@@ -17,23 +17,23 @@ const MAX_FILES = 200;
  * @returns {Promise<string>}
  */
 export async function buildSystemPrompt(cwd) {
-  const parts = [BASE_PROMPT];
+	const parts = [BASE_PROMPT];
 
-  const instructions = await readInstructions(cwd);
-  if (instructions) {
-    parts.push('<workspace-instructions>');
-    parts.push(instructions);
-    parts.push('</workspace-instructions>');
-  }
+	const instructions = await readInstructions(cwd);
+	if (instructions) {
+		parts.push('<workspace-instructions>');
+		parts.push(instructions);
+		parts.push('</workspace-instructions>');
+	}
 
-  const files = await listWorkspaceFiles(cwd);
-  if (files.length > 0) {
-    parts.push('<workspace-files>');
-    parts.push(files.join('\n'));
-    parts.push('</workspace-files>');
-  }
+	const files = await listWorkspaceFiles(cwd);
+	if (files.length > 0) {
+		parts.push('<workspace-files>');
+		parts.push(files.join('\n'));
+		parts.push('</workspace-files>');
+	}
 
-  return parts.join('\n\n');
+	return parts.join('\n\n');
 }
 
 /**
@@ -43,15 +43,15 @@ export async function buildSystemPrompt(cwd) {
  * @returns {Promise<string|null>}
  */
 export async function readInstructions(cwd) {
-  for (const name of INSTRUCTION_FILES) {
-    try {
-      const content = await readFile(join(cwd, name), 'utf8');
-      if (content.trim()) return content.trim();
-    } catch {
-      // not found, try next
-    }
-  }
-  return null;
+	for (const name of INSTRUCTION_FILES) {
+		try {
+			const content = await readFile(join(cwd, name), 'utf8');
+			if (content.trim()) return content.trim();
+		} catch {
+			// not found, try next
+		}
+	}
+	return null;
 }
 
 /**
@@ -60,34 +60,34 @@ export async function readInstructions(cwd) {
  * @returns {Promise<string[]>}
  */
 export async function listWorkspaceFiles(cwd) {
-  const files = [];
-  await walk(cwd, cwd, files);
-  return files;
+	const files = [];
+	await walk(cwd, cwd, files);
+	return files;
 }
 
 async function walk(dir, root, files) {
-  if (files.length >= MAX_FILES) return;
+	if (files.length >= MAX_FILES) return;
 
-  let entries;
-  try {
-    entries = await readdir(dir, { withFileTypes: true });
-  } catch {
-    return;
-  }
+	let entries;
+	try {
+		entries = await readdir(dir, { withFileTypes: true });
+	} catch {
+		return;
+	}
 
-  for (const entry of entries) {
-    if (files.length >= MAX_FILES) return;
-    if (IGNORE.has(entry.name)) continue;
+	for (const entry of entries) {
+		if (files.length >= MAX_FILES) return;
+		if (IGNORE.has(entry.name)) continue;
 
-    const full = join(dir, entry.name);
-    const rel = relative(root, full);
+		const full = join(dir, entry.name);
+		const rel = relative(root, full);
 
-    if (entry.isDirectory()) {
-      await walk(full, root, files);
-    } else {
-      files.push(rel);
-    }
-  }
+		if (entry.isDirectory()) {
+			await walk(full, root, files);
+		} else {
+			files.push(rel);
+		}
+	}
 }
 
 const BASE_PROMPT = `You are Kodr, a coding assistant. You help developers by reading, writing, and modifying code in their workspace.
