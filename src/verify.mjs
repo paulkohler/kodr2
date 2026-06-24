@@ -14,24 +14,27 @@ const MAX_OUTPUT = 20_000;
  * @param {string} cwd - Working directory
  * @returns {Promise<{ passed: boolean, command: string, output: string, exitCode: number }>}
  */
-export async function verify(command, cwd) {
+export async function verify(command, cwd, options = {}) {
+	const timeout = options.timeout ?? DEFAULT_TIMEOUT;
+	const maxOutput = options.maxOutput ?? MAX_OUTPUT;
 	return new Promise((resolve) => {
 		execFile(
 			'/bin/sh',
 			['-c', command],
 			{
 				cwd,
-				timeout: DEFAULT_TIMEOUT,
-				maxBuffer: MAX_OUTPUT * 2,
+				timeout,
+				maxBuffer: maxOutput * 2,
 				env: { ...process.env, PATH: process.env.PATH },
 			},
 			(err, stdout, stderr) => {
-				const exitCode = err?.code ?? 0;
-				const code = typeof exitCode === 'number' ? exitCode : 1;
+				let code = 0;
+				if (err && typeof err.code === 'number') code = err.code;
+				if (err && typeof err.code !== 'number') code = 1;
 				const output = [stdout, stderr]
 					.filter(Boolean)
 					.join('\n')
-					.slice(0, MAX_OUTPUT);
+					.slice(0, maxOutput);
 
 				resolve({
 					passed: code === 0,

@@ -38,3 +38,5 @@ tests:
     - passing command returns passed true
     - failing command returns passed false
     - captures combined output
+    - truncates output at the configured limit
+    - timed out commands return passed false

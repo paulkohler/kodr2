@@ -45,5 +45,6 @@ tests:
     - rejects when old_string not found
     - rejects paths escaping workspace
     - rejects missing files
+    - rejects symlinked files escaping workspace
   eval:
     - model applies a targeted edit to fix a bug

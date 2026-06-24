@@ -26,34 +26,37 @@ export default {
 
 	async execute({ command }, context) {
 		if (!command) return { error: 'command is required' };
-
-		return new Promise((resolve) => {
-			const child = execFile(
-				'/bin/sh',
-				['-c', command],
-				{
-					cwd: context.cwd,
-					timeout: DEFAULT_TIMEOUT,
-					maxBuffer: MAX_OUTPUT * 2,
-					env: { ...process.env, PATH: process.env.PATH },
-				},
-				(err, stdout, stderr) => {
-					const exitCode = err
-						? err.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
-							? 1
-							: (err.code ?? 1)
-						: 0;
-
-					resolve({
-						stdout: truncate(stdout || '', MAX_OUTPUT),
-						stderr: truncate(stderr || '', MAX_OUTPUT),
-						exitCode: typeof exitCode === 'number' ? exitCode : 1,
-					});
-				},
-			);
-		});
+		return executeCommand(command, context.cwd);
 	},
 };
+
+export function executeCommand(command, cwd, options = {}) {
+	const timeout = options.timeout ?? DEFAULT_TIMEOUT;
+	const maxOutput = options.maxOutput ?? MAX_OUTPUT;
+	return new Promise((resolve) => {
+		const child = execFile(
+			'/bin/sh',
+			['-c', command],
+			{
+				cwd,
+				timeout,
+				maxBuffer: maxOutput * 2,
+				env: { ...process.env, PATH: process.env.PATH },
+			},
+			(err, stdout, stderr) => {
+				let exitCode = 0;
+				if (err) exitCode = err.code ?? 1;
+				if (exitCode === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') exitCode = 1;
+
+				resolve({
+					stdout: truncate(stdout || '', maxOutput),
+					stderr: truncate(stderr || '', maxOutput),
+					exitCode: typeof exitCode === 'number' ? exitCode : 1,
+				});
+			},
+		);
+	});
+}
 
 function truncate(text, max) {
 	if (text.length <= max) return text;

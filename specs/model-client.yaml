@@ -38,6 +38,9 @@ tests:
     - assembleResponse builds complete message from chunks
     - assembleResponse accumulates tool call arguments
     - assembleResponse generates IDs for tool calls without them
+    - streaming requests ask the server to include token usage
+    - HTTP errors from model listing and chat are surfaced
+    - stalled requests time out
   eval:
     - connects to LM Studio and lists models
     - sends a simple prompt and gets a response

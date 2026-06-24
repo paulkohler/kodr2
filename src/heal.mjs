@@ -69,7 +69,7 @@ export async function heal(params) {
 		}
 
 		// No-progress check: same output means the fix didn't help
-		if (result.output === lastOutput) {
+		if (hasNoProgress(lastOutput, result.output)) {
 			return {
 				healed: false,
 				turns: turn,
@@ -89,6 +89,10 @@ export async function heal(params) {
 		verification: finalResult,
 		usage: totalUsage,
 	};
+}
+
+export function hasNoProgress(previousOutput, currentOutput) {
+	return currentOutput === previousOutput;
 }
 
 async function runToolLoop(client, modelId, messages, tools, quiet) {

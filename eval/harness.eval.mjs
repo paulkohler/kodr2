@@ -17,6 +17,9 @@ import { tmpdir } from 'node:os';
 import { request } from 'node:http';
 
 import { run } from '../src/harness.mjs';
+import { heal } from '../src/heal.mjs';
+import { createClient } from '../src/model.mjs';
+import { createToolRegistry } from '../src/tools/index.mjs';
 
 const LM_STUDIO_URL = 'http://localhost:1234/v1';
 
@@ -111,5 +114,43 @@ describe('harness eval', {
 		});
 
 		assert.ok(result.toolTurns <= 20, 'should not exceed 20 tool turns');
+	});
+
+	it('heals a simple verification failure', { timeout: 120_000 }, async () => {
+		const path = join(tmpDir, 'heal-target.mjs');
+		await writeFile(path, 'export function add(a, b) { return a - b; }\n');
+		const client = createClient({ baseUrl: LM_STUDIO_URL });
+		const modelId = await client.resolveModel();
+		const tools = createToolRegistry(tmpDir);
+		const failure = {
+			passed: false,
+			output: 'add(2, 3) returned -1; expected 5. Fix heal-target.mjs.',
+		};
+		const messages = [
+			{
+				role: 'system',
+				content:
+					'You are a coding assistant. Use the provided tools to fix verification failures.',
+			},
+		];
+		const verifyFn = async () => {
+			const content = await readFile(path, 'utf8');
+			const passed = content.includes('a + b');
+			return { passed, output: passed ? '' : failure.output };
+		};
+
+		const result = await heal({
+			client,
+			modelId,
+			messages,
+			tools,
+			verifyFn,
+			failure,
+			maxTurns: 2,
+			quiet: true,
+		});
+
+		assert.equal(result.healed, true);
+		assert.equal(result.verification.passed, true);
 	});
 });

@@ -17,6 +17,7 @@ import editFileTool from '../src/tools/edit-file.mjs';
 import listFilesTool from '../src/tools/list-files.mjs';
 import searchTool from '../src/tools/search.mjs';
 import runCommandTool from '../src/tools/run-command.mjs';
+import { executeCommand } from '../src/tools/run-command.mjs';
 
 let tmpDir;
 let context;
@@ -71,6 +72,17 @@ describe('read_file', () => {
 		} finally {
 			await rm(outside, { recursive: true, force: true });
 		}
+	});
+
+	it('rejects absolute paths outside workspace', async () => {
+		const result = await readFileTool.execute({ path: '/etc/hosts' }, context);
+		assert.match(result.error, /escape/i);
+	});
+
+	it('rejects files over 1MB', async () => {
+		await writeFile(join(tmpDir, 'large.txt'), 'x'.repeat(1024 * 1024 + 1));
+		const result = await readFileTool.execute({ path: 'large.txt' }, context);
+		assert.match(result.error, /too large/i);
 	});
 
 	it('returns error for missing files', async () => {
@@ -219,6 +231,14 @@ describe('edit_file', () => {
 		assert.ok(result.error);
 	});
 
+	it('rejects paths escaping workspace', async () => {
+		const result = await editFileTool.execute(
+			{ path: '../outside.txt', old_string: 'a', new_string: 'b' },
+			context,
+		);
+		assert.match(result.error, /escape/i);
+	});
+
 	it('rejects edits through symlinks escaping workspace', async () => {
 		const outside = await mkdtemp(join(tmpdir(), 'kodr-outside-'));
 		try {
@@ -277,6 +297,21 @@ describe('list_files', () => {
 		const nmFiles = result.files.filter((f) => f.startsWith('node_modules'));
 		assert.equal(nmFiles.length, 0);
 	});
+
+	it('caps recursive output at 500 entries', async () => {
+		await Promise.all(
+			Array.from({ length: 510 }, (_, index) =>
+				writeFile(join(tmpDir, `file-${index}.txt`), ''),
+			),
+		);
+		const result = await listFilesTool.execute({ recursive: true }, context);
+		assert.equal(result.files.length, 500);
+	});
+
+	it('rejects paths escaping workspace', async () => {
+		const result = await listFilesTool.execute({ path: '..' }, context);
+		assert.match(result.error, /escape/i);
+	});
 });
 
 // --- search ---
@@ -325,6 +360,26 @@ describe('search', () => {
 			await rm(outside, { recursive: true, force: true });
 		}
 	});
+
+	it('caps output at 100 matches', async () => {
+		await writeFile(join(tmpDir, 'many.txt'), 'target\n'.repeat(110));
+		const result = await searchTool.execute({ pattern: 'target' }, context);
+		assert.equal(result.matches.length, 100);
+	});
+
+	it('truncates matching lines to 200 characters', async () => {
+		await writeFile(join(tmpDir, 'long.txt'), `target ${'x'.repeat(300)}`);
+		const result = await searchTool.execute({ pattern: 'target' }, context);
+		assert.equal(result.matches[0].text.length, 200);
+	});
+
+	it('rejects paths escaping workspace', async () => {
+		const result = await searchTool.execute(
+			{ pattern: 'target', path: '..' },
+			context,
+		);
+		assert.match(result.error, /escape/i);
+	});
 });
 
 // --- run_command ---
@@ -353,5 +408,24 @@ describe('run_command', () => {
 	it('requires command parameter', async () => {
 		const result = await runCommandTool.execute({}, context);
 		assert.ok(result.error);
+	});
+
+	it('truncates long output', async () => {
+		const result = await executeCommand(
+			`${process.execPath} -e "process.stdout.write('x'.repeat(200))"`,
+			tmpDir,
+			{ maxOutput: 100 },
+		);
+		assert.ok(result.stdout.length <= 112);
+		assert.match(result.stdout, /\[truncated\]/);
+	});
+
+	it('times out long-running commands', async () => {
+		const result = await executeCommand(
+			`${process.execPath} -e "setTimeout(() => {}, 1000)"`,
+			tmpDir,
+			{ timeout: 20 },
+		);
+		assert.notEqual(result.exitCode, 0);
 	});
 });

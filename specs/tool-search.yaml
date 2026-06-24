@@ -43,5 +43,6 @@ tests:
     - caps at 100 matches
     - truncates long match lines
     - rejects paths escaping workspace
+    - skips symlinked files outside workspace
   eval:
     - model uses search to find a function definition

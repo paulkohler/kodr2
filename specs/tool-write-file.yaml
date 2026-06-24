@@ -40,5 +40,6 @@ tests:
     - rejects paths that escape workspace root
     - tracks written files in context
     - requires content parameter
+    - rejects symlinked parent directories escaping workspace
   eval:
     - model creates a file that persists on disk
