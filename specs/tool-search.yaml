@@ -32,6 +32,8 @@ constraints:
   - Skips files over 1MB
   - Match text truncated to 200 characters
   - Path must resolve within workspace root
+  - Symlinks are resolved before jail check
+  - Symlinked files outside the workspace are skipped
 
 tests:
   unit:

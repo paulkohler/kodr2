@@ -2,8 +2,9 @@
  * search tool — grep across workspace files.
  */
 
-import { readFile, readdir, stat } from 'node:fs/promises';
-import { resolve, relative, join } from 'node:path';
+import { readFile, readdir, realpath, stat } from 'node:fs/promises';
+import { relative, join } from 'node:path';
+import { resolveExistingPath } from '../path-jail.mjs';
 
 const IGNORE = new Set(['.git', 'node_modules', '.kodr']);
 const MAX_MATCHES = 100;
@@ -37,16 +38,19 @@ export default {
 	async execute({ pattern, path = '.', glob }, context) {
 		if (!pattern) return { error: 'pattern is required' };
 
-		const resolved = resolve(context.cwd, path);
-		if (
-			!resolved.startsWith(context.cwd) ||
-			(resolved !== context.cwd && !resolved.startsWith(context.cwd + '/'))
-		) {
+		let resolved;
+		try {
+			resolved = await resolveExistingPath(context.cwd, path);
+		} catch {
+			return { error: `directory not found: ${path}` };
+		}
+		if (!resolved) {
 			return { error: 'path escapes workspace root' };
 		}
 
 		const matches = [];
-		await searchDir(resolved, context.cwd, pattern, glob, matches);
+		const root = await realpath(context.cwd);
+		await searchDir(resolved, root, pattern, glob, matches);
 		return { matches };
 	},
 };
@@ -73,9 +77,16 @@ async function searchDir(dir, root, pattern, glob, matches) {
 		}
 
 		if (glob && !entry.name.endsWith(glob)) continue;
+		let safePath;
+		try {
+			safePath = await resolveExistingPath(root, full);
+		} catch {
+			continue;
+		}
+		if (!safePath) continue;
 
 		try {
-			const info = await stat(full);
+			const info = await stat(safePath);
 			if (info.size > MAX_FILE_SIZE) continue;
 		} catch {
 			continue;
@@ -83,7 +94,7 @@ async function searchDir(dir, root, pattern, glob, matches) {
 
 		let content;
 		try {
-			content = await readFile(full, 'utf8');
+			content = await readFile(safePath, 'utf8');
 		} catch {
 			continue;
 		}

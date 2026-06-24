@@ -40,6 +40,7 @@ export function createClient(options = {}) {
 			model: params.model || model,
 			messages: params.messages,
 			stream: true,
+			stream_options: { include_usage: true },
 		};
 
 		if (params.tools && params.tools.length > 0) {
@@ -83,7 +84,7 @@ export function createClient(options = {}) {
 
 // --- streaming ---
 
-function assembleResponse(chunks, onToken, onToolCall) {
+export function assembleResponse(chunks, onToken, onToolCall) {
 	let role = 'assistant';
 	let content = '';
 	const toolCalls = [];

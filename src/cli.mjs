@@ -192,7 +192,7 @@ async function printVersion() {
 	}
 }
 
-async function loadPriorRun(cwd, ref) {
+export async function loadPriorRun(cwd, ref) {
 	const { join } = await import('node:path');
 	const { readdir } = await import('node:fs/promises');
 
@@ -205,7 +205,7 @@ async function loadPriorRun(cwd, ref) {
 			if (files.length === 0) return null;
 			const last = files[files.length - 1];
 			const data = JSON.parse(await readFile(join(runDir, last), 'utf8'));
-			return data;
+			return withoutSystemMessages(data);
 		} catch {
 			return null;
 		}
@@ -213,9 +213,17 @@ async function loadPriorRun(cwd, ref) {
 
 	// Treat ref as a file path
 	try {
-		const data = JSON.parse(await readFile(resolve(ref), 'utf8'));
-		return data;
+		const data = JSON.parse(await readFile(resolve(cwd, ref), 'utf8'));
+		return withoutSystemMessages(data);
 	} catch {
 		return null;
 	}
+}
+
+function withoutSystemMessages(data) {
+	if (!Array.isArray(data.messages)) return data;
+	return {
+		...data,
+		messages: data.messages.filter((message) => message.role !== 'system'),
+	};
 }

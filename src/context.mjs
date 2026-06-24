@@ -6,6 +6,7 @@
 
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
+import { resolveExistingPath } from './path-jail.mjs';
 
 const INSTRUCTION_FILES = ['KODR.md', 'AGENTS.md'];
 const IGNORE = new Set(['.git', 'node_modules', '.kodr']);
@@ -45,7 +46,9 @@ export async function buildSystemPrompt(cwd) {
 export async function readInstructions(cwd) {
 	for (const name of INSTRUCTION_FILES) {
 		try {
-			const content = await readFile(join(cwd, name), 'utf8');
+			const path = await resolveExistingPath(cwd, name);
+			if (!path) continue;
+			const content = await readFile(path, 'utf8');
 			if (content.trim()) return content.trim();
 		} catch {
 			// not found, try next

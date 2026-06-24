@@ -1,6 +1,13 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, mkdir, rm, readFile } from 'node:fs/promises';
+import {
+	mkdtemp,
+	writeFile,
+	mkdir,
+	rm,
+	readFile,
+	symlink,
+} from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -49,6 +56,21 @@ describe('read_file', () => {
 		);
 		assert.ok(result.error);
 		assert.match(result.error, /escape/i);
+	});
+
+	it('rejects symlinks escaping workspace', async () => {
+		const outside = await mkdtemp(join(tmpdir(), 'kodr-outside-'));
+		try {
+			await writeFile(join(outside, 'secret.txt'), 'secret');
+			await symlink(join(outside, 'secret.txt'), join(tmpDir, 'secret.txt'));
+			const result = await readFileTool.execute(
+				{ path: 'secret.txt' },
+				context,
+			);
+			assert.match(result.error, /escape/i);
+		} finally {
+			await rm(outside, { recursive: true, force: true });
+		}
 	});
 
 	it('returns error for missing files', async () => {
@@ -109,6 +131,20 @@ describe('write_file', () => {
 			context,
 		);
 		assert.ok(result.error);
+	});
+
+	it('rejects writes through symlinks escaping workspace', async () => {
+		const outside = await mkdtemp(join(tmpdir(), 'kodr-outside-'));
+		try {
+			await symlink(outside, join(tmpDir, 'outside'));
+			const result = await writeFileTool.execute(
+				{ path: 'outside/evil.txt', content: 'bad' },
+				context,
+			);
+			assert.match(result.error, /escape/i);
+		} finally {
+			await rm(outside, { recursive: true, force: true });
+		}
 	});
 
 	it('tracks written files', async () => {
@@ -181,6 +217,21 @@ describe('edit_file', () => {
 			context,
 		);
 		assert.ok(result.error);
+	});
+
+	it('rejects edits through symlinks escaping workspace', async () => {
+		const outside = await mkdtemp(join(tmpdir(), 'kodr-outside-'));
+		try {
+			await writeFile(join(outside, 'file.txt'), 'before');
+			await symlink(join(outside, 'file.txt'), join(tmpDir, 'file.txt'));
+			const result = await editFileTool.execute(
+				{ path: 'file.txt', old_string: 'before', new_string: 'after' },
+				context,
+			);
+			assert.match(result.error, /escape/i);
+		} finally {
+			await rm(outside, { recursive: true, force: true });
+		}
 	});
 });
 
@@ -261,6 +312,18 @@ describe('search', () => {
 		await writeFile(join(tmpDir, '.git/config'), 'target');
 		const result = await searchTool.execute({ pattern: 'target' }, context);
 		assert.equal(result.matches.length, 0);
+	});
+
+	it('does not search symlinks escaping workspace', async () => {
+		const outside = await mkdtemp(join(tmpdir(), 'kodr-outside-'));
+		try {
+			await writeFile(join(outside, 'secret.txt'), 'target secret');
+			await symlink(join(outside, 'secret.txt'), join(tmpDir, 'secret.txt'));
+			const result = await searchTool.execute({ pattern: 'target' }, context);
+			assert.deepEqual(result.matches, []);
+		} finally {
+			await rm(outside, { recursive: true, force: true });
+		}
 	});
 });
 

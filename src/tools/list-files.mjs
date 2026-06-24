@@ -2,8 +2,9 @@
  * list_files tool — list directory contents with optional glob filtering.
  */
 
-import { readdir, stat } from 'node:fs/promises';
-import { resolve, relative, join } from 'node:path';
+import { readdir, realpath, stat } from 'node:fs/promises';
+import { relative, join } from 'node:path';
+import { resolveExistingPath } from '../path-jail.mjs';
 
 const IGNORE = new Set(['.git', 'node_modules', '.kodr']);
 const MAX_ENTRIES = 500;
@@ -29,11 +30,13 @@ export default {
 	},
 
 	async execute({ path = '.', recursive = false }, context) {
-		const resolved = resolve(context.cwd, path);
-		if (
-			!resolved.startsWith(context.cwd) ||
-			(resolved !== context.cwd && !resolved.startsWith(context.cwd + '/'))
-		) {
+		let resolved;
+		try {
+			resolved = await resolveExistingPath(context.cwd, path);
+		} catch {
+			return { error: `directory not found: ${path}` };
+		}
+		if (!resolved) {
 			return { error: 'path escapes workspace root' };
 		}
 
@@ -47,14 +50,15 @@ export default {
 		}
 
 		const files = [];
+		const root = await realpath(context.cwd);
 
 		if (recursive) {
-			await walk(resolved, context.cwd, files);
+			await walk(resolved, root, files);
 		} else {
 			const entries = await readdir(resolved, { withFileTypes: true });
 			for (const entry of entries) {
 				if (IGNORE.has(entry.name)) continue;
-				const rel = relative(context.cwd, join(resolved, entry.name));
+				const rel = relative(root, join(resolved, entry.name));
 				const suffix = entry.isDirectory() ? '/' : '';
 				files.push(rel + suffix);
 				if (files.length >= MAX_ENTRIES) break;

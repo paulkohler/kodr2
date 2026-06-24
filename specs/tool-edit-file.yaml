@@ -35,6 +35,7 @@ constraints:
   - Multiple occurrences return an error (ambiguous edit)
   - Zero occurrences return "not found" error
   - Path must resolve within workspace root
+  - Symlinks are resolved before jail check
   - Tracks edited files in run summary
 
 tests:

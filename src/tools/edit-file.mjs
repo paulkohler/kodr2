@@ -3,7 +3,7 @@
  */
 
 import { readFile, writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { resolveExistingPath } from '../path-jail.mjs';
 
 export default {
 	definition: {
@@ -37,8 +37,13 @@ export default {
 			return { error: 'new_string is required' };
 		}
 
-		const resolved = resolve(context.cwd, path);
-		if (!resolved.startsWith(context.cwd + '/') && resolved !== context.cwd) {
+		let resolved;
+		try {
+			resolved = await resolveExistingPath(context.cwd, path);
+		} catch {
+			return { error: `file not found: ${path}` };
+		}
+		if (!resolved) {
 			return { error: 'path escapes workspace root' };
 		}
 

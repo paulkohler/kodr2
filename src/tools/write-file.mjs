@@ -3,7 +3,8 @@
  */
 
 import { writeFile, mkdir } from 'node:fs/promises';
-import { resolve, dirname } from 'node:path';
+import { dirname } from 'node:path';
+import { resolveWritePath } from '../path-jail.mjs';
 
 export default {
 	definition: {
@@ -32,8 +33,13 @@ export default {
 			return { error: 'content is required' };
 		}
 
-		const resolved = resolve(context.cwd, path);
-		if (!resolved.startsWith(context.cwd + '/') && resolved !== context.cwd) {
+		let resolved;
+		try {
+			resolved = await resolveWritePath(context.cwd, path);
+		} catch (e) {
+			return { error: e.message };
+		}
+		if (!resolved) {
 			return { error: 'path escapes workspace root' };
 		}
 

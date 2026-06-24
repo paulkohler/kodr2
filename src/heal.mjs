@@ -7,6 +7,7 @@
 import { formatHealTurn, formatToolCall, formatToolResult } from './format.mjs';
 
 const DEFAULT_MAX_TURNS = 3;
+const MAX_TOOL_TURNS = 20;
 
 /**
  * Run the healing loop.
@@ -93,7 +94,8 @@ export async function heal(params) {
 async function runToolLoop(client, modelId, messages, tools, quiet) {
 	let totalUsage = { prompt: 0, completion: 0 };
 
-	while (true) {
+	let toolTurns = 0;
+	while (toolTurns < MAX_TOOL_TURNS) {
 		const { message, usage } = await client.chat({
 			model: modelId,
 			messages,
@@ -131,6 +133,7 @@ async function runToolLoop(client, modelId, messages, tools, quiet) {
 				content: JSON.stringify(result),
 			});
 		}
+		toolTurns++;
 	}
 
 	return { usage: totalUsage };

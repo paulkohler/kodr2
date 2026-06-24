@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, mkdir, rm, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -46,6 +46,17 @@ describe('readInstructions', () => {
 	it('returns null when no instruction file exists', async () => {
 		const result = await readInstructions(tmpDir);
 		assert.equal(result, null);
+	});
+
+	it('does not read instruction symlinks escaping workspace', async () => {
+		const outside = await mkdtemp(join(tmpdir(), 'kodr-instructions-'));
+		try {
+			await writeFile(join(outside, 'rules.md'), 'outside rules');
+			await symlink(join(outside, 'rules.md'), join(tmpDir, 'KODR.md'));
+			assert.equal(await readInstructions(tmpDir), null);
+		} finally {
+			await rm(outside, { recursive: true, force: true });
+		}
 	});
 });
 

@@ -3,7 +3,7 @@
  */
 
 import { readFile, stat } from 'node:fs/promises';
-import { resolve, relative } from 'node:path';
+import { resolveExistingPath } from '../path-jail.mjs';
 
 const MAX_SIZE = 1024 * 1024; // 1 MB
 
@@ -27,8 +27,13 @@ export default {
 	async execute({ path }, context) {
 		if (!path) return { error: 'path is required' };
 
-		const resolved = resolve(context.cwd, path);
-		if (!resolved.startsWith(context.cwd + '/') && resolved !== context.cwd) {
+		let resolved;
+		try {
+			resolved = await resolveExistingPath(context.cwd, path);
+		} catch {
+			return { error: `file not found: ${path}` };
+		}
+		if (!resolved) {
 			return { error: 'path escapes workspace root' };
 		}
 

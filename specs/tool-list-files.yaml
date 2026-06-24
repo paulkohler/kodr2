@@ -25,6 +25,7 @@ constraints:
   - Skips .git, node_modules, .kodr directories
   - Directories have trailing slash in output
   - Path must resolve within workspace root
+  - Symlinks are resolved before jail check
 
 tests:
   unit:
