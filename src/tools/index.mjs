@@ -60,6 +60,9 @@ export function createToolRegistry(cwd) {
 			if (!tool) {
 				return { error: `unknown tool: ${name}` };
 			}
+			if (!isPlainObject(args)) {
+				return { error: 'tool arguments must be a JSON object' };
+			}
 			return tool.execute(args, context);
 		},
 
@@ -71,4 +74,9 @@ export function createToolRegistry(cwd) {
 			return [...filesChanged];
 		},
 	};
+}
+
+function isPlainObject(value) {
+	if (!value || typeof value !== 'object') return false;
+	return !Array.isArray(value);
 }

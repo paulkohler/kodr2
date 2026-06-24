@@ -1,18 +1,43 @@
 {
-  "name": "kodr",
-  "version": "0.1.0",
-  "license": "MIT",
-  "type": "module",
-  "bin": {
-    "kodr": "./bin/kodr.mjs"
-  },
-  "scripts": {
-    "test": "node --test test/*.test.mjs",
-    "eval": "node --test eval/*.eval.mjs",
-    "check": "node --check bin/*.mjs && node --check src/*.mjs && node --check src/tools/*.mjs",
-    "format": "biome format --write bin src test eval specs"
-  },
-  "engines": {
-    "node": ">=22"
-  }
+	"name": "kodr",
+	"version": "0.1.0",
+	"description": "A one-shot coding harness for local LM Studio models",
+	"keywords": [
+		"coding-agent",
+		"lm-studio",
+		"local-llm"
+	],
+	"author": "Paul Kohler",
+	"license": "MIT",
+	"homepage": "https://github.com/paulkohler/kodr2#readme",
+	"bugs": {
+		"url": "https://github.com/paulkohler/kodr2/issues"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/paulkohler/kodr2.git"
+	},
+	"type": "module",
+	"files": [
+		"bin/",
+		"src/",
+		"README.md",
+		"LICENSE"
+	],
+	"bin": {
+		"kodr": "./bin/kodr.mjs"
+	},
+	"scripts": {
+		"test": "node --test test/*.test.mjs",
+		"eval": "node --test eval/*.eval.mjs",
+		"check": "node --check bin/*.mjs && node --check src/*.mjs && node --check src/tools/*.mjs",
+		"format": "biome format --write bin src test eval specs *.md *.json",
+		"format:check": "biome format bin src test eval specs *.md *.json"
+	},
+	"engines": {
+		"node": ">=22"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.4.15"
+	}
 }

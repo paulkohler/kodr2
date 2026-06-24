@@ -47,6 +47,14 @@ describe('createToolRegistry', () => {
 		assert.match(result.error, /unknown tool/i);
 	});
 
+	it('rejects non-object tool arguments', async () => {
+		const registry = createToolRegistry(tmpDir);
+		for (const args of [null, [], 'invalid']) {
+			const result = await registry.dispatch('read_file', args);
+			assert.match(result.error, /JSON object/i);
+		}
+	});
+
 	it('tracks files changed across tool calls', async () => {
 		const registry = createToolRegistry(tmpDir);
 		await registry.dispatch('write_file', { path: 'a.txt', content: 'a' });

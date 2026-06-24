@@ -1,0 +1,23 @@
+name: distribution and CLI integration
+status: implemented
+description: >
+  Define the public npm package boundary and verify that the installed
+  command works independently of the source checkout.
+
+constraints:
+  - Published package contains only runtime source, executable, README, and license
+  - Local settings, tests, evals, and development specifications are excluded
+  - Installed kodr executable supports help and version output
+  - CLI failures return a non-zero exit code
+
+tests:
+  unit:
+    - CLI help exits successfully
+    - CLI version exits successfully
+    - missing prompt exits unsuccessfully
+    - unavailable LM Studio exits unsuccessfully
+    - packed tarball excludes development and local files
+    - packed tarball installs and exposes the kodr executable
+  eval:
+    - CLI continuation loads the prior transcript and completes a follow-up task
+    - model performs multiple tool calls while exploring files

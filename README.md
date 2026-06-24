@@ -7,8 +7,8 @@ Kodr reads a prompt, assembles workspace context, lets the model use tools to re
 ## Quick start
 
 ```bash
-# Install globally (or use npx)
-npm install -g .
+# Install globally from GitHub
+npm install -g github:paulkohler/kodr2
 
 # Run a coding task
 kodr run "add input validation to server.mjs"
@@ -80,8 +80,11 @@ Follow the existing code style: no semicolons, single quotes.
 ## Development
 
 ```bash
+# Install development tooling
+npm install
+
 # Run unit tests
-node --test test/
+npm test
 
 # Run integration evals (requires LM Studio)
 node --test eval/
@@ -89,9 +92,19 @@ node --test eval/
 # Syntax check
 node --check bin/*.mjs && node --check src/*.mjs && node --check src/tools/*.mjs
 
-# Format (requires biome installed globally)
-biome format --write bin src test eval
+# Format
+npm run format
 ```
+
+## Contributing and security
+
+See the repository's
+[contribution guide](https://github.com/paulkohler/kodr2/blob/main/CONTRIBUTING.md)
+for the development workflow. Report security vulnerabilities privately as
+described in the
+[security policy](https://github.com/paulkohler/kodr2/blob/main/SECURITY.md).
+
+Kodr is available under the [MIT License](LICENSE).
 
 ## Project structure
 

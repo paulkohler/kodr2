@@ -15,6 +15,7 @@ import { mkdtemp, writeFile, readFile, rm, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { request } from 'node:http';
+import { spawn } from 'node:child_process';
 
 import { run } from '../src/harness.mjs';
 import { heal } from '../src/heal.mjs';
@@ -22,6 +23,7 @@ import { createClient } from '../src/model.mjs';
 import { createToolRegistry } from '../src/tools/index.mjs';
 
 const LM_STUDIO_URL = 'http://localhost:1234/v1';
+const CLI = new URL('../bin/kodr.mjs', import.meta.url).pathname;
 
 async function lmStudioAvailable() {
 	return new Promise((resolve) => {
@@ -153,4 +155,67 @@ describe('harness eval', {
 		assert.equal(result.healed, true);
 		assert.equal(result.verification.passed, true);
 	});
+
+	it('uses multiple tool calls to inspect separate files', {
+		timeout: 120_000,
+	}, async () => {
+		await writeFile(join(tmpDir, 'first-value.txt'), '17');
+		await writeFile(join(tmpDir, 'second-value.txt'), '25');
+		const result = await run(
+			'Read first-value.txt and second-value.txt, then report their sum.',
+			{ cwd: tmpDir, baseUrl: LM_STUDIO_URL, quiet: true },
+		);
+		const toolCalls = result.messages.flatMap(
+			(message) => message.tool_calls || [],
+		);
+		assert.ok(toolCalls.length >= 2, 'should make at least two tool calls');
+		assert.match(result.response, /42/);
+	});
+
+	it('continues a prior run through the CLI', {
+		timeout: 180_000,
+	}, async () => {
+		const workspace = await mkdtemp(join(tmpdir(), 'kodr-cli-eval-'));
+		try {
+			const first = await runCli([
+				'run',
+				'Create notes.txt containing exactly the word alpha.',
+				'--cwd',
+				workspace,
+				'--base-url',
+				LM_STUDIO_URL,
+				'--quiet',
+			]);
+			assert.equal(first.code, 0, first.stderr);
+
+			const second = await runCli([
+				'run',
+				'Continue the task by adding beta on a new line in the same file.',
+				'--cwd',
+				workspace,
+				'--base-url',
+				LM_STUDIO_URL,
+				'--continue',
+				'last',
+				'--quiet',
+			]);
+			assert.equal(second.code, 0, second.stderr);
+			const content = await readFile(join(workspace, 'notes.txt'), 'utf8');
+			assert.match(content, /alpha/);
+			assert.match(content, /beta/);
+		} finally {
+			await rm(workspace, { recursive: true, force: true });
+		}
+	});
 });
+
+function runCli(args) {
+	return new Promise((resolve) => {
+		const child = spawn(process.execPath, [CLI, ...args]);
+		let stdout = '';
+		let stderr = '';
+		child.stdout.on('data', (chunk) => (stdout += chunk));
+		child.stderr.on('data', (chunk) => (stderr += chunk));
+		child.on('close', (code) => resolve({ code, stdout, stderr }));
+	});
+}
