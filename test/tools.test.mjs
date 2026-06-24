@@ -410,6 +410,32 @@ describe('run_command', () => {
 		assert.ok(result.error);
 	});
 
+	it('does not expose non-allowlisted env vars by default', async () => {
+		process.env.KODR_TEST_SECRET = 'shh';
+		try {
+			const result = await runCommandTool.execute(
+				{ command: 'echo "[$KODR_TEST_SECRET]"' },
+				context,
+			);
+			assert.equal(result.stdout.trim(), '[]');
+		} finally {
+			delete process.env.KODR_TEST_SECRET;
+		}
+	});
+
+	it('exposes env vars named in the passthrough', async () => {
+		process.env.KODR_TEST_SECRET = 'shh';
+		try {
+			const result = await runCommandTool.execute(
+				{ command: 'echo "[$KODR_TEST_SECRET]"' },
+				{ ...context, envPassthrough: ['KODR_TEST_SECRET'] },
+			);
+			assert.equal(result.stdout.trim(), '[shh]');
+		} finally {
+			delete process.env.KODR_TEST_SECRET;
+		}
+	});
+
 	it('truncates long output', async () => {
 		const result = await executeCommand(
 			`${process.execPath} -e "process.stdout.write('x'.repeat(200))"`,

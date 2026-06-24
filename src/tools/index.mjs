@@ -21,13 +21,16 @@ const ALL_TOOLS = [
 /**
  * Create a tool registry bound to a workspace.
  * @param {string} cwd - Workspace root (absolute path)
+ * @param {object} [options]
+ * @param {string[]} [options.envPassthrough] - Extra env var names for run_command
  * @returns {object} Registry with `definitions`, `dispatch`, and `context`
  */
-export function createToolRegistry(cwd) {
+export function createToolRegistry(cwd, options = {}) {
 	const filesChanged = [];
 
 	const context = {
 		cwd,
+		envPassthrough: options.envPassthrough ?? [],
 		trackWrite(path) {
 			if (!filesChanged.includes(path)) {
 				filesChanged.push(path);

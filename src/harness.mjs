@@ -6,6 +6,7 @@
 import { buildSystemPrompt } from './context.mjs';
 import { createClient } from './model.mjs';
 import { createToolRegistry } from './tools/index.mjs';
+import { buildEnv } from './env.mjs';
 import { verify } from './verify.mjs';
 import { heal } from './heal.mjs';
 import {
@@ -29,6 +30,7 @@ const MAX_TOOL_TURNS = 20;
  * @param {number} [options.maxHealTurns] - Max heal turns (default 3)
  * @param {boolean} [options.quiet] - Suppress terminal output
  * @param {Array} [options.priorMessages] - Continuation from previous run
+ * @param {string[]} [options.envPassthrough] - Extra env var names for commands
  * @returns {Promise<object>} Run result
  */
 export async function run(prompt, options) {
@@ -38,6 +40,7 @@ export async function run(prompt, options) {
 		maxHealTurns = 3,
 		quiet = false,
 		priorMessages,
+		envPassthrough = [],
 	} = options;
 
 	const client = createClient({
@@ -46,7 +49,8 @@ export async function run(prompt, options) {
 	});
 
 	const modelId = await client.resolveModel();
-	const tools = createToolRegistry(cwd);
+	const tools = createToolRegistry(cwd, { envPassthrough });
+	const commandEnv = buildEnv(envPassthrough);
 	const systemPrompt = await buildSystemPrompt(cwd);
 
 	// Build messages
@@ -127,7 +131,7 @@ export async function run(prompt, options) {
 
 	// Verify if test command is set
 	if (testCommand && tools.filesChanged().length > 0) {
-		const verifyResult = await verify(testCommand, cwd);
+		const verifyResult = await verify(testCommand, cwd, { env: commandEnv });
 		result.verification = verifyResult;
 
 		if (!quiet) process.stderr.write(formatVerification(verifyResult) + '\n');
@@ -139,7 +143,7 @@ export async function run(prompt, options) {
 				modelId,
 				messages,
 				tools,
-				verifyFn: () => verify(testCommand, cwd),
+				verifyFn: () => verify(testCommand, cwd, { env: commandEnv }),
 				failure: verifyResult,
 				maxTurns: maxHealTurns,
 				quiet,

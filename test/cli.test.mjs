@@ -55,6 +55,16 @@ describe('parseArgs', () => {
 		assert.equal(args.continue, 'last');
 	});
 
+	it('parses --env into a list of names', () => {
+		const args = parseArgs(['run', 'hi', '--env', 'API_URL, CI ,API_URL']);
+		assert.deepEqual(args.env, ['API_URL', 'CI']);
+	});
+
+	it('defaults env to an empty list', () => {
+		const args = parseArgs(['run', 'hi']);
+		assert.deepEqual(args.env, []);
+	});
+
 	it('parses --help flag', () => {
 		const args = parseArgs(['--help']);
 		assert.equal(args.help, true);

@@ -4,6 +4,7 @@
  */
 
 import { execFile } from 'node:child_process';
+import { buildEnv } from './env.mjs';
 
 const DEFAULT_TIMEOUT = 60_000; // 60 seconds
 const MAX_OUTPUT = 20_000;
@@ -17,6 +18,7 @@ const MAX_OUTPUT = 20_000;
 export async function verify(command, cwd, options = {}) {
 	const timeout = options.timeout ?? DEFAULT_TIMEOUT;
 	const maxOutput = options.maxOutput ?? MAX_OUTPUT;
+	const env = options.env ?? buildEnv();
 	return new Promise((resolve) => {
 		execFile(
 			'/bin/sh',
@@ -25,7 +27,7 @@ export async function verify(command, cwd, options = {}) {
 				cwd,
 				timeout,
 				maxBuffer: maxOutput * 2,
-				env: { ...process.env, PATH: process.env.PATH },
+				env,
 			},
 			(err, stdout, stderr) => {
 				let code = 0;
