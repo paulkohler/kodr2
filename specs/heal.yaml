@@ -1,0 +1,58 @@
+name: healing
+status: implemented
+description: >
+  Bounded repair loop when verification fails.
+  Feeds failure output back to the model, lets it use tools
+  to fix, re-verifies. Stops on pass, turn limit, or no-progress.
+
+inputs:
+  client:
+    type: object
+    required: true
+    description: Model client
+  messages:
+    type: array
+    required: true
+    description: Conversation so far
+  tools:
+    type: object
+    required: true
+    description: Tool registry
+  verifyFn:
+    type: function
+    required: true
+    description: Verification function
+  failure:
+    type: object
+    required: true
+    description: Initial verification failure
+  maxTurns:
+    type: number
+    description: Maximum repair turns (default 3)
+
+outputs:
+  healed:
+    type: boolean
+    description: Whether verification eventually passed
+  turns:
+    type: number
+    description: Number of repair turns taken
+  verification:
+    type: object
+    description: Final verification result
+  usage:
+    type: object
+    description: Cumulative token usage
+
+constraints:
+  - No-progress detection stops early when consecutive failures have identical output
+  - Each turn adds failure context as a user message
+  - Model gets full tool access during repair
+  - Turn limit prevents infinite loops
+
+tests:
+  unit:
+    - stops on no-progress (identical failure output)
+    - respects turn limit
+  eval:
+    - heals a simple test failure by fixing the code

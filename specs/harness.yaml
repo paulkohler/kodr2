@@ -1,0 +1,69 @@
+name: harness
+status: implemented
+description: >
+  The core execution loop. Takes a prompt, assembles context,
+  runs the model with tools, optionally verifies and heals.
+  This is the central orchestrator — every run goes through it.
+
+inputs:
+  prompt:
+    type: string
+    required: true
+    description: User's coding task
+  cwd:
+    type: string
+    required: true
+    description: Absolute path to workspace root
+  baseUrl:
+    type: string
+    description: LM Studio API URL (default localhost:1234)
+  model:
+    type: string
+    description: Model identifier (auto-detected if omitted)
+  testCommand:
+    type: string
+    description: Shell command for verification (e.g. "npm test")
+  maxHealTurns:
+    type: number
+    description: Max repair attempts (default 3)
+  priorMessages:
+    type: array
+    description: Messages from a prior run for continuation
+
+outputs:
+  response:
+    type: string
+    description: Final text response from the model
+  filesChanged:
+    type: array
+    description: List of files written during the run
+  toolTurns:
+    type: number
+    description: Number of tool-call round trips
+  verification:
+    type: object
+    description: "{ passed, command, output, exitCode }"
+  healed:
+    type: boolean
+    description: Whether healing succeeded (null if not attempted)
+  usage:
+    type: object
+    description: "{ prompt, completion } token counts"
+  messages:
+    type: array
+    description: Full conversation transcript for continuation
+
+constraints:
+  - Tool loop limited to 20 turns to prevent runaway
+  - Run transcript saved to .kodr/runs/ after every run
+  - System prompt assembled fresh each run from workspace state
+  - Healing only attempted when verification fails and files were changed
+
+tests:
+  unit:
+    - parseArgs extracts prompt from "kodr run 'text'"
+    - parseArgs extracts prompt from shorthand "kodr 'text'"
+    - parseArgs handles all flag variants
+  eval:
+    - end-to-end run produces file changes on a simple task
+    - tool loop terminates within turn limit

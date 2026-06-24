@@ -1,0 +1,38 @@
+name: list_files tool
+status: implemented
+description: >
+  List files and directories in the workspace. Supports
+  recursive listing. Skips .git, node_modules, .kodr.
+
+inputs:
+  path:
+    type: string
+    description: Relative directory path (default ".")
+  recursive:
+    type: boolean
+    description: List recursively (default false)
+
+outputs:
+  files:
+    type: array
+    description: File paths relative to workspace root (dirs suffixed with /)
+  error:
+    type: string
+    description: Error message if listing failed
+
+constraints:
+  - Capped at 500 entries to prevent flooding
+  - Skips .git, node_modules, .kodr directories
+  - Directories have trailing slash in output
+  - Path must resolve within workspace root
+
+tests:
+  unit:
+    - lists files in a directory
+    - recursive listing includes nested files
+    - skips ignored directories
+    - directories have trailing slash
+    - caps at 500 entries
+    - rejects paths escaping workspace
+  eval:
+    - model uses list_files to explore a project structure

@@ -1,0 +1,48 @@
+name: edit_file tool
+status: implemented
+description: >
+  Apply a targeted search/replace edit to an existing file.
+  The old_string must appear exactly once in the file for safety.
+  Path-jailed to workspace root.
+
+inputs:
+  path:
+    type: string
+    required: true
+    description: Relative path from workspace root
+  old_string:
+    type: string
+    required: true
+    description: Exact text to find (must appear exactly once)
+  new_string:
+    type: string
+    required: true
+    description: Replacement text
+
+outputs:
+  edited:
+    type: boolean
+    description: true on success
+  path:
+    type: string
+    description: The path that was edited
+  error:
+    type: string
+    description: Error message if edit failed
+
+constraints:
+  - old_string must appear exactly once in the file
+  - Multiple occurrences return an error (ambiguous edit)
+  - Zero occurrences return "not found" error
+  - Path must resolve within workspace root
+  - Tracks edited files in run summary
+
+tests:
+  unit:
+    - edits a file with unique match
+    - rejects when old_string appears multiple times
+    - rejects when old_string not found
+    - rejects paths escaping workspace
+    - rejects missing files
+  eval:
+    - model applies a targeted edit to fix a bug

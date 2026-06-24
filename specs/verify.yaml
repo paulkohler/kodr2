@@ -1,0 +1,40 @@
+name: verification
+status: implemented
+description: >
+  Run a test/check command after the model makes changes.
+  Returns pass/fail with captured output.
+
+inputs:
+  command:
+    type: string
+    required: true
+    description: Shell command to run
+  cwd:
+    type: string
+    required: true
+    description: Working directory
+
+outputs:
+  passed:
+    type: boolean
+    description: true if exit code is 0
+  command:
+    type: string
+    description: The command that was run
+  output:
+    type: string
+    description: Combined stdout + stderr
+  exitCode:
+    type: number
+    description: Process exit code
+
+constraints:
+  - 60 second timeout
+  - Output truncated at 20,000 characters
+  - Only runs when testCommand is configured and files were changed
+
+tests:
+  unit:
+    - passing command returns passed true
+    - failing command returns passed false
+    - captures combined output

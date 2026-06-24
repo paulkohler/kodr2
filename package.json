@@ -1,0 +1,18 @@
+{
+  "name": "kodr",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "kodr": "./bin/kodr.mjs"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "eval": "node --test eval/*.eval.mjs",
+    "check": "node --check bin/*.mjs && node --check src/*.mjs && node --check src/tools/*.mjs",
+    "format": "biome format --write bin src test eval specs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

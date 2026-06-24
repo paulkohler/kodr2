@@ -1,0 +1,45 @@
+name: search tool
+status: implemented
+description: >
+  Search for a text pattern across workspace files.
+  Returns matching lines with file paths and line numbers.
+  Skips binary files and files over 1MB.
+
+inputs:
+  pattern:
+    type: string
+    required: true
+    description: Search string (plain text)
+  path:
+    type: string
+    description: Directory to search (default workspace root)
+  glob:
+    type: string
+    description: File extension filter (e.g. ".mjs")
+
+outputs:
+  matches:
+    type: array
+    description: "Array of { file, line, text }"
+  error:
+    type: string
+    description: Error message if search failed
+
+constraints:
+  - Capped at 100 matches
+  - Skips .git, node_modules, .kodr directories
+  - Skips binary files (null byte check)
+  - Skips files over 1MB
+  - Match text truncated to 200 characters
+  - Path must resolve within workspace root
+
+tests:
+  unit:
+    - finds matches in text files
+    - respects glob filter
+    - skips ignored directories
+    - caps at 100 matches
+    - truncates long match lines
+    - rejects paths escaping workspace
+  eval:
+    - model uses search to find a function definition

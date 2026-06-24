@@ -1,0 +1,40 @@
+name: read_file tool
+status: implemented
+description: >
+  Read the contents of a file relative to the workspace root.
+  Path-jailed: cannot read above the workspace directory.
+  Returns file contents as a string, or an error for missing,
+  binary, or oversized files.
+
+inputs:
+  path:
+    type: string
+    required: true
+    description: Relative path from workspace root
+
+outputs:
+  content:
+    type: string
+    description: File contents (UTF-8)
+  error:
+    type: string
+    description: Error message if read failed
+
+constraints:
+  - Path must resolve within workspace root (no ../ escape)
+  - Binary files (null bytes in first 8KB) return an error
+  - Files over 1MB return an error
+  - Symlinks resolved before jail check
+  - Directories return "not a file" error
+
+tests:
+  unit:
+    - reads a text file and returns contents
+    - rejects paths that escape workspace root via ../
+    - rejects absolute paths outside workspace
+    - rejects binary files
+    - rejects files over 1MB
+    - returns error for missing files
+    - rejects directories
+  eval:
+    - model asked to read a specific file gets correct contents

@@ -1,0 +1,29 @@
+name: continuation
+status: implemented
+description: >
+  Continue from a prior run by replaying its conversation transcript.
+  Not session management — just "here's what happened last time."
+
+inputs:
+  ref:
+    type: string
+    required: true
+    description: '"last" for most recent run, or a path to a run JSON file'
+
+outputs:
+  messages:
+    type: array
+    description: Prior conversation messages (system message stripped)
+
+constraints:
+  - Loads from .kodr/runs/ directory
+  - "last" picks the most recent run by filename sort
+  - System messages from prior run are stripped (fresh system prompt assembled)
+  - Falls back to null if no prior run found
+
+tests:
+  unit:
+    - loads most recent run with "last" ref
+    - loads specific run by file path
+    - returns null when no runs exist
+    - strips system messages from loaded transcript

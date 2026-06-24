@@ -1,0 +1,41 @@
+name: run_command tool
+status: implemented
+description: >
+  Execute a shell command in the workspace directory.
+  Returns stdout, stderr, and exit code.
+
+inputs:
+  command:
+    type: string
+    required: true
+    description: Shell command to execute
+
+outputs:
+  stdout:
+    type: string
+    description: Command stdout
+  stderr:
+    type: string
+    description: Command stderr
+  exitCode:
+    type: number
+    description: Process exit code
+  error:
+    type: string
+    description: Error message if execution failed
+
+constraints:
+  - Commands run via /bin/sh -c
+  - 30 second timeout
+  - Output truncated at 50,000 characters
+  - Runs in workspace directory (cwd)
+  - Inherits PATH from parent process
+
+tests:
+  unit:
+    - executes a simple command and returns output
+    - captures non-zero exit codes
+    - truncates long output
+    - times out after 30 seconds
+  eval:
+    - model uses run_command to run tests

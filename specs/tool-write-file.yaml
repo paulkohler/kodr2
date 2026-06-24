@@ -1,0 +1,43 @@
+name: write_file tool
+status: implemented
+description: >
+  Create or overwrite a file in the workspace.
+  Path-jailed: cannot write above the workspace directory.
+  Creates parent directories automatically.
+
+inputs:
+  path:
+    type: string
+    required: true
+    description: Relative path from workspace root
+  content:
+    type: string
+    required: true
+    description: File content to write
+
+outputs:
+  written:
+    type: boolean
+    description: true on success
+  path:
+    type: string
+    description: The path that was written
+  error:
+    type: string
+    description: Error message if write failed
+
+constraints:
+  - Path must resolve within workspace root
+  - Parent directories created with mkdir -p semantics
+  - Written paths are tracked for the run summary
+  - Content must be provided (even empty string is valid)
+
+tests:
+  unit:
+    - writes a new file and returns success
+    - creates parent directories
+    - rejects paths that escape workspace root
+    - tracks written files in context
+    - requires content parameter
+  eval:
+    - model creates a file that persists on disk

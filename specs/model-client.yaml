@@ -1,0 +1,44 @@
+name: model-client
+status: implemented
+description: >
+  LM Studio HTTP client. Handles chat completions with streaming
+  and tool-call support. Single provider, OpenAI-compatible API.
+
+inputs:
+  baseUrl:
+    type: string
+    description: LM Studio API base URL
+  model:
+    type: string
+    description: Model identifier
+  timeout:
+    type: number
+    description: Request timeout in ms (default 600000)
+
+outputs:
+  chat:
+    type: function
+    description: "Send chat completion: (messages, tools, onToken) → { message, usage }"
+  models:
+    type: function
+    description: "List available models: () → [{ id }]"
+  resolveModel:
+    type: function
+    description: "Resolve model ID, auto-detecting if not configured"
+
+constraints:
+  - Streams SSE responses, assembles into complete message
+  - Accumulates tool call deltas across chunks
+  - Generates synthetic tool_call IDs when server omits them
+  - HTTP errors surface as thrown exceptions
+  - Timeout applies to the full request lifecycle
+
+tests:
+  unit:
+    - assembleResponse builds complete message from chunks
+    - assembleResponse accumulates tool call arguments
+    - assembleResponse generates IDs for tool calls without them
+  eval:
+    - connects to LM Studio and lists models
+    - sends a simple prompt and gets a response
+    - sends a prompt with tools and gets tool calls back
