@@ -62,8 +62,41 @@ The model has these tools available:
 --test <command>       Verification command (e.g. "npm test")
 --heal-turns <n>       Max repair turns (default: 3)
 --env <a,b,c>          Extra env vars to expose to commands (CSV of names)
+--allow <command>      Allow a command for this run (repeatable)
+--allow-all-commands   Run any command without prompting
 --continue <last|path> Continue from a prior run
 --quiet, -q            Suppress streaming output
+```
+
+## Command permissions
+
+`run_command` is gated by an exact-match allowlist stored at
+`.kodr/allowed-commands.json`. When the model wants to run a command that isn't
+on the list, kodr asks:
+
+```
+permission run_command wants to run:
+  git push origin main
+  not on the allowlist. [y] allow once  [a] always allow  [n] deny:
+```
+
+- **`y`** runs it this once.
+- **`a`** runs it and appends the exact command to `.kodr/allowed-commands.json`,
+  so it won't ask again.
+- **`n`** denies it; the model is told and can try something else.
+
+Matching is exact — `npm test` and `npm test -- --watch` are different rules.
+`.kodr/` is gitignored, so the allowlist is local to your machine.
+
+When there's no interactive terminal (CI, piped input), unknown commands are
+denied automatically. Use flags to change that:
+
+```bash
+# Allow specific commands for a single run, without saving them
+kodr "run the suite" --allow "npm test" --allow "node --test"
+
+# Trust everything (e.g. a sandboxed CI job)
+kodr "set up the project" --allow-all-commands
 ```
 
 ## Command environment

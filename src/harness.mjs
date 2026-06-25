@@ -7,6 +7,7 @@ import { buildSystemPrompt } from './context.mjs';
 import { createClient } from './model.mjs';
 import { createToolRegistry } from './tools/index.mjs';
 import { buildEnv } from './env.mjs';
+import { createCommandGate, createConfirm } from './permissions.mjs';
 import { verify } from './verify.mjs';
 import { heal } from './heal.mjs';
 import {
@@ -31,6 +32,8 @@ const MAX_TOOL_TURNS = 20;
  * @param {boolean} [options.quiet] - Suppress terminal output
  * @param {Array} [options.priorMessages] - Continuation from previous run
  * @param {string[]} [options.envPassthrough] - Extra env var names for commands
+ * @param {string[]} [options.allowCommands] - Commands allowed for this run only
+ * @param {boolean} [options.allowAllCommands] - Bypass the command-permissions gate
  * @returns {Promise<object>} Run result
  */
 export async function run(prompt, options) {
@@ -41,6 +44,8 @@ export async function run(prompt, options) {
 		quiet = false,
 		priorMessages,
 		envPassthrough = [],
+		allowCommands = [],
+		allowAllCommands = false,
 	} = options;
 
 	const client = createClient({
@@ -49,7 +54,22 @@ export async function run(prompt, options) {
 	});
 
 	const modelId = await client.resolveModel();
-	const tools = createToolRegistry(cwd, { envPassthrough });
+
+	const gate = await createCommandGate({
+		cwd,
+		allowAll: allowAllCommands,
+		seeded: allowCommands,
+		confirm: createConfirm({
+			isTty: Boolean(process.stdin.isTTY),
+			input: process.stdin,
+			output: process.stderr,
+		}),
+	});
+
+	const tools = createToolRegistry(cwd, {
+		envPassthrough,
+		checkCommand: (command) => gate.check(command),
+	});
 	const commandEnv = buildEnv(envPassthrough);
 	const systemPrompt = await buildSystemPrompt(cwd);
 

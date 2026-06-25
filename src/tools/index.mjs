@@ -23,6 +23,7 @@ const ALL_TOOLS = [
  * @param {string} cwd - Workspace root (absolute path)
  * @param {object} [options]
  * @param {string[]} [options.envPassthrough] - Extra env var names for run_command
+ * @param {function} [options.checkCommand] - Permission gate for run_command
  * @returns {object} Registry with `definitions`, `dispatch`, and `context`
  */
 export function createToolRegistry(cwd, options = {}) {
@@ -32,6 +33,7 @@ export function createToolRegistry(cwd, options = {}) {
 	const context = {
 		cwd,
 		envPassthrough: options.envPassthrough ?? [],
+		checkCommand: options.checkCommand,
 		trackWrite(path) {
 			if (!filesChanged.includes(path)) {
 				filesChanged.push(path);

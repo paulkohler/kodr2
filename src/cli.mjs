@@ -47,6 +47,8 @@ export async function main(argv) {
 		maxHealTurns: args.healTurns,
 		quiet: args.quiet,
 		envPassthrough: args.env,
+		allowCommands: args.allow,
+		allowAllCommands: args.allowAllCommands,
 	};
 
 	// Handle continuation
@@ -85,6 +87,8 @@ export function parseArgs(argv) {
 		healTurns: 3,
 		quiet: false,
 		env: [],
+		allow: [],
+		allowAllCommands: false,
 		continue: null,
 		help: false,
 		version: false,
@@ -139,6 +143,16 @@ export function parseArgs(argv) {
 			i++;
 			continue;
 		}
+		if (arg === '--allow-all-commands') {
+			args.allowAllCommands = true;
+			i++;
+			continue;
+		}
+		if (arg === '--allow' && argv[i + 1]) {
+			args.allow.push(argv[++i]);
+			i++;
+			continue;
+		}
 		if (arg === '--continue' && argv[i + 1]) {
 			args.continue = argv[++i];
 			i++;
@@ -183,6 +197,8 @@ Options:
   --test <command>                Verification command (e.g. "npm test")
   --heal-turns <n>                Max repair turns (default: 3)
   --env <a,b,c>                   Extra env vars to expose to commands (CSV of names)
+  --allow <command>               Allow a command for this run (repeatable)
+  --allow-all-commands            Run any command without prompting
   --continue <last|path>          Continue from a prior run
   --quiet, -q                     Suppress streaming output
   --help, -h                      Show this help

@@ -27,6 +27,16 @@ export default {
 
 	async execute({ command }, context) {
 		if (!command) return { error: 'command is required' };
+
+		if (context.checkCommand) {
+			const decision = await context.checkCommand(command);
+			if (!decision.allowed) {
+				return {
+					error: 'command not permitted (denied or not on the allowlist)',
+				};
+			}
+		}
+
 		if (context.trackCommand) context.trackCommand();
 		return executeCommand(command, context.cwd, {
 			env: buildEnv(context.envPassthrough),

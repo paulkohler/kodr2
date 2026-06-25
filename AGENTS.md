@@ -31,19 +31,22 @@ Rules for AI agents working in this repo.
 
 ## Specs
 
-- Every feature has a YAML spec in `specs/`.
-- Write the spec before the implementation.
+- Every feature or behavior change MUST have a YAML spec in `specs/`. No spec, no code.
+- Write or update the spec FIRST and get it to `accepted` before writing any implementation.
+- The spec is the contract: implement to satisfy it, and keep it in sync when behavior changes.
 - Spec status: proposed → accepted → implemented → deprecated.
-- Tests listed in the spec are the contract.
+- Tests listed in the spec are the contract. Flip the status to `implemented` only once they pass.
 
 ## Workflow
 
-1. Read relevant specs and existing code.
-2. Implement the change.
-3. Write or update tests.
-4. Run `npm test` — all must pass.
-5. Run `node --check` on changed files.
-6. Commit with a descriptive message.
+1. Write or update the YAML spec in `specs/` first (status `accepted`). No code without a spec.
+2. Read the spec and existing code.
+3. Implement the change to satisfy the spec.
+4. Write or update tests (the spec's `tests` list is the contract).
+5. Run `npm test` — all must pass.
+6. Run `node --check` on changed files.
+7. Flip the spec status to `implemented`.
+8. Commit with a descriptive message.
 
 ## Model output is untrusted
 

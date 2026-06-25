@@ -65,6 +65,29 @@ describe('parseArgs', () => {
 		assert.deepEqual(args.env, []);
 	});
 
+	it('collects repeated --allow flags', () => {
+		const args = parseArgs([
+			'run',
+			'hi',
+			'--allow',
+			'npm test',
+			'--allow',
+			'git status',
+		]);
+		assert.deepEqual(args.allow, ['npm test', 'git status']);
+	});
+
+	it('parses --allow-all-commands flag', () => {
+		const args = parseArgs(['run', 'hi', '--allow-all-commands']);
+		assert.equal(args.allowAllCommands, true);
+	});
+
+	it('defaults command permissions to gated', () => {
+		const args = parseArgs(['run', 'hi']);
+		assert.deepEqual(args.allow, []);
+		assert.equal(args.allowAllCommands, false);
+	});
+
 	it('parses --help flag', () => {
 		const args = parseArgs(['--help']);
 		assert.equal(args.help, true);

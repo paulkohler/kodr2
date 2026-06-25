@@ -1,0 +1,63 @@
+name: command permissions
+status: implemented
+description: >
+  Gate run_command behind an exact-match allowlist. A command already on the
+  list runs silently. A command not on the list prompts the user for an inline
+  allow/deny decision when a TTY is attached, or is denied and reported back to
+  the model when running non-interactively. This is the safety boundary for
+  model-supplied shell commands; the allowlist is convenience on top of it.
+
+inputs:
+  cwd:
+    type: string
+    required: true
+    description: Workspace root (holds the .kodr/allowed-commands.json store)
+  command:
+    type: string
+    required: true
+    description: The exact shell command the model wants to run
+  allowAll:
+    type: boolean
+    description: Bypass the gate entirely (--allow-all-commands)
+  seeded:
+    type: array
+    description: Commands allowed for this run only (--allow), not persisted
+  confirm:
+    type: function
+    required: true
+    description: Resolves an unknown command to "once", "always", or "deny"
+
+outputs:
+  allowed:
+    type: boolean
+    description: Whether the command may execute
+
+constraints:
+  - Allowlist persists at .kodr/allowed-commands.json as { "commands": [string] }
+  - Matching is exact string equality — no normalization, prefixing, or globbing
+  - A command already on the list runs without prompting
+  - allowAll (--allow-all-commands) runs everything without prompting or persisting
+  - Seeded commands (--allow) are allowed for the current run only, never persisted
+  - Unknown command + TTY prompts; "always" appends the exact command to the file
+  - Unknown command + no TTY is denied without prompting
+  - A command allowed once is remembered for the rest of the run
+  - A denied command returns { error } to the model, never throws
+  - A missing or malformed allowlist file is treated as empty
+  - The displayed command has control characters escaped (untrusted model output)
+
+tests:
+  unit:
+    - loads commands from .kodr/allowed-commands.json
+    - returns empty for a missing or malformed allowlist file
+    - appends a command and de-duplicates on repeat
+    - allows a command already on the list without prompting
+    - allows any command when allowAll is set, without persisting
+    - allows a seeded command without prompting or persisting
+    - "allow once" permits the command without writing the file
+    - "always allow" permits the command and appends it to the file
+    - "deny" rejects the command
+    - a command allowed once is not prompted again in the same run
+    - parseDecision maps y/a/n (and synonyms) to once/always/deny
+    - createConfirm denies without reading input when there is no TTY
+  eval:
+    - a command on the allowlist runs without interrupting the loop

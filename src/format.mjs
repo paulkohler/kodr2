@@ -47,6 +47,24 @@ export function formatNotice(text) {
 }
 
 /**
+ * Format the run_command permission prompt. The command is untrusted model
+ * output, so control characters are escaped to prevent prompt spoofing.
+ * @param {string} command
+ * @returns {string}
+ */
+export function formatPermissionPrompt(command) {
+	const safe = command.replace(/[\x00-\x1f\x7f]/g, '?');
+	return (
+		`\n${YELLOW}permission${RESET} run_command wants to run:\n` +
+		`  ${BOLD}${safe}${RESET}\n` +
+		`  not on the allowlist. ` +
+		`[${GREEN}y${RESET}] allow once  ` +
+		`[${CYAN}a${RESET}] always allow  ` +
+		`[${RED}n${RESET}] deny: `
+	);
+}
+
+/**
  * Format verification result.
  * @param {{ passed: boolean, output: string, command: string }} result
  * @returns {string}

@@ -29,6 +29,12 @@ inputs:
   priorMessages:
     type: array
     description: Messages from a prior run for continuation
+  allowCommands:
+    type: array
+    description: Commands allowed for this run only (--allow), not persisted
+  allowAllCommands:
+    type: boolean
+    description: Bypass the command-permissions gate (--allow-all-commands)
 
 outputs:
   response:
@@ -61,6 +67,7 @@ constraints:
   - Hitting the tool-turn ceiling sets stoppedReason "tool-limit" and emits a notice
   - Run transcript saved to .kodr/runs/ after every run
   - System prompt assembled fresh each run from workspace state
+  - run_command is gated by the command-permissions allowlist (see command-permissions spec)
   - Verification runs when a test command is set and the workspace was touched (files written or a command run)
   - Healing only attempted when verification fails
 

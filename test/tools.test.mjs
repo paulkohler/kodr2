@@ -436,6 +436,24 @@ describe('run_command', () => {
 		}
 	});
 
+	it('does not execute a command denied by the permission gate', async () => {
+		const marker = join(tmpDir, 'ran.txt');
+		const gated = { ...context, checkCommand: async () => ({ allowed: false }) };
+		const result = await runCommandTool.execute(
+			{ command: `touch ${marker}` },
+			gated,
+		);
+		assert.ok(result.error);
+		assert.match(result.error, /not permitted/i);
+		await assert.rejects(readFile(marker));
+	});
+
+	it('executes a command approved by the permission gate', async () => {
+		const gated = { ...context, checkCommand: async () => ({ allowed: true }) };
+		const result = await runCommandTool.execute({ command: 'echo ok' }, gated);
+		assert.equal(result.stdout.trim(), 'ok');
+	});
+
 	it('truncates long output', async () => {
 		const result = await executeCommand(
 			`${process.execPath} -e "process.stdout.write('x'.repeat(200))"`,
