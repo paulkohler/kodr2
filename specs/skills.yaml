@@ -1,0 +1,49 @@
+name: skills
+status: accepted
+description: >
+  Basic skill loading. A skill is a SKILL.md file with YAML frontmatter
+  (name, description) and a markdown body of instructions. Skills are
+  discovered at workspace scan time and listed in the system prompt by
+  name and description. The model loads a skill's full instructions on
+  demand via the load_skill tool.
+
+inputs:
+  cwd:
+    type: string
+    required: true
+    description: Absolute path to workspace root
+
+outputs:
+  skills:
+    type: array
+    description: Available skills as { name, description }
+  error:
+    type: string
+    description: Error message if a skill load failed
+
+constraints:
+  - Skills live under .kodr/skills/<dir>/SKILL.md
+  - Frontmatter is a leading --- block of simple key:value pairs
+  - Only name and description are read from frontmatter
+  - Missing name falls back to the skill directory name
+  - Frontmatter values may be single- or double-quoted
+  - The markdown body after the frontmatter is the skill instructions
+  - Discovery returns only name and description, never the body
+  - load_skill matches a skill by its frontmatter name (or directory name)
+  - Skill paths are path-jailed within the workspace root
+  - A workspace with no skills produces no available-skills prompt section
+
+tests:
+  unit:
+    - discovers skills from SKILL.md frontmatter
+    - falls back to directory name when frontmatter has no name
+    - parses quoted frontmatter values
+    - ignores directories without a SKILL.md
+    - returns empty list when no skills directory exists
+    - load_skill returns the markdown body for a known skill
+    - load_skill returns an error for an unknown skill
+    - load_skill requires a name argument
+    - system prompt lists available skills when present
+    - system prompt omits the skills section when none exist
+  eval:
+    - model loads a matching skill before performing the task

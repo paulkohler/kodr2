@@ -8,6 +8,7 @@ import editFile from './edit-file.mjs';
 import listFiles from './list-files.mjs';
 import search from './search.mjs';
 import runCommand from './run-command.mjs';
+import loadSkill from './load-skill.mjs';
 
 const ALL_TOOLS = [
 	readFile,
@@ -16,6 +17,7 @@ const ALL_TOOLS = [
 	listFiles,
 	search,
 	runCommand,
+	loadSkill,
 ];
 
 /**

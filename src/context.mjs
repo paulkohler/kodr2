@@ -7,6 +7,7 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { resolveExistingPath } from './path-jail.mjs';
+import { discoverSkills } from './skills.mjs';
 
 const INSTRUCTION_FILES = ['KODR.md', 'AGENTS.md'];
 const IGNORE = new Set(['.git', 'node_modules', '.kodr']);
@@ -25,6 +26,18 @@ export async function buildSystemPrompt(cwd) {
 		parts.push('<workspace-instructions>');
 		parts.push(instructions);
 		parts.push('</workspace-instructions>');
+	}
+
+	const skills = await discoverSkills(cwd);
+	if (skills.length > 0) {
+		parts.push('<available-skills>');
+		parts.push(
+			'These skills hold specialized instructions for specific tasks. When a task matches a skill, call the load_skill tool with its name to retrieve the full instructions before proceeding.',
+		);
+		for (const skill of skills) {
+			parts.push(`- ${skill.name}: ${skill.description}`);
+		}
+		parts.push('</available-skills>');
 	}
 
 	const files = await listWorkspaceFiles(cwd);
@@ -103,4 +116,5 @@ Guidelines:
 - Respect existing code style and conventions.
 - When writing new files, match the patterns used in the project.
 - If a task requires running commands (tests, builds), use the run_command tool.
+- If a task matches an available skill, load it with load_skill and follow its instructions.
 - Explain what you're doing and why.`;
