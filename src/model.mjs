@@ -20,7 +20,7 @@ const DEFAULT_TIMEOUT = 600_000; // 10 minutes
  */
 export function createClient(options = {}) {
 	const baseUrl = options.baseUrl || DEFAULT_BASE_URL;
-	const model = options.model || '';
+	const model = resolveConfiguredModel(options.model);
 	const timeout = options.timeout || DEFAULT_TIMEOUT;
 
 	return { chat, models, resolveModel };
@@ -80,6 +80,11 @@ export function createClient(options = {}) {
 		}
 		return list[0].id;
 	}
+}
+
+function resolveConfiguredModel(model) {
+	if (model) return model;
+	return process.env.KODR_MODEL || '';
 }
 
 // --- streaming ---

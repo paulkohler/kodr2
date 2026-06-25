@@ -10,7 +10,7 @@ inputs:
     description: LM Studio API base URL
   model:
     type: string
-    description: Model identifier
+    description: Model identifier. Takes precedence over KODR_MODEL.
   timeout:
     type: number
     description: Request timeout in ms (default 600000)
@@ -31,6 +31,8 @@ constraints:
   - Supports http and https base URLs (transport selected by URL protocol)
   - Accumulates tool call deltas across chunks
   - Generates synthetic tool_call IDs when server omits them
+  - KODR_MODEL configures the model when no model option is provided
+  - Explicit model option takes precedence over KODR_MODEL
   - HTTP errors surface as thrown exceptions
   - Timeout applies to the full request lifecycle
 
@@ -40,6 +42,8 @@ tests:
     - assembleResponse accumulates tool call arguments
     - assembleResponse generates IDs for tool calls without them
     - streaming requests ask the server to include token usage
+    - KODR_MODEL is used when no model option is provided
+    - explicit model option takes precedence over KODR_MODEL
     - HTTP errors from model listing and chat are surfaced
     - stalled requests time out
   eval:

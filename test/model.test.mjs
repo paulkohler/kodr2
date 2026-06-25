@@ -1,12 +1,26 @@
-import { afterEach, describe, it } from 'node:test';
+import { after, afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 
 import { assembleResponse, createClient } from '../src/model.mjs';
 
 const servers = [];
+const originalKodrModel = process.env.KODR_MODEL;
+
+after(() => {
+	if (originalKodrModel === undefined) {
+		delete process.env.KODR_MODEL;
+	} else {
+		process.env.KODR_MODEL = originalKodrModel;
+	}
+});
 
 afterEach(async () => {
+	if (originalKodrModel === undefined) {
+		delete process.env.KODR_MODEL;
+	} else {
+		process.env.KODR_MODEL = originalKodrModel;
+	}
 	await Promise.all(servers.splice(0).map((server) => closeServer(server)));
 });
 
@@ -74,6 +88,30 @@ describe('model HTTP client', () => {
 		const result = await client.chat({ messages: [] });
 		assert.deepEqual(requestBody.stream_options, { include_usage: true });
 		assert.deepEqual(result.usage, { prompt: 4, completion: 1 });
+	});
+
+	it('uses KODR_MODEL when no model option is provided', async () => {
+		process.env.KODR_MODEL = 'env/model';
+		let requestBody;
+		const baseUrl = await startServer((req, res) => {
+			let body = '';
+			req.on('data', (chunk) => (body += chunk));
+			req.on('end', () => {
+				requestBody = JSON.parse(body);
+				res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+				res.end('data: {"choices":[{"delta":{"content":"ok"}}]}\n\n');
+			});
+		});
+		const client = createClient({ baseUrl });
+		await client.chat({ messages: [] });
+		assert.equal(await client.resolveModel(), 'env/model');
+		assert.equal(requestBody.model, 'env/model');
+	});
+
+	it('prefers explicit model option over KODR_MODEL', async () => {
+		process.env.KODR_MODEL = 'env/model';
+		const client = createClient({ model: 'cli/model' });
+		assert.equal(await client.resolveModel(), 'cli/model');
 	});
 
 	it('emits text tokens to onToken as they stream', async () => {

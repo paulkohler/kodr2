@@ -58,13 +58,23 @@ The model has these tools available:
 ```
 --cwd <path>           Workspace directory (default: .)
 --base-url <url>       LM Studio URL (default: http://localhost:1234/v1)
---model <id>           Model identifier (auto-detected if omitted)
+--model <id>           Model identifier (or KODR_MODEL; auto-detected if omitted)
 --test <command>       Verification command (e.g. "npm test")
 --heal-turns <n>       Max repair turns (default: 3)
 --env <a,b,c>          Extra env vars to expose to commands (CSV of names)
 --continue <last|path> Continue from a prior run
 --quiet, -q            Suppress streaming output
 ```
+
+You can also set the model once for scripts and evals:
+
+```bash
+KODR_MODEL=qwen/qwen3.6-35b-a3b kodr "fix the failing test"
+KODR_MODEL=qwen/qwen3.6-35b-a3b npm run eval
+```
+
+`--model` takes precedence over `KODR_MODEL`. If neither is set, kodr uses the
+first model reported by LM Studio's OpenAI-compatible `/v1/models` endpoint.
 
 ## Command environment
 
