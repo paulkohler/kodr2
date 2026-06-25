@@ -45,7 +45,7 @@ outputs:
     description: Cumulative token usage
 
 constraints:
-  - No-progress detection stops early when consecutive failures have identical output
+  - No-progress detection stops early when consecutive failures are identical after normalizing timings and timestamps
   - Each turn adds failure context as a user message
   - Model gets full tool access during repair
   - Turn limit prevents infinite loops

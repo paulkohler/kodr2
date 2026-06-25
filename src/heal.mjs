@@ -92,7 +92,22 @@ export async function heal(params) {
 }
 
 export function hasNoProgress(previousOutput, currentOutput) {
-	return currentOutput === previousOutput;
+	return normalizeOutput(currentOutput) === normalizeOutput(previousOutput);
+}
+
+/**
+ * Normalize verification output so that runs which differ only in timing
+ * (durations, timestamps) compare equal. Line numbers, counts, and test
+ * names are preserved so genuinely different failures still register progress.
+ */
+function normalizeOutput(output) {
+	return (output || '')
+		.replace(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?/g, '<ts>')
+		.replace(/duration_ms:\s*[\d.]+/g, 'duration_ms: <dur>')
+		.replace(/\d+(\.\d+)?\s?ms\b/g, '<dur>')
+		.replace(/\d+(\.\d+)?\s?s\b/g, '<dur>')
+		.replace(/[ \t]+$/gm, '')
+		.trim();
 }
 
 async function runToolLoop(client, modelId, messages, tools, quiet) {

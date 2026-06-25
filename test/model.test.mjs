@@ -76,6 +76,25 @@ describe('model HTTP client', () => {
 		assert.deepEqual(result.usage, { prompt: 4, completion: 1 });
 	});
 
+	it('emits text tokens to onToken as they stream', async () => {
+		const baseUrl = await startServer((req, res) => {
+			res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+			res.end(
+				'data: {"choices":[{"delta":{"role":"assistant","content":"he"}}]}\n\n' +
+					'data: {"choices":[{"delta":{"content":"llo"}}]}\n\n' +
+					'data: [DONE]\n\n',
+			);
+		});
+		const client = createClient({ baseUrl, model: 'test' });
+		const tokens = [];
+		const result = await client.chat({
+			messages: [],
+			onToken: (t) => tokens.push(t),
+		});
+		assert.deepEqual(tokens, ['he', 'llo']);
+		assert.equal(result.message.content, 'hello');
+	});
+
 	it('surfaces HTTP errors from model listing', async () => {
 		const baseUrl = await startServer((req, res) => {
 			res.writeHead(503);

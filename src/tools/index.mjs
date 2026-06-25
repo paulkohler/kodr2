@@ -27,6 +27,7 @@ const ALL_TOOLS = [
  */
 export function createToolRegistry(cwd, options = {}) {
 	const filesChanged = [];
+	let commandCount = 0;
 
 	const context = {
 		cwd,
@@ -35,6 +36,9 @@ export function createToolRegistry(cwd, options = {}) {
 			if (!filesChanged.includes(path)) {
 				filesChanged.push(path);
 			}
+		},
+		trackCommand() {
+			commandCount++;
 		},
 	};
 
@@ -75,6 +79,14 @@ export function createToolRegistry(cwd, options = {}) {
 		 */
 		filesChanged() {
 			return [...filesChanged];
+		},
+
+		/**
+		 * Number of shell commands executed during this run.
+		 * @returns {number}
+		 */
+		commandsRun() {
+			return commandCount;
 		},
 	};
 }

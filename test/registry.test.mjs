@@ -70,4 +70,12 @@ describe('createToolRegistry', () => {
 		const changed = registry.filesChanged();
 		assert.deepEqual(changed, ['a.txt']);
 	});
+
+	it('counts shell commands run', async () => {
+		const registry = createToolRegistry(tmpDir);
+		assert.equal(registry.commandsRun(), 0);
+		await registry.dispatch('run_command', { command: 'true' });
+		await registry.dispatch('run_command', { command: 'true' });
+		assert.equal(registry.commandsRun(), 2);
+	});
 });

@@ -9,6 +9,18 @@ describe('healing', () => {
 		assert.equal(hasNoProgress('first failure', 'second failure'), false);
 	});
 
+	it('treats timing-only differences as no progress', () => {
+		const a = '1 failing\n  duration_ms: 12.4\n  at foo.mjs:5';
+		const b = '1 failing\n  duration_ms: 88.1\n  at foo.mjs:5';
+		assert.equal(hasNoProgress(a, b), true);
+	});
+
+	it('treats different failure locations as progress', () => {
+		const a = 'AssertionError at foo.mjs:5';
+		const b = 'AssertionError at foo.mjs:9';
+		assert.equal(hasNoProgress(a, b), false);
+	});
+
 	it('respects a zero-turn limit without calling the model', async () => {
 		let modelCalled = false;
 		const client = {

@@ -38,12 +38,12 @@ export function formatToolResult(name, result) {
 }
 
 /**
- * Format the final model response.
+ * Format a one-line notice (warnings, non-fatal diagnostics).
  * @param {string} text
  * @returns {string}
  */
-export function formatResponse(text) {
-	return `\n${text}\n`;
+export function formatNotice(text) {
+	return `${YELLOW}note${RESET} ${text}`;
 }
 
 /**

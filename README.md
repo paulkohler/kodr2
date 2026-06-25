@@ -105,7 +105,7 @@ npm install
 npm test
 
 # Run integration evals (requires LM Studio)
-node --test eval/
+npm run eval
 
 # Syntax check
 node --check bin/*.mjs && node --check src/*.mjs && node --check src/tools/*.mjs

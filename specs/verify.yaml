@@ -31,7 +31,8 @@ outputs:
 constraints:
   - 60 second timeout
   - Output truncated at 20,000 characters
-  - Only runs when testCommand is configured and files were changed
+  - Runs with a minimal curated environment (see run_command spec)
+  - Only runs when testCommand is configured and the workspace was touched (files written or a command run)
 
 tests:
   unit:

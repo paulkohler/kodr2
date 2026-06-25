@@ -12,7 +12,7 @@ import { heal } from './heal.mjs';
 import {
 	formatToolCall,
 	formatToolResult,
-	formatResponse,
+	formatNotice,
 	formatVerification,
 	formatSummary,
 } from './format.mjs';
@@ -72,6 +72,7 @@ export async function run(prompt, options) {
 	let totalUsage = { prompt: 0, completion: 0 };
 	let toolTurns = 0;
 	let finalText = '';
+	let completed = false;
 
 	while (toolTurns < MAX_TOOL_TURNS) {
 		const { message, usage } = await client.chat({
@@ -89,6 +90,7 @@ export async function run(prompt, options) {
 		// No tool calls = final response
 		if (!message.tool_calls || message.tool_calls.length === 0) {
 			finalText = message.content || '';
+			completed = true;
 			if (!quiet) process.stdout.write('\n');
 			break;
 		}
@@ -120,17 +122,28 @@ export async function run(prompt, options) {
 		toolTurns++;
 	}
 
+	// The model never produced a final response — it hit the tool-turn ceiling.
+	if (!completed && !quiet) {
+		process.stderr.write(
+			formatNotice(`stopped after ${MAX_TOOL_TURNS} tool turns`) + '\n',
+		);
+	}
+
 	// Build result
 	const result = {
 		response: finalText,
 		filesChanged: tools.filesChanged(),
 		toolTurns,
+		stoppedReason: completed ? 'complete' : 'tool-limit',
 		usage: totalUsage,
 		messages,
 	};
 
-	// Verify if test command is set
-	if (testCommand && tools.filesChanged().length > 0) {
+	// Verify if a test command is set and the model touched the workspace
+	// (writes, or shell commands that may have changed files).
+	const touchedWorkspace =
+		tools.filesChanged().length > 0 || tools.commandsRun() > 0;
+	if (testCommand && touchedWorkspace) {
 		const verifyResult = await verify(testCommand, cwd, { env: commandEnv });
 		result.verification = verifyResult;
 
@@ -179,6 +192,7 @@ async function saveRun(cwd, result) {
 		timestamp: new Date().toISOString(),
 		filesChanged: result.filesChanged,
 		toolTurns: result.toolTurns,
+		stoppedReason: result.stoppedReason,
 		usage: result.usage,
 		verified: result.verification?.passed ?? null,
 		healed: result.healed ?? null,

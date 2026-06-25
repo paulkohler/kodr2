@@ -40,6 +40,9 @@ outputs:
   toolTurns:
     type: number
     description: Number of tool-call round trips
+  stoppedReason:
+    type: string
+    description: '"complete" when the model produced a final response, "tool-limit" when it hit the turn ceiling'
   verification:
     type: object
     description: "{ passed, command, output, exitCode }"
@@ -55,9 +58,11 @@ outputs:
 
 constraints:
   - Tool loop limited to 20 turns to prevent runaway
+  - Hitting the tool-turn ceiling sets stoppedReason "tool-limit" and emits a notice
   - Run transcript saved to .kodr/runs/ after every run
   - System prompt assembled fresh each run from workspace state
-  - Healing only attempted when verification fails and files were changed
+  - Verification runs when a test command is set and the workspace was touched (files written or a command run)
+  - Healing only attempted when verification fails
 
 tests:
   unit:

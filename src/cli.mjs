@@ -32,6 +32,12 @@ export async function main(argv) {
 		return;
 	}
 
+	if (!Number.isInteger(args.healTurns) || args.healTurns < 0) {
+		process.stderr.write('--heal-turns must be a non-negative integer.\n');
+		process.exitCode = 1;
+		return;
+	}
+
 	const cwd = resolve(args.cwd || '.');
 	const options = {
 		cwd,
