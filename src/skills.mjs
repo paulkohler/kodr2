@@ -30,14 +30,17 @@ export async function discoverSkills(cwd) {
  * @returns {Promise<{name: string, description: string, instructions: string}|null>}
  */
 export async function loadSkill(cwd, name) {
-	const skills = await readAllSkills(cwd);
-	const skill = skills.find((s) => s.name === name);
-	if (!skill) return null;
-	return {
-		name: skill.name,
-		description: skill.description,
-		instructions: skill.body,
-	};
+	for (const dirName of await skillDirNames(cwd)) {
+		const skill = await readSkill(cwd, dirName);
+		if (skill && skill.name === name) {
+			return {
+				name: skill.name,
+				description: skill.description,
+				instructions: skill.body,
+			};
+		}
+	}
+	return null;
 }
 
 /**
@@ -46,6 +49,20 @@ export async function loadSkill(cwd, name) {
  * @returns {Promise<Array<{name, description, body}>>}
  */
 async function readAllSkills(cwd) {
+	const skills = [];
+	for (const dirName of await skillDirNames(cwd)) {
+		const skill = await readSkill(cwd, dirName);
+		if (skill) skills.push(skill);
+	}
+	return skills;
+}
+
+/**
+ * List skill directory names under .kodr/skills.
+ * @param {string} cwd
+ * @returns {Promise<string[]>}
+ */
+async function skillDirNames(cwd) {
 	let dir;
 	try {
 		dir = await resolveExistingPath(cwd, SKILLS_DIR);
@@ -54,20 +71,12 @@ async function readAllSkills(cwd) {
 	}
 	if (!dir) return [];
 
-	let entries;
 	try {
-		entries = await readdir(dir, { withFileTypes: true });
+		const entries = await readdir(dir, { withFileTypes: true });
+		return entries.filter((e) => e.isDirectory()).map((e) => e.name);
 	} catch {
 		return [];
 	}
-
-	const skills = [];
-	for (const entry of entries) {
-		if (!entry.isDirectory()) continue;
-		const skill = await readSkill(cwd, entry.name);
-		if (skill) skills.push(skill);
-	}
-	return skills;
 }
 
 /**
@@ -104,7 +113,8 @@ async function readSkill(cwd, dirName) {
 
 /**
  * Parse a leading YAML frontmatter block of simple key:value pairs.
- * Anything beyond the closing --- is the body.
+ * The body after the closing --- is preserved verbatim \u2014 indentation and
+ * intentional whitespace in skill instructions are left intact.
  * @param {string} raw
  * @returns {{frontmatter: object, body: string}}
  */
@@ -112,7 +122,7 @@ export function parseFrontmatter(raw) {
 	const text = raw.replace(/^\uFEFF/, '');
 	const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
 	if (!match) {
-		return { frontmatter: {}, body: text.trim() };
+		return { frontmatter: {}, body: text };
 	}
 
 	const frontmatter = {};
@@ -122,7 +132,7 @@ export function parseFrontmatter(raw) {
 		frontmatter[pair[1]] = stripQuotes(pair[2].trim());
 	}
 
-	return { frontmatter, body: text.slice(match[0].length).trim() };
+	return { frontmatter, body: text.slice(match[0].length) };
 }
 
 function stripQuotes(value) {

@@ -48,6 +48,13 @@ describe('parseFrontmatter', () => {
 		assert.deepEqual(frontmatter, {});
 		assert.equal(body, 'just text');
 	});
+
+	it('preserves body indentation and trailing whitespace', () => {
+		const { body } = parseFrontmatter(
+			'---\nname: x\n---\n    indented code\nplain line\n',
+		);
+		assert.equal(body, '    indented code\nplain line\n');
+	});
 });
 
 // --- discoverSkills ---

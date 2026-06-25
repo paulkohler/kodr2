@@ -28,8 +28,10 @@ constraints:
   - Missing name falls back to the skill directory name
   - Frontmatter values may be single- or double-quoted
   - The markdown body after the frontmatter is the skill instructions
+  - The body is preserved verbatim — indentation and whitespace are not trimmed
   - Discovery returns only name and description, never the body
   - load_skill matches a skill by its frontmatter name (or directory name)
+  - load_skill returns on the first name match without reading every skill
   - Skill paths are path-jailed within the workspace root
   - A workspace with no skills produces no available-skills prompt section
 
@@ -38,6 +40,7 @@ tests:
     - discovers skills from SKILL.md frontmatter
     - falls back to directory name when frontmatter has no name
     - parses quoted frontmatter values
+    - preserves body indentation and whitespace verbatim
     - ignores directories without a SKILL.md
     - returns empty list when no skills directory exists
     - load_skill returns the markdown body for a known skill
