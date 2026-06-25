@@ -21,17 +21,24 @@ const ALL_TOOLS = [
 /**
  * Create a tool registry bound to a workspace.
  * @param {string} cwd - Workspace root (absolute path)
+ * @param {object} [options]
+ * @param {string[]} [options.envPassthrough] - Extra env var names for run_command
  * @returns {object} Registry with `definitions`, `dispatch`, and `context`
  */
-export function createToolRegistry(cwd) {
+export function createToolRegistry(cwd, options = {}) {
 	const filesChanged = [];
+	let commandCount = 0;
 
 	const context = {
 		cwd,
+		envPassthrough: options.envPassthrough ?? [],
 		trackWrite(path) {
 			if (!filesChanged.includes(path)) {
 				filesChanged.push(path);
 			}
+		},
+		trackCommand() {
+			commandCount++;
 		},
 	};
 
@@ -72,6 +79,14 @@ export function createToolRegistry(cwd) {
 		 */
 		filesChanged() {
 			return [...filesChanged];
+		},
+
+		/**
+		 * Number of shell commands executed during this run.
+		 * @returns {number}
+		 */
+		commandsRun() {
+			return commandCount;
 		},
 	};
 }

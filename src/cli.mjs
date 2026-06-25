@@ -5,6 +5,7 @@
 import { resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { run } from './harness.mjs';
+import { parseEnvNames } from './env.mjs';
 
 /**
  * Parse CLI arguments and run.
@@ -31,6 +32,12 @@ export async function main(argv) {
 		return;
 	}
 
+	if (!Number.isInteger(args.healTurns) || args.healTurns < 0) {
+		process.stderr.write('--heal-turns must be a non-negative integer.\n');
+		process.exitCode = 1;
+		return;
+	}
+
 	const cwd = resolve(args.cwd || '.');
 	const options = {
 		cwd,
@@ -39,6 +46,7 @@ export async function main(argv) {
 		testCommand: args.test,
 		maxHealTurns: args.healTurns,
 		quiet: args.quiet,
+		envPassthrough: args.env,
 	};
 
 	// Handle continuation
@@ -76,6 +84,7 @@ export function parseArgs(argv) {
 		test: null,
 		healTurns: 3,
 		quiet: false,
+		env: [],
 		continue: null,
 		help: false,
 		version: false,
@@ -125,6 +134,11 @@ export function parseArgs(argv) {
 			i++;
 			continue;
 		}
+		if (arg === '--env' && argv[i + 1]) {
+			args.env = parseEnvNames(argv[++i]);
+			i++;
+			continue;
+		}
 		if (arg === '--continue' && argv[i + 1]) {
 			args.continue = argv[++i];
 			i++;
@@ -168,6 +182,7 @@ Options:
   --model <id>                    Model identifier
   --test <command>                Verification command (e.g. "npm test")
   --heal-turns <n>                Max repair turns (default: 3)
+  --env <a,b,c>                   Extra env vars to expose to commands (CSV of names)
   --continue <last|path>          Continue from a prior run
   --quiet, -q                     Suppress streaming output
   --help, -h                      Show this help

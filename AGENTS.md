@@ -26,8 +26,8 @@ Rules for AI agents working in this repo.
 - Unit tests in `test/`. Fast, deterministic, no network.
 - Evals in `eval/`. Hit real LM Studio. Slow, non-deterministic.
 - No model mocks. Tests either need the model (eval) or don't (unit).
-- Run tests: `node --test test/`
-- Run evals: `node --test eval/`
+- Run tests: `npm test` (`node --test test/*.test.mjs`)
+- Run evals: `npm run eval` (`node --test eval/*.eval.mjs`)
 
 ## Specs
 
@@ -41,7 +41,7 @@ Rules for AI agents working in this repo.
 1. Read relevant specs and existing code.
 2. Implement the change.
 3. Write or update tests.
-4. Run `node --test test/` — all must pass.
+4. Run `npm test` — all must pass.
 5. Run `node --check` on changed files.
 6. Commit with a descriptive message.
 

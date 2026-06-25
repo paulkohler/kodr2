@@ -4,7 +4,8 @@
  * Single provider, single API shape: OpenAI-compatible.
  */
 
-import { request } from 'node:http';
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 
 const DEFAULT_BASE_URL = 'http://localhost:1234/v1';
 const DEFAULT_TIMEOUT = 600_000; // 10 minutes
@@ -26,7 +27,8 @@ export function createClient(options = {}) {
 
 	/**
 	 * Send a chat completion request with optional tool definitions.
-	 * Streams the response. Returns the complete message when done.
+	 * Streams the response, emitting tokens as they arrive.
+	 * Returns the complete message when done.
 	 *
 	 * @param {object} params
 	 * @param {Array} params.messages - Chat messages
@@ -50,12 +52,10 @@ export function createClient(options = {}) {
 			}));
 		}
 
-		const chunks = await streamRequest(
-			`${baseUrl}/chat/completions`,
-			body,
-			timeout,
-		);
-		return assembleResponse(chunks, params.onToken, params.onToolCall);
+		return streamRequest(`${baseUrl}/chat/completions`, body, timeout, {
+			onToken: params.onToken,
+			onToolCall: params.onToolCall,
+		});
 	}
 
 	/**
@@ -84,13 +84,17 @@ export function createClient(options = {}) {
 
 // --- streaming ---
 
-export function assembleResponse(chunks, onToken, onToolCall) {
+/**
+ * Stateful assembler for streamed chat completion chunks.
+ * Accumulates content and tool calls, invoking callbacks as deltas arrive.
+ */
+function createAssembler(onToken, onToolCall) {
 	let role = 'assistant';
 	let content = '';
 	const toolCalls = [];
 	let usage = { prompt: 0, completion: 0 };
 
-	for (const chunk of chunks) {
+	function push(chunk) {
 		const delta = chunk.choices?.[0]?.delta;
 		if (!delta) {
 			if (chunk.usage) {
@@ -99,7 +103,7 @@ export function assembleResponse(chunks, onToken, onToolCall) {
 					completion: chunk.usage.completion_tokens || 0,
 				};
 			}
-			continue;
+			return;
 		}
 
 		if (delta.role) role = delta.role;
@@ -111,49 +115,82 @@ export function assembleResponse(chunks, onToken, onToolCall) {
 
 		if (delta.tool_calls) {
 			for (const tc of delta.tool_calls) {
-				const idx = tc.index ?? toolCalls.length;
-				if (!toolCalls[idx]) {
-					toolCalls[idx] = { id: tc.id || '', name: '', arguments: '' };
-					if (tc.function?.name) {
-						toolCalls[idx].name = tc.function.name;
-						if (onToolCall) onToolCall(toolCalls[idx].name);
-					}
-				}
-				if (tc.function?.name && !toolCalls[idx].name) {
-					toolCalls[idx].name = tc.function.name;
-					if (onToolCall) onToolCall(toolCalls[idx].name);
-				}
-				if (tc.function?.arguments) {
-					toolCalls[idx].arguments += tc.function.arguments;
-				}
-				if (tc.id && !toolCalls[idx].id) {
-					toolCalls[idx].id = tc.id;
-				}
+				pushToolCall(toolCalls, tc, onToolCall);
 			}
 		}
 	}
 
-	const message = { role, content };
-
-	if (toolCalls.length > 0) {
-		message.tool_calls = toolCalls.map((tc) => ({
-			id: tc.id || `call_${Math.random().toString(36).slice(2, 10)}`,
-			type: 'function',
-			function: { name: tc.name, arguments: tc.arguments },
-		}));
+	function result() {
+		const message = { role, content };
+		if (toolCalls.length > 0) {
+			message.tool_calls = toolCalls.map((tc) => ({
+				id: tc.id || `call_${Math.random().toString(36).slice(2, 10)}`,
+				type: 'function',
+				function: { name: tc.name, arguments: tc.arguments },
+			}));
+		}
+		return { message, usage };
 	}
 
-	return { message, usage };
+	return { push, result };
+}
+
+function pushToolCall(toolCalls, tc, onToolCall) {
+	const idx = tc.index ?? toolCalls.length;
+	if (!toolCalls[idx]) {
+		toolCalls[idx] = { id: tc.id || '', name: '', arguments: '' };
+		if (tc.function?.name) {
+			toolCalls[idx].name = tc.function.name;
+			if (onToolCall) onToolCall(toolCalls[idx].name);
+		}
+	}
+	if (tc.function?.name && !toolCalls[idx].name) {
+		toolCalls[idx].name = tc.function.name;
+		if (onToolCall) onToolCall(toolCalls[idx].name);
+	}
+	if (tc.function?.arguments) {
+		toolCalls[idx].arguments += tc.function.arguments;
+	}
+	if (tc.id && !toolCalls[idx].id) {
+		toolCalls[idx].id = tc.id;
+	}
+}
+
+/**
+ * Assemble a complete response from an array of chunks.
+ * Pure helper used by tests; the live path streams via createAssembler.
+ */
+export function assembleResponse(chunks, onToken, onToolCall) {
+	const assembler = createAssembler(onToken, onToolCall);
+	for (const chunk of chunks) assembler.push(chunk);
+	return assembler.result();
 }
 
 // --- HTTP helpers ---
 
-function streamRequest(url, body, timeout) {
+function transportFor(url) {
+	return url.protocol === 'https:' ? httpsRequest : httpRequest;
+}
+
+function parseSseLine(line) {
+	const trimmed = line.trim();
+	if (!trimmed || !trimmed.startsWith('data: ')) return null;
+	const payload = trimmed.slice(6);
+	if (payload === '[DONE]') return null;
+	try {
+		return JSON.parse(payload);
+	} catch {
+		return null;
+	}
+}
+
+function streamRequest(url, body, timeout, callbacks) {
 	return new Promise((resolve, reject) => {
 		const parsed = new URL(url);
 		const payload = JSON.stringify(body);
+		const assembler = createAssembler(callbacks.onToken, callbacks.onToolCall);
 
-		const req = request(
+		const req = transportFor(parsed)(
 			{
 				hostname: parsed.hostname,
 				port: parsed.port,
@@ -175,7 +212,6 @@ function streamRequest(url, body, timeout) {
 					return;
 				}
 
-				const chunks = [];
 				let buffer = '';
 
 				res.setEncoding('utf8');
@@ -185,30 +221,15 @@ function streamRequest(url, body, timeout) {
 					buffer = lines.pop() || '';
 
 					for (const line of lines) {
-						const trimmed = line.trim();
-						if (!trimmed || !trimmed.startsWith('data: ')) continue;
-						const payload = trimmed.slice(6);
-						if (payload === '[DONE]') continue;
-						try {
-							chunks.push(JSON.parse(payload));
-						} catch {
-							// skip malformed chunks
-						}
+						const chunk = parseSseLine(line);
+						if (chunk) assembler.push(chunk);
 					}
 				});
 
 				res.on('end', () => {
-					if (buffer.trim().startsWith('data: ')) {
-						const payload = buffer.trim().slice(6);
-						if (payload !== '[DONE]') {
-							try {
-								chunks.push(JSON.parse(payload));
-							} catch {
-								// skip
-							}
-						}
-					}
-					resolve(chunks);
+					const chunk = parseSseLine(buffer);
+					if (chunk) assembler.push(chunk);
+					resolve(assembler.result());
 				});
 
 				res.on('error', reject);
@@ -230,7 +251,7 @@ function jsonRequest(url, timeout) {
 	return new Promise((resolve, reject) => {
 		const parsed = new URL(url);
 
-		const req = request(
+		const req = transportFor(parsed)(
 			{
 				hostname: parsed.hostname,
 				port: parsed.port,

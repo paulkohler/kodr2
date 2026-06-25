@@ -29,7 +29,9 @@ constraints:
   - 30 second timeout
   - Output truncated at 50,000 characters
   - Runs in workspace directory (cwd)
-  - Inherits PATH from parent process
+  - Runs with a minimal curated environment, not the full process.env
+  - Default env allowlist: PATH, HOME, TMPDIR, LANG, LC_ALL, LC_CTYPE, TERM, TZ
+  - Extra variables are passed through by name only (--env a,b,c)
 
 tests:
   unit:
@@ -37,5 +39,7 @@ tests:
     - captures non-zero exit codes
     - truncates long output
     - times out after 30 seconds
+    - does not expose non-allowlisted environment variables by default
+    - exposes extra variables named in envPassthrough
   eval:
     - model uses run_command to run tests

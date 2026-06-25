@@ -61,9 +61,27 @@ The model has these tools available:
 --model <id>           Model identifier (auto-detected if omitted)
 --test <command>       Verification command (e.g. "npm test")
 --heal-turns <n>       Max repair turns (default: 3)
+--env <a,b,c>          Extra env vars to expose to commands (CSV of names)
 --continue <last|path> Continue from a prior run
 --quiet, -q            Suppress streaming output
 ```
+
+## Command environment
+
+`run_command` and the `--test` verification command run with a minimal,
+curated environment — not the harness's full `process.env`. By default only a
+small allowlist is passed through (`PATH`, `HOME`, `TMPDIR`, and the common
+locale variables), so model-suggested commands can't read secrets that happen
+to live in your shell environment.
+
+If a command needs additional variables, allow them by name:
+
+```bash
+kodr "run the integration suite" --test "npm run test:int" --env API_BASE_URL,CI
+```
+
+Only the named variables that exist in your environment are forwarded; the
+values are never shown to the model.
 
 ## Workspace instructions
 
@@ -87,7 +105,7 @@ npm install
 npm test
 
 # Run integration evals (requires LM Studio)
-node --test eval/
+npm run eval
 
 # Syntax check
 node --check bin/*.mjs && node --check src/*.mjs && node --check src/tools/*.mjs

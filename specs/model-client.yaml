@@ -27,7 +27,8 @@ outputs:
     description: "Resolve model ID, auto-detecting if not configured"
 
 constraints:
-  - Streams SSE responses, assembles into complete message
+  - Streams SSE responses, emitting text tokens to onToken as they arrive
+  - Supports http and https base URLs (transport selected by URL protocol)
   - Accumulates tool call deltas across chunks
   - Generates synthetic tool_call IDs when server omits them
   - HTTP errors surface as thrown exceptions

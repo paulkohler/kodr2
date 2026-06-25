@@ -3,6 +3,7 @@
  */
 
 import { execFile } from 'node:child_process';
+import { buildEnv } from '../env.mjs';
 
 const DEFAULT_TIMEOUT = 30_000; // 30 seconds
 const MAX_OUTPUT = 50_000; // characters
@@ -26,13 +27,17 @@ export default {
 
 	async execute({ command }, context) {
 		if (!command) return { error: 'command is required' };
-		return executeCommand(command, context.cwd);
+		if (context.trackCommand) context.trackCommand();
+		return executeCommand(command, context.cwd, {
+			env: buildEnv(context.envPassthrough),
+		});
 	},
 };
 
 export function executeCommand(command, cwd, options = {}) {
 	const timeout = options.timeout ?? DEFAULT_TIMEOUT;
 	const maxOutput = options.maxOutput ?? MAX_OUTPUT;
+	const env = options.env ?? buildEnv();
 	return new Promise((resolve) => {
 		const child = execFile(
 			'/bin/sh',
@@ -41,7 +46,7 @@ export function executeCommand(command, cwd, options = {}) {
 				cwd,
 				timeout,
 				maxBuffer: maxOutput * 2,
-				env: { ...process.env, PATH: process.env.PATH },
+				env,
 			},
 			(err, stdout, stderr) => {
 				let exitCode = 0;

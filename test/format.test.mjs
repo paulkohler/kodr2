@@ -6,6 +6,7 @@ import {
 	formatToolResult,
 	formatVerification,
 	formatHealTurn,
+	formatNotice,
 	formatSummary,
 } from '../src/format.mjs';
 
@@ -69,6 +70,13 @@ describe('formatHealTurn', () => {
 	it('shows turn number', () => {
 		const out = formatHealTurn(2, 3);
 		assert.ok(out.includes('2/3'));
+	});
+});
+
+describe('formatNotice', () => {
+	it('includes the message text', () => {
+		const out = formatNotice('stopped after 20 tool turns');
+		assert.ok(out.includes('stopped after 20 tool turns'));
 	});
 });
 
