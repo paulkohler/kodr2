@@ -85,6 +85,17 @@ describe('listWorkspaceFiles', () => {
     const files = await listWorkspaceFiles(tmpDir);
     assert.ok(!files.some((f) => f.startsWith('node_modules')));
   });
+
+  it('skips operator logs and copied kodr artifacts', async () => {
+    await mkdir(join(tmpDir, 'kodr'));
+    await writeFile(join(tmpDir, 'run1.log'), 'log');
+    await writeFile(join(tmpDir, 'kodr/run.json'), '{}');
+    await writeFile(join(tmpDir, 'source.mjs'), '');
+    const files = await listWorkspaceFiles(tmpDir);
+    assert.ok(files.includes('source.mjs'));
+    assert.ok(!files.includes('run1.log'));
+    assert.ok(!files.some((f) => f.startsWith('kodr')));
+  });
 });
 
 describe('buildSystemPrompt', () => {

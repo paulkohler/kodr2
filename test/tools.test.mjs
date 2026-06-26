@@ -298,6 +298,17 @@ describe('list_files', () => {
     assert.equal(nmFiles.length, 0);
   });
 
+  it('skips operator logs and copied kodr artifacts', async () => {
+    await mkdir(join(tmpDir, 'kodr'));
+    await writeFile(join(tmpDir, 'run1.log'), 'log');
+    await writeFile(join(tmpDir, 'kodr/run.json'), '{}');
+    await writeFile(join(tmpDir, 'source.mjs'), '');
+    const result = await listFilesTool.execute({ recursive: true }, context);
+    assert.ok(result.files.includes('source.mjs'));
+    assert.ok(!result.files.includes('run1.log'));
+    assert.ok(!result.files.some((f) => f.startsWith('kodr')));
+  });
+
   it('caps recursive output at 500 entries', async () => {
     await Promise.all(
       Array.from({ length: 510 }, (_, index) =>
@@ -347,6 +358,18 @@ describe('search', () => {
     await writeFile(join(tmpDir, '.git/config'), 'target');
     const result = await searchTool.execute({ pattern: 'target' }, context);
     assert.equal(result.matches.length, 0);
+  });
+
+  it('skips operator logs and copied kodr artifacts', async () => {
+    await mkdir(join(tmpDir, 'kodr'));
+    await writeFile(join(tmpDir, 'run1.log'), 'target');
+    await writeFile(join(tmpDir, 'kodr/run.json'), 'target');
+    await writeFile(join(tmpDir, 'source.mjs'), 'target');
+    const result = await searchTool.execute({ pattern: 'target' }, context);
+    assert.deepEqual(
+      result.matches.map((match) => match.file),
+      ['source.mjs'],
+    );
   });
 
   it('does not search symlinks escaping workspace', async () => {

@@ -8,9 +8,9 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { resolveExistingPath } from './path-jail.mjs';
 import { discoverSkills } from './skills.mjs';
+import { shouldIgnoreEntry } from './ignore.mjs';
 
 const INSTRUCTION_FILES = ['KODR.md', 'AGENTS.md'];
-const IGNORE = new Set(['.git', 'node_modules', '.kodr']);
 const MAX_FILES = 200;
 
 /**
@@ -93,7 +93,7 @@ async function walk(dir, root, files) {
 
   for (const entry of entries) {
     if (files.length >= MAX_FILES) return;
-    if (IGNORE.has(entry.name)) continue;
+    if (shouldIgnoreEntry(entry.name)) continue;
 
     const full = join(dir, entry.name);
     const rel = relative(root, full);

@@ -5,8 +5,8 @@
 import { readdir, realpath, stat } from 'node:fs/promises';
 import { relative, join } from 'node:path';
 import { resolveExistingPath } from '../path-jail.mjs';
+import { shouldIgnoreEntry } from '../ignore.mjs';
 
-const IGNORE = new Set(['.git', 'node_modules', '.kodr']);
 const MAX_ENTRIES = 500;
 
 export default {
@@ -57,7 +57,7 @@ export default {
     } else {
       const entries = await readdir(resolved, { withFileTypes: true });
       for (const entry of entries) {
-        if (IGNORE.has(entry.name)) continue;
+        if (shouldIgnoreEntry(entry.name)) continue;
         const rel = relative(root, join(resolved, entry.name));
         const suffix = entry.isDirectory() ? '/' : '';
         files.push(rel + suffix);
@@ -81,7 +81,7 @@ async function walk(dir, root, files) {
 
   for (const entry of entries) {
     if (files.length >= MAX_ENTRIES) return;
-    if (IGNORE.has(entry.name)) continue;
+    if (shouldIgnoreEntry(entry.name)) continue;
 
     const full = join(dir, entry.name);
     const rel = relative(root, full);

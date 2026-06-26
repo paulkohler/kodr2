@@ -63,6 +63,7 @@ constraints:
   - Hitting the tool-turn ceiling sets stoppedReason "tool-limit" and emits a notice
   - Run transcript saved to .kodr/runs/ after every run
   - System prompt assembled fresh each run from workspace state
+  - System prompt file listing skips operator logs and copied kodr artifacts
   - System prompt requires tools to be called through the provided tool channel, not text-form pseudo calls
   - Verification runs when a test command is set and the workspace was touched (files written or a command run)
   - Healing only attempted when verification fails
@@ -74,6 +75,7 @@ tests:
     - parseArgs extracts prompt from shorthand "kodr 'text'"
     - parseArgs handles all flag variants
     - CLI process failure follows final verification failure
+    - workspace file listing skips operator logs and copied kodr artifacts
     - system prompt requires native tool-channel calls
     - recovers exact text-form tool calls through the tool registry
   eval:

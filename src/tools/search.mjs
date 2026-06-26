@@ -5,8 +5,8 @@
 import { readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { relative, join } from 'node:path';
 import { resolveExistingPath } from '../path-jail.mjs';
+import { shouldIgnoreEntry } from '../ignore.mjs';
 
-const IGNORE = new Set(['.git', 'node_modules', '.kodr']);
 const MAX_MATCHES = 100;
 const MAX_FILE_SIZE = 1024 * 1024; // 1 MB
 
@@ -67,7 +67,7 @@ async function searchDir(dir, root, pattern, glob, matches) {
 
   for (const entry of entries) {
     if (matches.length >= MAX_MATCHES) return;
-    if (IGNORE.has(entry.name)) continue;
+    if (shouldIgnoreEntry(entry.name)) continue;
 
     const full = join(dir, entry.name);
 
