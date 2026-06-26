@@ -32,6 +32,7 @@ const MAX_TOOL_TURNS = 20;
  * @returns {Promise<object>} Run result
  */
 export async function run(prompt, options) {
+  const startedAt = new Date();
   const {
     cwd,
     testCommand,
@@ -47,6 +48,16 @@ export async function run(prompt, options) {
   });
 
   const modelId = await client.resolveModel();
+  const metadata = {
+    cwd,
+    prompt,
+    baseUrl: options.baseUrl || 'http://localhost:1234/v1',
+    model: modelId,
+    testCommand: testCommand || null,
+    maxHealTurns,
+    envPassthrough,
+    startedAt: startedAt.toISOString(),
+  };
   const tools = createToolRegistry(cwd, { envPassthrough });
   const commandEnv = buildEnv(envPassthrough);
   const systemPrompt = await buildSystemPrompt(cwd);
@@ -118,6 +129,7 @@ export async function run(prompt, options) {
 
   // Build result
   const result = {
+    metadata,
     response: finalText,
     filesChanged: tools.filesChanged(),
     toolTurns,
@@ -158,14 +170,14 @@ export async function run(prompt, options) {
   }
 
   // Save run transcript
-  await saveRun(cwd, result);
+  await saveRun(cwd, result, startedAt);
 
   if (!quiet) process.stderr.write(formatSummary(result) + '\n');
 
   return result;
 }
 
-async function saveRun(cwd, result) {
+async function saveRun(cwd, result, startedAt) {
   const { mkdir, writeFile } = await import('node:fs/promises');
   const { join } = await import('node:path');
 
@@ -175,16 +187,27 @@ async function saveRun(cwd, result) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const file = join(runDir, `${timestamp}.json`);
 
-  const data = {
-    timestamp: new Date().toISOString(),
+  const finishedAt = new Date();
+  const data = createRunRecord(result, {
+    finishedAt: finishedAt.toISOString(),
+    durationMs: finishedAt.getTime() - startedAt.getTime(),
+  });
+
+  await writeFile(file, JSON.stringify(data, null, 2), 'utf8');
+}
+
+export function createRunRecord(result, finish = {}) {
+  return {
+    timestamp: finish.finishedAt || new Date().toISOString(),
+    metadata: result.metadata || {},
+    durationMs: finish.durationMs ?? null,
     filesChanged: result.filesChanged,
     toolTurns: result.toolTurns,
     stoppedReason: result.stoppedReason,
     usage: result.usage,
     verified: result.verification?.passed ?? null,
     healed: result.healed ?? null,
+    healTurns: result.healTurns ?? null,
     messages: result.messages,
   };
-
-  await writeFile(file, JSON.stringify(data, null, 2), 'utf8');
 }

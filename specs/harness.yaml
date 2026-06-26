@@ -52,6 +52,12 @@ outputs:
   usage:
     type: object
     description: "{ prompt, completion } token counts"
+  metadata:
+    type: object
+    description: "{ cwd, prompt, baseUrl, model, testCommand, maxHealTurns, envPassthrough, startedAt }"
+  durationMs:
+    type: number
+    description: Wall-clock duration in milliseconds
   messages:
     type: array
     description: Full conversation transcript for continuation
@@ -62,6 +68,7 @@ constraints:
   - Text-form tool calls in the exact shape tool_name[ARGS]{...} are recovered as a compatibility fallback
   - Hitting the tool-turn ceiling sets stoppedReason "tool-limit" and emits a notice
   - Run transcript saved to .kodr/runs/ after every run
+  - Run transcript includes model, prompt, cwd, baseUrl, test command, env passthrough, start time, finish time, and duration
   - System prompt assembled fresh each run from workspace state
   - System prompt file listing skips operator logs and copied kodr artifacts
   - System prompt requires tools to be called through the provided tool channel, not text-form pseudo calls
@@ -75,6 +82,7 @@ tests:
     - parseArgs extracts prompt from shorthand "kodr 'text'"
     - parseArgs handles all flag variants
     - CLI process failure follows final verification failure
+    - run records include metadata and duration
     - workspace file listing skips operator logs and copied kodr artifacts
     - system prompt requires native tool-channel calls
     - recovers exact text-form tool calls through the tool registry
