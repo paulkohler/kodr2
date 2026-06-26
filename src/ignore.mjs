@@ -3,7 +3,7 @@
  */
 
 const IGNORED_NAMES = new Set(['.git', 'node_modules', '.kodr', 'kodr']);
-const IGNORED_FILE_PATTERNS = [/^run\d*\.log$/];
+const IGNORED_FILE_PATTERNS = [/^run.*\.log$/];
 
 export function shouldIgnoreEntry(name) {
   if (IGNORED_NAMES.has(name)) return true;

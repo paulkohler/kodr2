@@ -301,11 +301,13 @@ describe('list_files', () => {
   it('skips operator logs and copied kodr artifacts', async () => {
     await mkdir(join(tmpDir, 'kodr'));
     await writeFile(join(tmpDir, 'run1.log'), 'log');
+    await writeFile(join(tmpDir, 'run-qwen.log'), 'log');
     await writeFile(join(tmpDir, 'kodr/run.json'), '{}');
     await writeFile(join(tmpDir, 'source.mjs'), '');
     const result = await listFilesTool.execute({ recursive: true }, context);
     assert.ok(result.files.includes('source.mjs'));
     assert.ok(!result.files.includes('run1.log'));
+    assert.ok(!result.files.includes('run-qwen.log'));
     assert.ok(!result.files.some((f) => f.startsWith('kodr')));
   });
 
@@ -363,6 +365,7 @@ describe('search', () => {
   it('skips operator logs and copied kodr artifacts', async () => {
     await mkdir(join(tmpDir, 'kodr'));
     await writeFile(join(tmpDir, 'run1.log'), 'target');
+    await writeFile(join(tmpDir, 'run-qwen.log'), 'target');
     await writeFile(join(tmpDir, 'kodr/run.json'), 'target');
     await writeFile(join(tmpDir, 'source.mjs'), 'target');
     const result = await searchTool.execute({ pattern: 'target' }, context);
