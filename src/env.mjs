@@ -8,14 +8,14 @@
 
 // A small default set: enough to find and run common tooling, nothing more.
 const DEFAULT_ENV_VARS = [
-	'PATH',
-	'HOME',
-	'TMPDIR',
-	'LANG',
-	'LC_ALL',
-	'LC_CTYPE',
-	'TERM',
-	'TZ',
+  'PATH',
+  'HOME',
+  'TMPDIR',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
+  'TERM',
+  'TZ',
 ];
 
 /**
@@ -26,12 +26,12 @@ const DEFAULT_ENV_VARS = [
  * @returns {Record<string, string>}
  */
 export function buildEnv(extraNames = []) {
-	const env = {};
-	for (const name of [...DEFAULT_ENV_VARS, ...extraNames]) {
-		const value = process.env[name];
-		if (value !== undefined) env[name] = value;
-	}
-	return env;
+  const env = {};
+  for (const name of [...DEFAULT_ENV_VARS, ...extraNames]) {
+    const value = process.env[name];
+    if (value !== undefined) env[name] = value;
+  }
+  return env;
 }
 
 /**
@@ -41,11 +41,11 @@ export function buildEnv(extraNames = []) {
  * @returns {string[]}
  */
 export function parseEnvNames(csv) {
-	if (!csv) return [];
-	const names = [];
-	for (const part of csv.split(',')) {
-		const name = part.trim();
-		if (name && !names.includes(name)) names.push(name);
-	}
-	return names;
+  if (!csv) return [];
+  const names = [];
+  for (const part of csv.split(',')) {
+    const name = part.trim();
+    if (name && !names.includes(name)) names.push(name);
+  }
+  return names;
 }

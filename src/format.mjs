@@ -19,8 +19,8 @@ const CYAN = '\x1b[36m';
  * @returns {string}
  */
 export function formatToolCall(name, args) {
-	const summary = summariseArgs(name, args);
-	return `${DIM}tool${RESET} ${CYAN}${name}${RESET} ${summary}`;
+  const summary = summariseArgs(name, args);
+  return `${DIM}tool${RESET} ${CYAN}${name}${RESET} ${summary}`;
 }
 
 /**
@@ -30,11 +30,11 @@ export function formatToolCall(name, args) {
  * @returns {string}
  */
 export function formatToolResult(name, result) {
-	if (result.error) {
-		return `${DIM}  -> ${RED}error:${RESET} ${result.error}`;
-	}
-	const preview = summariseResult(name, result);
-	return `${DIM}  -> ${GREEN}ok${RESET} ${preview}`;
+  if (result.error) {
+    return `${DIM}  -> ${RED}error:${RESET} ${result.error}`;
+  }
+  const preview = summariseResult(name, result);
+  return `${DIM}  -> ${GREEN}ok${RESET} ${preview}`;
 }
 
 /**
@@ -43,7 +43,7 @@ export function formatToolResult(name, result) {
  * @returns {string}
  */
 export function formatNotice(text) {
-	return `${YELLOW}note${RESET} ${text}`;
+  return `${YELLOW}note${RESET} ${text}`;
 }
 
 /**
@@ -52,15 +52,15 @@ export function formatNotice(text) {
  * @returns {string}
  */
 export function formatVerification(result) {
-	const icon = result.passed ? `${GREEN}pass${RESET}` : `${RED}fail${RESET}`;
-	const lines = [
-		`\n${BOLD}verify${RESET} ${icon} ${DIM}${result.command}${RESET}`,
-	];
-	if (!result.passed && result.output) {
-		const trimmed = result.output.slice(0, 2000);
-		lines.push(trimmed);
-	}
-	return lines.join('\n');
+  const icon = result.passed ? `${GREEN}pass${RESET}` : `${RED}fail${RESET}`;
+  const lines = [
+    `\n${BOLD}verify${RESET} ${icon} ${DIM}${result.command}${RESET}`,
+  ];
+  if (!result.passed && result.output) {
+    const trimmed = result.output.slice(0, 2000);
+    lines.push(trimmed);
+  }
+  return lines.join('\n');
 }
 
 /**
@@ -70,7 +70,7 @@ export function formatVerification(result) {
  * @returns {string}
  */
 export function formatHealTurn(turn, max) {
-	return `\n${YELLOW}heal${RESET} turn ${turn}/${max}`;
+  return `\n${YELLOW}heal${RESET} turn ${turn}/${max}`;
 }
 
 /**
@@ -79,68 +79,68 @@ export function formatHealTurn(turn, max) {
  * @returns {string}
  */
 export function formatSummary(result) {
-	const lines = [`\n${BOLD}---${RESET}`];
+  const lines = [`\n${BOLD}---${RESET}`];
 
-	if (result.filesChanged && result.filesChanged.length > 0) {
-		lines.push(`${DIM}files:${RESET} ${result.filesChanged.join(', ')}`);
-	}
+  if (result.filesChanged && result.filesChanged.length > 0) {
+    lines.push(`${DIM}files:${RESET} ${result.filesChanged.join(', ')}`);
+  }
 
-	if (result.verification) {
-		const v = result.verification;
-		const icon = v.passed ? `${GREEN}pass${RESET}` : `${RED}fail${RESET}`;
-		lines.push(`${DIM}verify:${RESET} ${icon}`);
-	}
+  if (result.verification) {
+    const v = result.verification;
+    const icon = v.passed ? `${GREEN}pass${RESET}` : `${RED}fail${RESET}`;
+    lines.push(`${DIM}verify:${RESET} ${icon}`);
+  }
 
-	if (result.healed !== undefined) {
-		lines.push(`${DIM}healed:${RESET} ${result.healed}`);
-	}
+  if (result.healed !== undefined) {
+    lines.push(`${DIM}healed:${RESET} ${result.healed}`);
+  }
 
-	const tokens = result.usage;
-	if (tokens) {
-		lines.push(
-			`${DIM}tokens:${RESET} ${tokens.prompt} in / ${tokens.completion} out`,
-		);
-	}
+  const tokens = result.usage;
+  if (tokens) {
+    lines.push(
+      `${DIM}tokens:${RESET} ${tokens.prompt} in / ${tokens.completion} out`,
+    );
+  }
 
-	return lines.join('\n');
+  return lines.join('\n');
 }
 
 // --- helpers ---
 
 function summariseArgs(name, args) {
-	if (!args) return '';
-	if (name === 'read_file' || name === 'write_file' || name === 'edit_file') {
-		return DIM + (args.path || '') + RESET;
-	}
-	if (name === 'list_files') {
-		return DIM + (args.path || '.') + RESET;
-	}
-	if (name === 'search') {
-		return DIM + (args.pattern || '') + RESET;
-	}
-	if (name === 'run_command') {
-		return DIM + (args.command || '') + RESET;
-	}
-	return DIM + JSON.stringify(args) + RESET;
+  if (!args) return '';
+  if (name === 'read_file' || name === 'write_file' || name === 'edit_file') {
+    return DIM + (args.path || '') + RESET;
+  }
+  if (name === 'list_files') {
+    return DIM + (args.path || '.') + RESET;
+  }
+  if (name === 'search') {
+    return DIM + (args.pattern || '') + RESET;
+  }
+  if (name === 'run_command') {
+    return DIM + (args.command || '') + RESET;
+  }
+  return DIM + JSON.stringify(args) + RESET;
 }
 
 function summariseResult(name, result) {
-	if (name === 'read_file' && result.content) {
-		const lines = result.content.split('\n').length;
-		return DIM + `${lines} lines` + RESET;
-	}
-	if (name === 'list_files' && result.files) {
-		return DIM + `${result.files.length} entries` + RESET;
-	}
-	if (name === 'write_file') {
-		return DIM + 'written' + RESET;
-	}
-	if (name === 'search' && result.matches) {
-		return DIM + `${result.matches.length} matches` + RESET;
-	}
-	if (name === 'run_command') {
-		const code = result.exitCode === 0 ? 'exit 0' : `exit ${result.exitCode}`;
-		return DIM + code + RESET;
-	}
-	return '';
+  if (name === 'read_file' && result.content) {
+    const lines = result.content.split('\n').length;
+    return DIM + `${lines} lines` + RESET;
+  }
+  if (name === 'list_files' && result.files) {
+    return DIM + `${result.files.length} entries` + RESET;
+  }
+  if (name === 'write_file') {
+    return DIM + 'written' + RESET;
+  }
+  if (name === 'search' && result.matches) {
+    return DIM + `${result.matches.length} matches` + RESET;
+  }
+  if (name === 'run_command') {
+    const code = result.exitCode === 0 ? 'exit 0' : `exit ${result.exitCode}`;
+    return DIM + code + RESET;
+  }
+  return '';
 }

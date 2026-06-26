@@ -18,8 +18,8 @@ const SKILLS_DIR = '.kodr/skills';
  * @returns {Promise<Array<{name: string, description: string}>>}
  */
 export async function discoverSkills(cwd) {
-	const skills = await readAllSkills(cwd);
-	return skills.map((s) => ({ name: s.name, description: s.description }));
+  const skills = await readAllSkills(cwd);
+  return skills.map((s) => ({ name: s.name, description: s.description }));
 }
 
 /**
@@ -30,17 +30,17 @@ export async function discoverSkills(cwd) {
  * @returns {Promise<{name: string, description: string, instructions: string}|null>}
  */
 export async function loadSkill(cwd, name) {
-	for (const dirName of await skillDirNames(cwd)) {
-		const skill = await readSkill(cwd, dirName);
-		if (skill && skill.name === name) {
-			return {
-				name: skill.name,
-				description: skill.description,
-				instructions: skill.body,
-			};
-		}
-	}
-	return null;
+  for (const dirName of await skillDirNames(cwd)) {
+    const skill = await readSkill(cwd, dirName);
+    if (skill && skill.name === name) {
+      return {
+        name: skill.name,
+        description: skill.description,
+        instructions: skill.body,
+      };
+    }
+  }
+  return null;
 }
 
 /**
@@ -49,12 +49,12 @@ export async function loadSkill(cwd, name) {
  * @returns {Promise<Array<{name, description, body}>>}
  */
 async function readAllSkills(cwd) {
-	const skills = [];
-	for (const dirName of await skillDirNames(cwd)) {
-		const skill = await readSkill(cwd, dirName);
-		if (skill) skills.push(skill);
-	}
-	return skills;
+  const skills = [];
+  for (const dirName of await skillDirNames(cwd)) {
+    const skill = await readSkill(cwd, dirName);
+    if (skill) skills.push(skill);
+  }
+  return skills;
 }
 
 /**
@@ -63,20 +63,20 @@ async function readAllSkills(cwd) {
  * @returns {Promise<string[]>}
  */
 async function skillDirNames(cwd) {
-	let dir;
-	try {
-		dir = await resolveExistingPath(cwd, SKILLS_DIR);
-	} catch {
-		return [];
-	}
-	if (!dir) return [];
+  let dir;
+  try {
+    dir = await resolveExistingPath(cwd, SKILLS_DIR);
+  } catch {
+    return [];
+  }
+  if (!dir) return [];
 
-	try {
-		const entries = await readdir(dir, { withFileTypes: true });
-		return entries.filter((e) => e.isDirectory()).map((e) => e.name);
-	} catch {
-		return [];
-	}
+  try {
+    const entries = await readdir(dir, { withFileTypes: true });
+    return entries.filter((e) => e.isDirectory()).map((e) => e.name);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -86,29 +86,29 @@ async function skillDirNames(cwd) {
  * @returns {Promise<{name, description, body}|null>}
  */
 async function readSkill(cwd, dirName) {
-	const rel = join(SKILLS_DIR, dirName, 'SKILL.md');
+  const rel = join(SKILLS_DIR, dirName, 'SKILL.md');
 
-	let resolved;
-	try {
-		resolved = await resolveExistingPath(cwd, rel);
-	} catch {
-		return null;
-	}
-	if (!resolved) return null;
+  let resolved;
+  try {
+    resolved = await resolveExistingPath(cwd, rel);
+  } catch {
+    return null;
+  }
+  if (!resolved) return null;
 
-	let raw;
-	try {
-		raw = await readFile(resolved, 'utf8');
-	} catch {
-		return null;
-	}
+  let raw;
+  try {
+    raw = await readFile(resolved, 'utf8');
+  } catch {
+    return null;
+  }
 
-	const { frontmatter, body } = parseFrontmatter(raw);
-	return {
-		name: frontmatter.name || dirName,
-		description: frontmatter.description || '',
-		body,
-	};
+  const { frontmatter, body } = parseFrontmatter(raw);
+  return {
+    name: frontmatter.name || dirName,
+    description: frontmatter.description || '',
+    body,
+  };
 }
 
 /**
@@ -119,28 +119,28 @@ async function readSkill(cwd, dirName) {
  * @returns {{frontmatter: object, body: string}}
  */
 export function parseFrontmatter(raw) {
-	const text = raw.replace(/^\uFEFF/, '');
-	const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
-	if (!match) {
-		return { frontmatter: {}, body: text };
-	}
+  const text = raw.replace(/^\uFEFF/, '');
+  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
+  if (!match) {
+    return { frontmatter: {}, body: text };
+  }
 
-	const frontmatter = {};
-	for (const line of match[1].split('\n')) {
-		const pair = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
-		if (!pair) continue;
-		frontmatter[pair[1]] = stripQuotes(pair[2].trim());
-	}
+  const frontmatter = {};
+  for (const line of match[1].split('\n')) {
+    const pair = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
+    if (!pair) continue;
+    frontmatter[pair[1]] = stripQuotes(pair[2].trim());
+  }
 
-	return { frontmatter, body: text.slice(match[0].length) };
+  return { frontmatter, body: text.slice(match[0].length) };
 }
 
 function stripQuotes(value) {
-	if (value.length < 2) return value;
-	const first = value[0];
-	const last = value[value.length - 1];
-	if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
-		return value.slice(1, -1);
-	}
-	return value;
+  if (value.length < 2) return value;
+  const first = value[0];
+  const last = value[value.length - 1];
+  if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+    return value.slice(1, -1);
+  }
+  return value;
 }

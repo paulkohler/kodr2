@@ -11,13 +11,13 @@ import runCommand from './run-command.mjs';
 import loadSkill from './load-skill.mjs';
 
 const ALL_TOOLS = [
-	readFile,
-	writeFile,
-	editFile,
-	listFiles,
-	search,
-	runCommand,
-	loadSkill,
+  readFile,
+  writeFile,
+  editFile,
+  listFiles,
+  search,
+  runCommand,
+  loadSkill,
 ];
 
 /**
@@ -28,72 +28,72 @@ const ALL_TOOLS = [
  * @returns {object} Registry with `definitions`, `dispatch`, and `context`
  */
 export function createToolRegistry(cwd, options = {}) {
-	const filesChanged = [];
-	let commandCount = 0;
+  const filesChanged = [];
+  let commandCount = 0;
 
-	const context = {
-		cwd,
-		envPassthrough: options.envPassthrough ?? [],
-		trackWrite(path) {
-			if (!filesChanged.includes(path)) {
-				filesChanged.push(path);
-			}
-		},
-		trackCommand() {
-			commandCount++;
-		},
-	};
+  const context = {
+    cwd,
+    envPassthrough: options.envPassthrough ?? [],
+    trackWrite(path) {
+      if (!filesChanged.includes(path)) {
+        filesChanged.push(path);
+      }
+    },
+    trackCommand() {
+      commandCount++;
+    },
+  };
 
-	const toolMap = new Map();
-	for (const tool of ALL_TOOLS) {
-		toolMap.set(tool.definition.name, tool);
-	}
+  const toolMap = new Map();
+  for (const tool of ALL_TOOLS) {
+    toolMap.set(tool.definition.name, tool);
+  }
 
-	return {
-		/**
-		 * Tool definitions for the chat completions API.
-		 * @returns {Array}
-		 */
-		definitions() {
-			return ALL_TOOLS.map((t) => t.definition);
-		},
+  return {
+    /**
+     * Tool definitions for the chat completions API.
+     * @returns {Array}
+     */
+    definitions() {
+      return ALL_TOOLS.map((t) => t.definition);
+    },
 
-		/**
-		 * Execute a tool call by name.
-		 * @param {string} name - Tool name
-		 * @param {object} args - Tool arguments (parsed JSON)
-		 * @returns {Promise<object>} Tool result
-		 */
-		async dispatch(name, args) {
-			const tool = toolMap.get(name);
-			if (!tool) {
-				return { error: `unknown tool: ${name}` };
-			}
-			if (!isPlainObject(args)) {
-				return { error: 'tool arguments must be a JSON object' };
-			}
-			return tool.execute(args, context);
-		},
+    /**
+     * Execute a tool call by name.
+     * @param {string} name - Tool name
+     * @param {object} args - Tool arguments (parsed JSON)
+     * @returns {Promise<object>} Tool result
+     */
+    async dispatch(name, args) {
+      const tool = toolMap.get(name);
+      if (!tool) {
+        return { error: `unknown tool: ${name}` };
+      }
+      if (!isPlainObject(args)) {
+        return { error: 'tool arguments must be a JSON object' };
+      }
+      return tool.execute(args, context);
+    },
 
-		/**
-		 * List of files written during this run.
-		 * @returns {string[]}
-		 */
-		filesChanged() {
-			return [...filesChanged];
-		},
+    /**
+     * List of files written during this run.
+     * @returns {string[]}
+     */
+    filesChanged() {
+      return [...filesChanged];
+    },
 
-		/**
-		 * Number of shell commands executed during this run.
-		 * @returns {number}
-		 */
-		commandsRun() {
-			return commandCount;
-		},
-	};
+    /**
+     * Number of shell commands executed during this run.
+     * @returns {number}
+     */
+    commandsRun() {
+      return commandCount;
+    },
+  };
 }
 
 function isPlainObject(value) {
-	if (!value || typeof value !== 'object') return false;
-	return !Array.isArray(value);
+  if (!value || typeof value !== 'object') return false;
+  return !Array.isArray(value);
 }
