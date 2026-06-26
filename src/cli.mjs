@@ -62,11 +62,19 @@ export async function main(argv) {
 	}
 
 	try {
-		await run(args.prompt, options);
+		const result = await run(args.prompt, options);
+		if (shouldFailProcess(result)) {
+			process.exitCode = 1;
+		}
 	} catch (err) {
 		process.stderr.write(`Error: ${err.message}\n`);
 		process.exitCode = 1;
 	}
+}
+
+export function shouldFailProcess(result) {
+	if (result.verification && result.verification.passed === false) return true;
+	return false;
 }
 
 /**

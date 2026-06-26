@@ -410,6 +410,24 @@ describe('run_command', () => {
 		assert.ok(result.error);
 	});
 
+	it('rejects cd targets outside the workspace', async () => {
+		const result = await runCommandTool.execute(
+			{ command: 'cd /home/user && node --test' },
+			context,
+		);
+		assert.match(result.error, /escapes workspace/i);
+	});
+
+	it('allows cd targets inside the workspace', async () => {
+		await mkdir(join(tmpDir, 'subdir'));
+		const result = await runCommandTool.execute(
+			{ command: 'cd subdir && pwd' },
+			context,
+		);
+		assert.equal(result.exitCode, 0);
+		assert.match(result.stdout, /subdir/);
+	});
+
 	it('does not expose non-allowlisted env vars by default', async () => {
 		process.env.KODR_TEST_SECRET = 'shh';
 		try {

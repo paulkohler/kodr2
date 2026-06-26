@@ -3,6 +3,7 @@
  */
 
 import { execFile } from 'node:child_process';
+import { relative, resolve } from 'node:path';
 import { buildEnv } from '../env.mjs';
 
 const DEFAULT_TIMEOUT = 30_000; // 30 seconds
@@ -27,12 +28,43 @@ export default {
 
 	async execute({ command }, context) {
 		if (!command) return { error: 'command is required' };
+		const cdError = validateCdTargets(command, context.cwd);
+		if (cdError) return { error: cdError };
 		if (context.trackCommand) context.trackCommand();
 		return executeCommand(command, context.cwd, {
 			env: buildEnv(context.envPassthrough),
 		});
 	},
 };
+
+export function validateCdTargets(command, cwd) {
+	for (const target of findCdTargets(command)) {
+		const resolved = resolve(cwd, target);
+		if (!isInside(cwd, resolved)) {
+			return `cd target escapes workspace: ${target}`;
+		}
+	}
+	return null;
+}
+
+function findCdTargets(command) {
+	const targets = [];
+	const pattern = /(^|[;&|]\s*)cd\s+(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/g;
+	let match;
+	while ((match = pattern.exec(command)) !== null) {
+		const target = match[2] || match[3] || match[4];
+		if (target) targets.push(target);
+	}
+	return targets;
+}
+
+function isInside(root, path) {
+	const rel = relative(resolve(root), resolve(path));
+	if (rel === '') return true;
+	if (rel.startsWith('..')) return false;
+	if (rel.startsWith('/')) return false;
+	return true;
+}
 
 export function executeCommand(command, cwd, options = {}) {
 	const timeout = options.timeout ?? DEFAULT_TIMEOUT;

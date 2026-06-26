@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseArgs } from '../src/cli.mjs';
+import { parseArgs, shouldFailProcess } from '../src/cli.mjs';
 
 describe('parseArgs', () => {
 	it('extracts prompt from "run" command', () => {
@@ -83,5 +83,19 @@ describe('parseArgs', () => {
 	it('defaults quiet to false', () => {
 		const args = parseArgs(['run', 'hi']);
 		assert.equal(args.quiet, false);
+	});
+});
+
+describe('shouldFailProcess', () => {
+	it('fails the CLI process when verification failed', () => {
+		assert.equal(shouldFailProcess({ verification: { passed: false } }), true);
+	});
+
+	it('does not fail the CLI process when verification passed', () => {
+		assert.equal(shouldFailProcess({ verification: { passed: true } }), false);
+	});
+
+	it('does not fail the CLI process when verification did not run', () => {
+		assert.equal(shouldFailProcess({}), false);
 	});
 });

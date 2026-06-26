@@ -66,12 +66,14 @@ constraints:
   - System prompt requires tools to be called through the provided tool channel, not text-form pseudo calls
   - Verification runs when a test command is set and the workspace was touched (files written or a command run)
   - Healing only attempted when verification fails
+  - CLI exits non-zero when final verification fails
 
 tests:
   unit:
     - parseArgs extracts prompt from "kodr run 'text'"
     - parseArgs extracts prompt from shorthand "kodr 'text'"
     - parseArgs handles all flag variants
+    - CLI process failure follows final verification failure
     - system prompt requires native tool-channel calls
     - recovers exact text-form tool calls through the tool registry
   eval:

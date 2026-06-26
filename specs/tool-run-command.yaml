@@ -29,6 +29,7 @@ constraints:
   - 30 second timeout
   - Output truncated at 50,000 characters
   - Runs in workspace directory (cwd)
+  - Rejects explicit cd targets that resolve outside the workspace
   - Runs with a minimal curated environment, not the full process.env
   - Default env allowlist: PATH, HOME, TMPDIR, LANG, LC_ALL, LC_CTYPE, TERM, TZ
   - Extra variables are passed through by name only (--env a,b,c)
@@ -37,6 +38,8 @@ tests:
   unit:
     - executes a simple command and returns output
     - captures non-zero exit codes
+    - rejects cd targets outside the workspace
+    - allows cd targets inside the workspace
     - truncates long output
     - times out after 30 seconds
     - does not expose non-allowlisted environment variables by default
