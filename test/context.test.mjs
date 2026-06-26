@@ -116,4 +116,22 @@ describe('buildSystemPrompt', () => {
 		assert.ok(prompt.includes('src.mjs'));
 		assert.ok(prompt.includes('<workspace-files>'));
 	});
+
+	it('lists available skills when present', async () => {
+		const dir = join(tmpDir, '.kodr', 'skills', 'commit');
+		await mkdir(dir, { recursive: true });
+		await writeFile(
+			join(dir, 'SKILL.md'),
+			'---\nname: commit\ndescription: Craft a commit\n---\nbody',
+		);
+		const prompt = await buildSystemPrompt(tmpDir);
+		assert.ok(prompt.includes('<available-skills>'));
+		assert.ok(prompt.includes('commit: Craft a commit'));
+		assert.ok(prompt.includes('load_skill'));
+	});
+
+	it('omits the skills section when no skills exist', async () => {
+		const prompt = await buildSystemPrompt(tmpDir);
+		assert.ok(!prompt.includes('<available-skills>'));
+	});
 });

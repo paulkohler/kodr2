@@ -31,6 +31,7 @@ describe('createToolRegistry', () => {
 		assert.ok(names.includes('list_files'));
 		assert.ok(names.includes('search'));
 		assert.ok(names.includes('run_command'));
+		assert.ok(names.includes('load_skill'));
 	});
 
 	it('dispatches known tools', async () => {
