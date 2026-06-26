@@ -428,6 +428,16 @@ describe('run_command', () => {
     assert.notEqual(result.exitCode, 0);
   });
 
+  it('tracks files changed by shell commands', async () => {
+    const result = await runCommandTool.execute(
+      { command: 'printf changed > shell.txt' },
+      context,
+    );
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(result.filesChanged, ['shell.txt']);
+    assert.deepEqual(context._writes, ['shell.txt']);
+  });
+
   it('requires command parameter', async () => {
     const result = await runCommandTool.execute({}, context);
     assert.ok(result.error);

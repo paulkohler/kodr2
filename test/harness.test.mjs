@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createRunRecord } from '../src/harness.mjs';
+import { createRunRecord, isRunBudgetExceeded } from '../src/harness.mjs';
 
 describe('createRunRecord', () => {
   it('includes run metadata and duration', () => {
@@ -39,5 +39,17 @@ describe('createRunRecord', () => {
     assert.equal(record.metadata.testCommand, 'node --test');
     assert.equal(record.verified, true);
     assert.equal(record.healTurns, 1);
+  });
+});
+
+describe('isRunBudgetExceeded', () => {
+  it('returns false when no budget is configured', () => {
+    const startedAt = new Date(Date.now() - 1000);
+    assert.equal(isRunBudgetExceeded(startedAt, 0), false);
+  });
+
+  it('returns true when elapsed time reaches the budget', () => {
+    const startedAt = new Date(Date.now() - 1000);
+    assert.equal(isRunBudgetExceeded(startedAt, 100), true);
   });
 });

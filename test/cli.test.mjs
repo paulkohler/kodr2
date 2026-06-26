@@ -40,6 +40,11 @@ describe('parseArgs', () => {
     assert.equal(args.healTurns, 5);
   });
 
+  it('parses --max-run-ms flag', () => {
+    const args = parseArgs(['run', 'hi', '--max-run-ms', '1000']);
+    assert.equal(args.maxRunMs, 1000);
+  });
+
   it('parses --quiet flag', () => {
     const args = parseArgs(['run', 'hi', '--quiet']);
     assert.equal(args.quiet, true);
@@ -97,5 +102,9 @@ describe('shouldFailProcess', () => {
 
   it('does not fail the CLI process when verification did not run', () => {
     assert.equal(shouldFailProcess({}), false);
+  });
+
+  it('fails the CLI process when the run did not complete', () => {
+    assert.equal(shouldFailProcess({ stoppedReason: 'budget-exceeded' }), true);
   });
 });

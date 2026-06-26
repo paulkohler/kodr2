@@ -37,6 +37,11 @@ export async function main(argv) {
     process.exitCode = 1;
     return;
   }
+  if (!Number.isInteger(args.maxRunMs) || args.maxRunMs < 0) {
+    process.stderr.write('--max-run-ms must be a non-negative integer.\n');
+    process.exitCode = 1;
+    return;
+  }
 
   const cwd = resolve(args.cwd || '.');
   const options = {
@@ -45,6 +50,7 @@ export async function main(argv) {
     model: args.model,
     testCommand: args.test,
     maxHealTurns: args.healTurns,
+    maxRunMs: args.maxRunMs,
     quiet: args.quiet,
     envPassthrough: args.env,
   };
@@ -73,6 +79,7 @@ export async function main(argv) {
 }
 
 export function shouldFailProcess(result) {
+  if (result.stoppedReason && result.stoppedReason !== 'complete') return true;
   if (result.verification && result.verification.passed === false) return true;
   return false;
 }
@@ -91,6 +98,7 @@ export function parseArgs(argv) {
     model: null,
     test: null,
     healTurns: 3,
+    maxRunMs: 0,
     quiet: false,
     env: [],
     continue: null,
@@ -142,6 +150,11 @@ export function parseArgs(argv) {
       i++;
       continue;
     }
+    if (arg === '--max-run-ms' && argv[i + 1]) {
+      args.maxRunMs = parseInt(argv[++i], 10);
+      i++;
+      continue;
+    }
     if (arg === '--env' && argv[i + 1]) {
       args.env = parseEnvNames(argv[++i]);
       i++;
@@ -190,6 +203,7 @@ Options:
   --model <id>                    Model identifier
   --test <command>                Verification command (e.g. "npm test")
   --heal-turns <n>                Max repair turns (default: 3)
+  --max-run-ms <n>                Stop between turns after this many ms (default: 0, disabled)
   --env <a,b,c>                   Extra env vars to expose to commands (CSV of names)
   --continue <last|path>          Continue from a prior run
   --quiet, -q                     Suppress streaming output

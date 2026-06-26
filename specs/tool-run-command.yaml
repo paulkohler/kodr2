@@ -23,6 +23,9 @@ outputs:
   error:
     type: string
     description: Error message if execution failed
+  filesChanged:
+    type: array
+    description: Files created, modified, or deleted by the command
 
 constraints:
   - Commands run via /bin/sh -c
@@ -33,11 +36,13 @@ constraints:
   - Runs with a minimal curated environment, not the full process.env
   - Default env allowlist: PATH, HOME, TMPDIR, LANG, LC_ALL, LC_CTYPE, TERM, TZ
   - Extra variables are passed through by name only (--env a,b,c)
+  - Tracks files changed by shell commands using a bounded before/after workspace snapshot
 
 tests:
   unit:
     - executes a simple command and returns output
     - captures non-zero exit codes
+    - tracks files changed by shell commands
     - rejects cd targets outside the workspace
     - allows cd targets inside the workspace
     - truncates long output

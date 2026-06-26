@@ -3,11 +3,14 @@
  */
 
 import { execFile } from 'node:child_process';
-import { relative, resolve } from 'node:path';
+import { readdir, stat } from 'node:fs/promises';
+import { join, relative, resolve } from 'node:path';
 import { buildEnv } from '../env.mjs';
+import { shouldIgnoreEntry } from '../ignore.mjs';
 
 const DEFAULT_TIMEOUT = 30_000; // 30 seconds
 const MAX_OUTPUT = 50_000; // characters
+const MAX_SNAPSHOT_FILES = 1000;
 
 export default {
   definition: {
@@ -31,11 +34,64 @@ export default {
     const cdError = validateCdTargets(command, context.cwd);
     if (cdError) return { error: cdError };
     if (context.trackCommand) context.trackCommand();
-    return executeCommand(command, context.cwd, {
+    const before = await snapshotWorkspace(context.cwd);
+    const result = await executeCommand(command, context.cwd, {
       env: buildEnv(context.envPassthrough),
     });
+    const changed = await changedFiles(context.cwd, before);
+    for (const path of changed) {
+      if (context.trackWrite) context.trackWrite(path);
+    }
+    if (changed.length > 0) {
+      result.filesChanged = changed;
+    }
+    return result;
   },
 };
+
+export async function snapshotWorkspace(cwd) {
+  const files = new Map();
+  await snapshotDir(cwd, cwd, files);
+  return files;
+}
+
+export async function changedFiles(cwd, before) {
+  const after = await snapshotWorkspace(cwd);
+  const changed = [];
+  for (const [path, sig] of after) {
+    if (before.get(path) !== sig) changed.push(path);
+  }
+  for (const path of before.keys()) {
+    if (!after.has(path)) changed.push(path);
+  }
+  return changed.sort();
+}
+
+async function snapshotDir(dir, root, files) {
+  if (files.size >= MAX_SNAPSHOT_FILES) return;
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (files.size >= MAX_SNAPSHOT_FILES) return;
+    if (shouldIgnoreEntry(entry.name)) continue;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await snapshotDir(full, root, files);
+      continue;
+    }
+    try {
+      const info = await stat(full);
+      const path = relative(root, full);
+      files.set(path, `${info.size}:${info.mtimeMs}`);
+    } catch {
+      // File disappeared during the snapshot.
+    }
+  }
+}
 
 export function validateCdTargets(command, cwd) {
   for (const target of findCdTargets(command)) {

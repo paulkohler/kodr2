@@ -26,6 +26,7 @@ const MAX_TOOL_TURNS = 20;
  * @param {string} [options.model] - Model identifier
  * @param {string} [options.testCommand] - Verification command
  * @param {number} [options.maxHealTurns] - Max heal turns (default 3)
+ * @param {number} [options.maxRunMs] - Stop between turns after this many ms (0 disables)
  * @param {boolean} [options.quiet] - Suppress terminal output
  * @param {Array} [options.priorMessages] - Continuation from previous run
  * @param {string[]} [options.envPassthrough] - Extra env var names for commands
@@ -37,6 +38,7 @@ export async function run(prompt, options) {
     cwd,
     testCommand,
     maxHealTurns = 3,
+    maxRunMs = 0,
     quiet = false,
     priorMessages,
     envPassthrough = [],
@@ -55,6 +57,7 @@ export async function run(prompt, options) {
     model: modelId,
     testCommand: testCommand || null,
     maxHealTurns,
+    maxRunMs,
     envPassthrough,
     startedAt: startedAt.toISOString(),
   };
@@ -82,8 +85,14 @@ export async function run(prompt, options) {
   let toolTurns = 0;
   let finalText = '';
   let completed = false;
+  let stoppedReason = 'tool-limit';
 
   while (toolTurns < MAX_TOOL_TURNS) {
+    if (isRunBudgetExceeded(startedAt, maxRunMs)) {
+      stoppedReason = 'budget-exceeded';
+      break;
+    }
+
     const { message, usage } = await client.chat({
       model: modelId,
       messages,
@@ -112,19 +121,22 @@ export async function run(prompt, options) {
       if (!recovered) {
         finalText = message.content || '';
         completed = true;
+        stoppedReason = 'complete';
         if (!quiet) process.stdout.write('\n');
         break;
       }
     }
 
     toolTurns++;
+    if (isRunBudgetExceeded(startedAt, maxRunMs)) {
+      stoppedReason = 'budget-exceeded';
+      break;
+    }
   }
 
   // The model never produced a final response — it hit the tool-turn ceiling.
   if (!completed && !quiet) {
-    process.stderr.write(
-      formatNotice(`stopped after ${MAX_TOOL_TURNS} tool turns`) + '\n',
-    );
+    process.stderr.write(formatNotice(formatStopReason(stoppedReason)) + '\n');
   }
 
   // Build result
@@ -133,7 +145,7 @@ export async function run(prompt, options) {
     response: finalText,
     filesChanged: tools.filesChanged(),
     toolTurns,
-    stoppedReason: completed ? 'complete' : 'tool-limit',
+    stoppedReason,
     usage: totalUsage,
     messages,
   };
@@ -142,14 +154,14 @@ export async function run(prompt, options) {
   // (writes, or shell commands that may have changed files).
   const touchedWorkspace =
     tools.filesChanged().length > 0 || tools.commandsRun() > 0;
-  if (testCommand && touchedWorkspace) {
+  if (testCommand && touchedWorkspace && stoppedReason === 'complete') {
     const verifyResult = await verify(testCommand, cwd, { env: commandEnv });
     result.verification = verifyResult;
 
     if (!quiet) process.stderr.write(formatVerification(verifyResult) + '\n');
 
     // Heal if verification failed
-    if (!verifyResult.passed) {
+    if (!verifyResult.passed && !isRunBudgetExceeded(startedAt, maxRunMs)) {
       const healResult = await heal({
         client,
         modelId,
@@ -175,6 +187,16 @@ export async function run(prompt, options) {
   if (!quiet) process.stderr.write(formatSummary(result) + '\n');
 
   return result;
+}
+
+export function isRunBudgetExceeded(startedAt, maxRunMs) {
+  if (!maxRunMs) return false;
+  return Date.now() - startedAt.getTime() >= maxRunMs;
+}
+
+function formatStopReason(stoppedReason) {
+  if (stoppedReason === 'budget-exceeded') return 'stopped after run budget';
+  return `stopped after ${MAX_TOOL_TURNS} tool turns`;
 }
 
 async function saveRun(cwd, result, startedAt) {

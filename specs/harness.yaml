@@ -26,6 +26,9 @@ inputs:
   maxHealTurns:
     type: number
     description: Max repair attempts (default 3)
+  maxRunMs:
+    type: number
+    description: Stop between model/tool turns after this many milliseconds (default 0, disabled)
   priorMessages:
     type: array
     description: Messages from a prior run for continuation
@@ -42,7 +45,7 @@ outputs:
     description: Number of tool-call round trips
   stoppedReason:
     type: string
-    description: '"complete" when the model produced a final response, "tool-limit" when it hit the turn ceiling'
+    description: '"complete" when the model produced a final response, "tool-limit" when it hit the turn ceiling, "budget-exceeded" when maxRunMs elapsed'
   verification:
     type: object
     description: "{ passed, command, output, exitCode }"
@@ -64,6 +67,7 @@ outputs:
 
 constraints:
   - Tool loop limited to 20 turns to prevent runaway
+  - Optional maxRunMs stops between turns and before healing when the budget is exceeded
   - Native API tool calls are the primary tool-use path
   - Text-form tool calls in the exact shape tool_name[ARGS]{...} are recovered as a compatibility fallback
   - Hitting the tool-turn ceiling sets stoppedReason "tool-limit" and emits a notice
@@ -82,6 +86,8 @@ tests:
     - parseArgs extracts prompt from shorthand "kodr 'text'"
     - parseArgs handles all flag variants
     - CLI process failure follows final verification failure
+    - CLI process fails when run stopped before completion
+    - maxRunMs budget detection works
     - run records include metadata and duration
     - workspace file listing skips operator logs and copied kodr artifacts
     - system prompt requires native tool-channel calls
