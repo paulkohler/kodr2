@@ -10,12 +10,10 @@ import { buildEnv } from './env.mjs';
 import { verify } from './verify.mjs';
 import { heal } from './heal.mjs';
 import {
-	formatToolCall,
-	formatToolResult,
-	formatNotice,
-	formatVerification,
-	formatSummary,
-} from './format.mjs';
+	executeNativeToolCalls,
+	executeRecoveredTextToolCall,
+} from './tool-loop.mjs';
+import { formatNotice, formatVerification, formatSummary } from './format.mjs';
 
 const MAX_TOOL_TURNS = 20;
 
@@ -87,36 +85,25 @@ export async function run(prompt, options) {
 
 		messages.push(message);
 
-		// No tool calls = final response
-		if (!message.tool_calls || message.tool_calls.length === 0) {
-			finalText = message.content || '';
-			completed = true;
-			if (!quiet) process.stdout.write('\n');
-			break;
-		}
-
-		// Execute tool calls
-		for (const tc of message.tool_calls) {
-			let args;
-			try {
-				args = JSON.parse(tc.function.arguments);
-			} catch {
-				args = {};
+		const nativeCalls = await executeNativeToolCalls(
+			message,
+			tools,
+			messages,
+			quiet,
+		);
+		if (nativeCalls === 0) {
+			const recovered = await executeRecoveredTextToolCall(
+				message,
+				tools,
+				messages,
+				quiet,
+			);
+			if (!recovered) {
+				finalText = message.content || '';
+				completed = true;
+				if (!quiet) process.stdout.write('\n');
+				break;
 			}
-
-			if (!quiet)
-				process.stderr.write(formatToolCall(tc.function.name, args) + '\n');
-
-			const result = await tools.dispatch(tc.function.name, args);
-
-			if (!quiet)
-				process.stderr.write(formatToolResult(tc.function.name, result) + '\n');
-
-			messages.push({
-				role: 'tool',
-				tool_call_id: tc.id,
-				content: JSON.stringify(result),
-			});
 		}
 
 		toolTurns++;

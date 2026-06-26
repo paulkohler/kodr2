@@ -58,9 +58,12 @@ outputs:
 
 constraints:
   - Tool loop limited to 20 turns to prevent runaway
+  - Native API tool calls are the primary tool-use path
+  - Text-form tool calls in the exact shape tool_name[ARGS]{...} are recovered as a compatibility fallback
   - Hitting the tool-turn ceiling sets stoppedReason "tool-limit" and emits a notice
   - Run transcript saved to .kodr/runs/ after every run
   - System prompt assembled fresh each run from workspace state
+  - System prompt requires tools to be called through the provided tool channel, not text-form pseudo calls
   - Verification runs when a test command is set and the workspace was touched (files written or a command run)
   - Healing only attempted when verification fails
 
@@ -69,6 +72,8 @@ tests:
     - parseArgs extracts prompt from "kodr run 'text'"
     - parseArgs extracts prompt from shorthand "kodr 'text'"
     - parseArgs handles all flag variants
+    - system prompt requires native tool-channel calls
+    - recovers exact text-form tool calls through the tool registry
   eval:
     - end-to-end run produces file changes on a simple task
     - tool loop terminates within turn limit

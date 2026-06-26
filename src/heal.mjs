@@ -4,7 +4,11 @@
  * re-verifies. Stops on: pass, turn limit, or no-progress.
  */
 
-import { formatHealTurn, formatToolCall, formatToolResult } from './format.mjs';
+import { formatHealTurn } from './format.mjs';
+import {
+	executeNativeToolCalls,
+	executeRecoveredTextToolCall,
+} from './tool-loop.mjs';
 
 const DEFAULT_MAX_TURNS = 3;
 const MAX_TOOL_TURNS = 20;
@@ -43,7 +47,13 @@ export async function heal(params) {
 		// Add failure context
 		messages.push({
 			role: 'user',
-			content: `Verification failed. Fix the issues and try again.\n\n<failure>\n${lastOutput}\n</failure>`,
+			content: `Verification failed. Fix the issues and try again.
+
+Use the provided tool channel for every tool call. Do not write tool calls as text, Markdown, XML, JSON blocks, or formats like tool_name[ARGS]{...}.
+
+<failure>
+${lastOutput}
+</failure>`,
 		});
 
 		// Let model use tools to fix
@@ -126,32 +136,24 @@ async function runToolLoop(client, modelId, messages, tools, quiet) {
 
 		messages.push(message);
 
-		if (!message.tool_calls || message.tool_calls.length === 0) {
-			break;
-		}
-
-		for (const tc of message.tool_calls) {
-			let args;
-			try {
-				args = JSON.parse(tc.function.arguments);
-			} catch {
-				args = {};
+		const nativeCalls = await executeNativeToolCalls(
+			message,
+			tools,
+			messages,
+			quiet,
+		);
+		if (nativeCalls === 0) {
+			const recovered = await executeRecoveredTextToolCall(
+				message,
+				tools,
+				messages,
+				quiet,
+			);
+			if (!recovered) {
+				break;
 			}
-
-			if (!quiet)
-				process.stderr.write(formatToolCall(tc.function.name, args) + '\n');
-
-			const result = await tools.dispatch(tc.function.name, args);
-
-			if (!quiet)
-				process.stderr.write(formatToolResult(tc.function.name, result) + '\n');
-
-			messages.push({
-				role: 'tool',
-				tool_call_id: tc.id,
-				content: JSON.stringify(result),
-			});
 		}
+
 		toolTurns++;
 	}
 

@@ -96,6 +96,13 @@ describe('buildSystemPrompt', () => {
 		assert.ok(prompt.includes('You are Kodr'));
 	});
 
+	it('requires native tool-channel calls', async () => {
+		const prompt = await buildSystemPrompt(tmpDir);
+		assert.ok(prompt.includes('Use the provided tool channel'));
+		assert.ok(prompt.includes('Never write tool calls as plain text'));
+		assert.ok(prompt.includes('tool_name[ARGS]'));
+	});
+
 	it('includes workspace instructions when present', async () => {
 		await writeFile(join(tmpDir, 'KODR.md'), 'custom rules');
 		const prompt = await buildSystemPrompt(tmpDir);
