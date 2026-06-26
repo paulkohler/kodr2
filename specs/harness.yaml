@@ -79,11 +79,13 @@ constraints:
   - Verification runs when a test command is set and the workspace was touched (files written or a command run)
   - Healing only attempted when verification fails
   - CLI exits non-zero when final verification fails
+  - CLI accepts -p/--prompt as a compatibility alias for prompt text
 
 tests:
   unit:
     - parseArgs extracts prompt from "kodr run 'text'"
     - parseArgs extracts prompt from shorthand "kodr 'text'"
+    - parseArgs extracts prompt from -p/--prompt
     - parseArgs handles all flag variants
     - CLI process failure follows final verification failure
     - CLI process fails when run stopped before completion

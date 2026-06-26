@@ -35,6 +35,18 @@ describe('parseArgs', () => {
     assert.equal(args.test, 'npm test');
   });
 
+  it('parses --prompt flag', () => {
+    const args = parseArgs(['run', '--prompt', 'fix the bug']);
+    assert.equal(args.prompt, 'fix the bug');
+    assert.equal(args.command, 'run');
+  });
+
+  it('parses -p shorthand', () => {
+    const args = parseArgs(['run', '-p', 'fix the bug']);
+    assert.equal(args.prompt, 'fix the bug');
+    assert.equal(args.command, 'run');
+  });
+
   it('parses --heal-turns flag', () => {
     const args = parseArgs(['run', 'hi', '--heal-turns', '5']);
     assert.equal(args.healTurns, 5);

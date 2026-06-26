@@ -145,6 +145,11 @@ export function parseArgs(argv) {
       i++;
       continue;
     }
+    if ((arg === '--prompt' || arg === '-p') && argv[i + 1]) {
+      args.prompt = argv[++i];
+      i++;
+      continue;
+    }
     if (arg === '--heal-turns' && argv[i + 1]) {
       args.healTurns = parseInt(argv[++i], 10);
       i++;
@@ -177,6 +182,7 @@ export function parseArgs(argv) {
   }
 
   // `kodr run "prompt"` — command is "run", prompt is the next arg
+  // `kodr run -p "prompt"` — compatibility alias for old operator scripts
   // `kodr "prompt"` — no command, prompt is the first arg
   if (args.command === 'run') {
     // prompt is already set from positional
@@ -201,6 +207,7 @@ Options:
   --cwd <path>                    Workspace directory (default: .)
   --base-url <url>                LM Studio URL (default: http://localhost:1234/v1)
   --model <id>                    Model identifier
+  --prompt, -p <text>             Prompt text (compatibility alias)
   --test <command>                Verification command (e.g. "npm test")
   --heal-turns <n>                Max repair turns (default: 3)
   --max-run-ms <n>                Stop between turns after this many ms (default: 0, disabled)
@@ -212,6 +219,7 @@ Options:
 
 Examples:
   kodr run "add input validation to server.mjs"
+  kodr run -p "add input validation to server.mjs"
   kodr "fix the failing test" --test "node --test"
   kodr "add error handling" --continue last
 `;
