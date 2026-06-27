@@ -5,9 +5,11 @@ continuing the same conversation over several turns to extend it. It shows how
 runs chain together with `--continue`, and uses `ls -l` between turns to watch
 the workspace grow.
 
-> The model's streamed output is omitted here — the point is the workflow and
-> the resulting files. The `ls -l` listings are representative of a typical
-> run; exact files, sizes, and ordering depend on the model.
+> The `ls -l` listings below are captured from a real run using
+> `google/gemma-4-26b-a4b` loaded in LM Studio. The model's streamed output is
+> omitted — the point is the workflow and the resulting files. Sizes,
+> timestamps, and exactly which files the model touches will vary from run to
+> run and across models.
 
 ## Setup
 
@@ -40,9 +42,9 @@ ls -l
 
 ```
 total 24
--rw-r--r--  1 paul  staff   642 Jun 27 14:02 README.md
--rw-r--r--  1 paul  staff   281 Jun 27 14:02 package.json
--rw-r--r--  1 paul  staff  1067 Jun 27 14:02 server.js
+-rw-r--r--@ 1 paul  staff  232 27 Jun 16:51 package.json
+-rw-r--r--@ 1 paul  staff  962 27 Jun 16:51 README.md
+-rw-r--r--@ 1 paul  staff  837 27 Jun 16:51 server.js
 ```
 
 The run is also recorded under `.kodr/runs/` — that transcript is what the next
@@ -53,8 +55,8 @@ ls -l .kodr/runs
 ```
 
 ```
-total 8
--rw-r--r--  1 paul  staff  4821 Jun 27 14:02 2026-06-27T14-02-09-218Z.json
+total 16
+-rw-r--r--@ 1 paul  staff  7018 27 Jun 16:51 2026-06-27T06-51-38-340Z.json
 ```
 
 ## Turn 2 — extend it, continuing the conversation
@@ -74,9 +76,9 @@ ls -l
 
 ```
 total 24
--rw-r--r--  1 paul  staff   642 Jun 27 14:02 README.md
--rw-r--r--  1 paul  staff   324 Jun 27 14:05 package.json
--rw-r--r--  1 paul  staff  1689 Jun 27 14:05 server.js
+-rw-r--r--@ 1 paul  staff   232 27 Jun 16:51 package.json
+-rw-r--r--@ 1 paul  staff   962 27 Jun 16:51 README.md
+-rw-r--r--@ 1 paul  staff  1789 27 Jun 16:52 server.js
 ```
 
 `server.js` grew with the new routes and validation; a second transcript now
@@ -87,9 +89,9 @@ ls -l .kodr/runs
 ```
 
 ```
-total 16
--rw-r--r--  1 paul  staff  4821 Jun 27 14:02 2026-06-27T14-02-09-218Z.json
--rw-r--r--  1 paul  staff  7903 Jun 27 14:05 2026-06-27T14-05-44-031Z.json
+total 48
+-rw-r--r--@ 1 paul  staff   7018 27 Jun 16:51 2026-06-27T06-51-38-340Z.json
+-rw-r--r--@ 1 paul  staff  12401 27 Jun 16:52 2026-06-27T06-52-15-511Z.json
 ```
 
 ## Turn 3 — add tests and verify
@@ -113,13 +115,13 @@ ls -l
 ```
 
 ```
-total 32
--rw-r--r--  1 paul  staff   642 Jun 27 14:02 README.md
-drwxr-xr-x  3 paul  staff    96 Jun 27 14:09 node_modules
--rw-r--r--  1 paul  staff   361 Jun 27 14:09 package.json
--rw-r--r--  1 paul  staff   118 Jun 27 14:09 package-lock.json
--rw-r--r--  1 paul  staff  1689 Jun 27 14:09 server.js
-drwxr-xr-x  3 paul  staff    96 Jun 27 14:09 test
+total 88
+drwxr-xr-x@ 71 paul  staff   2272 27 Jun 16:52 node_modules
+-rw-r--r--@  1 paul  staff  29352 27 Jun 16:52 package-lock.json
+-rw-r--r--@  1 paul  staff    278 27 Jun 16:53 package.json
+-rw-r--r--@  1 paul  staff    962 27 Jun 16:51 README.md
+-rw-r--r--@  1 paul  staff   1751 27 Jun 16:53 server.js
+drwxr-xr-x@  3 paul  staff     96 27 Jun 16:52 test
 ```
 
 ```bash
@@ -128,8 +130,14 @@ ls -l test
 
 ```
 total 8
--rw-r--r--  1 paul  staff  938 Jun 27 14:09 todos.test.js
+-rw-r--r--@ 1 paul  staff  2468 27 Jun 16:53 todos.test.js
 ```
+
+In this run the model also refactored `server.js` to export the app so the test
+could import it, then ran the suite itself before kodr's own `--test` pass — so
+the run finished with `verify pass` and no healing was needed. (`server.js` is
+slightly smaller than after turn 2 because of that refactor.) If the suite had
+failed, kodr would have fed the failure back for up to three repair turns.
 
 ## How continuation works
 
@@ -142,7 +150,7 @@ total 8
 
   ```bash
   kodr run "Document the API in the README." \
-    --continue .kodr/runs/2026-06-27T14-05-44-031Z.json
+    --continue .kodr/runs/2026-06-27T06-52-15-511Z.json
   ```
 
 Each turn appends a fresh transcript, so the chain is easy to inspect, replay,
