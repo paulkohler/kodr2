@@ -29,7 +29,9 @@ export function buildEnv(extraNames = []) {
   const env = {};
   for (const name of [...DEFAULT_ENV_VARS, ...extraNames]) {
     const value = process.env[name];
-    if (value !== undefined) env[name] = value;
+    if (value !== undefined) {
+      env[name] = value;
+    }
   }
   return env;
 }
@@ -41,11 +43,15 @@ export function buildEnv(extraNames = []) {
  * @returns {string[]}
  */
 export function parseEnvNames(csv) {
-  if (!csv) return [];
+  if (!csv) {
+    return [];
+  }
   const names = [];
   for (const part of csv.split(',')) {
     const name = part.trim();
-    if (name && !names.includes(name)) names.push(name);
+    if (name && !names.includes(name)) {
+      names.push(name);
+    }
   }
   return names;
 }

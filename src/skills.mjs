@@ -52,7 +52,9 @@ async function readAllSkills(cwd) {
   const skills = [];
   for (const dirName of await skillDirNames(cwd)) {
     const skill = await readSkill(cwd, dirName);
-    if (skill) skills.push(skill);
+    if (skill) {
+      skills.push(skill);
+    }
   }
   return skills;
 }
@@ -69,7 +71,9 @@ async function skillDirNames(cwd) {
   } catch {
     return [];
   }
-  if (!dir) return [];
+  if (!dir) {
+    return [];
+  }
 
   try {
     const entries = await readdir(dir, { withFileTypes: true });
@@ -94,7 +98,9 @@ async function readSkill(cwd, dirName) {
   } catch {
     return null;
   }
-  if (!resolved) return null;
+  if (!resolved) {
+    return null;
+  }
 
   let raw;
   try {
@@ -128,7 +134,9 @@ export function parseFrontmatter(raw) {
   const frontmatter = {};
   for (const line of match[1].split('\n')) {
     const pair = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
-    if (!pair) continue;
+    if (!pair) {
+      continue;
+    }
     frontmatter[pair[1]] = stripQuotes(pair[2].trim());
   }
 
@@ -136,7 +144,9 @@ export function parseFrontmatter(raw) {
 }
 
 function stripQuotes(value) {
-  if (value.length < 2) return value;
+  if (value.length < 2) {
+    return value;
+  }
   const first = value[0];
   const last = value[value.length - 1];
   if ((first === '"' && last === '"') || (first === "'" && last === "'")) {

@@ -31,8 +31,12 @@ export async function verify(command, cwd, options = {}) {
       },
       (err, stdout, stderr) => {
         let code = 0;
-        if (err && typeof err.code === 'number') code = err.code;
-        if (err && typeof err.code !== 'number') code = 1;
+        if (err && typeof err.code === 'number') {
+          code = err.code;
+        }
+        if (err && typeof err.code !== 'number') {
+          code = 1;
+        }
         const output = [stdout, stderr]
           .filter(Boolean)
           .join('\n')

@@ -122,7 +122,9 @@ export async function run(prompt, options) {
         finalText = message.content || '';
         completed = true;
         stoppedReason = 'complete';
-        if (!quiet) process.stdout.write('\n');
+        if (!quiet) {
+          process.stdout.write('\n');
+        }
         break;
       }
     }
@@ -158,7 +160,9 @@ export async function run(prompt, options) {
     const verifyResult = await verify(testCommand, cwd, { env: commandEnv });
     result.verification = verifyResult;
 
-    if (!quiet) process.stderr.write(formatVerification(verifyResult) + '\n');
+    if (!quiet) {
+      process.stderr.write(formatVerification(verifyResult) + '\n');
+    }
 
     // Heal if verification failed
     if (!verifyResult.passed && !isRunBudgetExceeded(startedAt, maxRunMs)) {
@@ -184,18 +188,24 @@ export async function run(prompt, options) {
   // Save run transcript
   await saveRun(cwd, result, startedAt);
 
-  if (!quiet) process.stderr.write(formatSummary(result) + '\n');
+  if (!quiet) {
+    process.stderr.write(formatSummary(result) + '\n');
+  }
 
   return result;
 }
 
 export function isRunBudgetExceeded(startedAt, maxRunMs) {
-  if (!maxRunMs) return false;
+  if (!maxRunMs) {
+    return false;
+  }
   return Date.now() - startedAt.getTime() >= maxRunMs;
 }
 
 function formatStopReason(stoppedReason) {
-  if (stoppedReason === 'budget-exceeded') return 'stopped after run budget';
+  if (stoppedReason === 'budget-exceeded') {
+    return 'stopped after run budget';
+  }
   return `stopped after ${MAX_TOOL_TURNS} tool turns`;
 }
 

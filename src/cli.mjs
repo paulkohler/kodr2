@@ -79,8 +79,12 @@ export async function main(argv) {
 }
 
 export function shouldFailProcess(result) {
-  if (result.stoppedReason && result.stoppedReason !== 'complete') return true;
-  if (result.verification && result.verification.passed === false) return true;
+  if (result.stoppedReason && result.stoppedReason !== 'complete') {
+    return true;
+  }
+  if (result.verification && result.verification.passed === false) {
+    return true;
+  }
   return false;
 }
 
@@ -247,7 +251,9 @@ export async function loadPriorRun(cwd, ref) {
       const files = (await readdir(runDir))
         .filter((f) => f.endsWith('.json'))
         .sort();
-      if (files.length === 0) return null;
+      if (files.length === 0) {
+        return null;
+      }
       const last = files[files.length - 1];
       const data = JSON.parse(await readFile(join(runDir, last), 'utf8'));
       return withoutSystemMessages(data);
@@ -266,7 +272,9 @@ export async function loadPriorRun(cwd, ref) {
 }
 
 function withoutSystemMessages(data) {
-  if (!Array.isArray(data.messages)) return data;
+  if (!Array.isArray(data.messages)) {
+    return data;
+  }
   return {
     ...data,
     messages: data.messages.filter((message) => message.role !== 'system'),

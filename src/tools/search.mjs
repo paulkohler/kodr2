@@ -36,7 +36,9 @@ export default {
   },
 
   async execute({ pattern, path = '.', glob }, context) {
-    if (!pattern) return { error: 'pattern is required' };
+    if (!pattern) {
+      return { error: 'pattern is required' };
+    }
 
     let resolved;
     try {
@@ -56,7 +58,9 @@ export default {
 };
 
 async function searchDir(dir, root, pattern, glob, matches) {
-  if (matches.length >= MAX_MATCHES) return;
+  if (matches.length >= MAX_MATCHES) {
+    return;
+  }
 
   let entries;
   try {
@@ -66,8 +70,12 @@ async function searchDir(dir, root, pattern, glob, matches) {
   }
 
   for (const entry of entries) {
-    if (matches.length >= MAX_MATCHES) return;
-    if (shouldIgnoreEntry(entry.name)) continue;
+    if (matches.length >= MAX_MATCHES) {
+      return;
+    }
+    if (shouldIgnoreEntry(entry.name)) {
+      continue;
+    }
 
     const full = join(dir, entry.name);
 
@@ -76,18 +84,24 @@ async function searchDir(dir, root, pattern, glob, matches) {
       continue;
     }
 
-    if (glob && !entry.name.endsWith(glob)) continue;
+    if (glob && !entry.name.endsWith(glob)) {
+      continue;
+    }
     let safePath;
     try {
       safePath = await resolveExistingPath(root, full);
     } catch {
       continue;
     }
-    if (!safePath) continue;
+    if (!safePath) {
+      continue;
+    }
 
     try {
       const info = await stat(safePath);
-      if (info.size > MAX_FILE_SIZE) continue;
+      if (info.size > MAX_FILE_SIZE) {
+        continue;
+      }
     } catch {
       continue;
     }
@@ -99,13 +113,17 @@ async function searchDir(dir, root, pattern, glob, matches) {
       continue;
     }
 
-    if (content.charCodeAt(0) === 0) continue; // binary
+    if (content.charCodeAt(0) === 0) {
+      continue; // binary
+    }
 
     const lines = content.split('\n');
     const rel = relative(root, full);
 
     for (let i = 0; i < lines.length; i++) {
-      if (matches.length >= MAX_MATCHES) return;
+      if (matches.length >= MAX_MATCHES) {
+        return;
+      }
       if (lines[i].includes(pattern)) {
         matches.push({
           file: rel,

@@ -60,9 +60,13 @@ export async function readInstructions(cwd) {
   for (const name of INSTRUCTION_FILES) {
     try {
       const path = await resolveExistingPath(cwd, name);
-      if (!path) continue;
+      if (!path) {
+        continue;
+      }
       const content = await readFile(path, 'utf8');
-      if (content.trim()) return content.trim();
+      if (content.trim()) {
+        return content.trim();
+      }
     } catch {
       // not found, try next
     }
@@ -82,7 +86,9 @@ export async function listWorkspaceFiles(cwd) {
 }
 
 async function walk(dir, root, files) {
-  if (files.length >= MAX_FILES) return;
+  if (files.length >= MAX_FILES) {
+    return;
+  }
 
   let entries;
   try {
@@ -92,8 +98,12 @@ async function walk(dir, root, files) {
   }
 
   for (const entry of entries) {
-    if (files.length >= MAX_FILES) return;
-    if (shouldIgnoreEntry(entry.name)) continue;
+    if (files.length >= MAX_FILES) {
+      return;
+    }
+    if (shouldIgnoreEntry(entry.name)) {
+      continue;
+    }
 
     const full = join(dir, entry.name);
     const rel = relative(root, full);

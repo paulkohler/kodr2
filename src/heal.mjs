@@ -42,7 +42,9 @@ export async function heal(params) {
   let totalUsage = { prompt: 0, completion: 0 };
 
   for (let turn = 1; turn <= maxTurns; turn++) {
-    if (!quiet) process.stderr.write(formatHealTurn(turn, maxTurns) + '\n');
+    if (!quiet) {
+      process.stderr.write(formatHealTurn(turn, maxTurns) + '\n');
+    }
 
     // Add failure context
     messages.push({

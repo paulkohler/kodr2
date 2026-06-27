@@ -94,6 +94,8 @@ export function createToolRegistry(cwd, options = {}) {
 }
 
 function isPlainObject(value) {
-  if (!value || typeof value !== 'object') return false;
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
   return !Array.isArray(value);
 }

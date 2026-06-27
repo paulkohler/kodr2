@@ -30,17 +30,25 @@ export default {
   },
 
   async execute({ command }, context) {
-    if (!command) return { error: 'command is required' };
+    if (!command) {
+      return { error: 'command is required' };
+    }
     const cdError = validateCdTargets(command, context.cwd);
-    if (cdError) return { error: cdError };
-    if (context.trackCommand) context.trackCommand();
+    if (cdError) {
+      return { error: cdError };
+    }
+    if (context.trackCommand) {
+      context.trackCommand();
+    }
     const before = await snapshotWorkspace(context.cwd);
     const result = await executeCommand(command, context.cwd, {
       env: buildEnv(context.envPassthrough),
     });
     const changed = await changedFiles(context.cwd, before);
     for (const path of changed) {
-      if (context.trackWrite) context.trackWrite(path);
+      if (context.trackWrite) {
+        context.trackWrite(path);
+      }
     }
     if (changed.length > 0) {
       result.filesChanged = changed;
@@ -59,16 +67,22 @@ export async function changedFiles(cwd, before) {
   const after = await snapshotWorkspace(cwd);
   const changed = [];
   for (const [path, sig] of after) {
-    if (before.get(path) !== sig) changed.push(path);
+    if (before.get(path) !== sig) {
+      changed.push(path);
+    }
   }
   for (const path of before.keys()) {
-    if (!after.has(path)) changed.push(path);
+    if (!after.has(path)) {
+      changed.push(path);
+    }
   }
   return changed.sort();
 }
 
 async function snapshotDir(dir, root, files) {
-  if (files.size >= MAX_SNAPSHOT_FILES) return;
+  if (files.size >= MAX_SNAPSHOT_FILES) {
+    return;
+  }
   let entries;
   try {
     entries = await readdir(dir, { withFileTypes: true });
@@ -76,8 +90,12 @@ async function snapshotDir(dir, root, files) {
     return;
   }
   for (const entry of entries) {
-    if (files.size >= MAX_SNAPSHOT_FILES) return;
-    if (shouldIgnoreEntry(entry.name)) continue;
+    if (files.size >= MAX_SNAPSHOT_FILES) {
+      return;
+    }
+    if (shouldIgnoreEntry(entry.name)) {
+      continue;
+    }
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
       await snapshotDir(full, root, files);
@@ -109,16 +127,24 @@ function findCdTargets(command) {
   let match;
   while ((match = pattern.exec(command)) !== null) {
     const target = match[2] || match[3] || match[4];
-    if (target) targets.push(target);
+    if (target) {
+      targets.push(target);
+    }
   }
   return targets;
 }
 
 function isInside(root, path) {
   const rel = relative(resolve(root), resolve(path));
-  if (rel === '') return true;
-  if (rel.startsWith('..')) return false;
-  if (rel.startsWith('/')) return false;
+  if (rel === '') {
+    return true;
+  }
+  if (rel.startsWith('..')) {
+    return false;
+  }
+  if (rel.startsWith('/')) {
+    return false;
+  }
   return true;
 }
 
@@ -138,8 +164,12 @@ export function executeCommand(command, cwd, options = {}) {
       },
       (err, stdout, stderr) => {
         let exitCode = 0;
-        if (err) exitCode = err.code ?? 1;
-        if (exitCode === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') exitCode = 1;
+        if (err) {
+          exitCode = err.code ?? 1;
+        }
+        if (exitCode === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
+          exitCode = 1;
+        }
 
         resolve({
           stdout: truncate(stdout || '', maxOutput),
@@ -152,6 +182,8 @@ export function executeCommand(command, cwd, options = {}) {
 }
 
 function truncate(text, max) {
-  if (text.length <= max) return text;
+  if (text.length <= max) {
+    return text;
+  }
   return text.slice(0, max) + '\n[truncated]';
 }

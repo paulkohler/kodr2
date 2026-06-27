@@ -108,7 +108,9 @@ export function formatSummary(result) {
 // --- helpers ---
 
 function summariseArgs(name, args) {
-  if (!args) return '';
+  if (!args) {
+    return '';
+  }
   if (name === 'read_file' || name === 'write_file' || name === 'edit_file') {
     return DIM + (args.path || '') + RESET;
   }

@@ -31,8 +31,12 @@ export default {
   },
 
   async execute({ path, old_string, new_string }, context) {
-    if (!path) return { error: 'path is required' };
-    if (!old_string) return { error: 'old_string is required' };
+    if (!path) {
+      return { error: 'path is required' };
+    }
+    if (!old_string) {
+      return { error: 'old_string is required' };
+    }
     if (new_string === undefined || new_string === null) {
       return { error: 'new_string is required' };
     }
@@ -79,7 +83,9 @@ function countOccurrences(text, search) {
   let pos = 0;
   while (true) {
     const idx = text.indexOf(search, pos);
-    if (idx === -1) break;
+    if (idx === -1) {
+      break;
+    }
     count++;
     pos = idx + 1;
   }

@@ -16,7 +16,9 @@ import { formatToolCall, formatToolResult } from './format.mjs';
  * @returns {Promise<number>} Number of executed calls
  */
 export async function executeNativeToolCalls(message, tools, messages, quiet) {
-  if (!message.tool_calls || message.tool_calls.length === 0) return 0;
+  if (!message.tool_calls || message.tool_calls.length === 0) {
+    return 0;
+  }
 
   let executed = 0;
   for (const tc of message.tool_calls) {
@@ -52,9 +54,13 @@ export async function executeRecoveredTextToolCall(
   messages,
   quiet,
 ) {
-  if (message.tool_calls && message.tool_calls.length > 0) return false;
+  if (message.tool_calls && message.tool_calls.length > 0) {
+    return false;
+  }
   const call = recoverTextToolCall(message.content || '');
-  if (!call) return false;
+  if (!call) {
+    return false;
+  }
 
   const result = await dispatchTool(call, tools, quiet);
   messages.push({
@@ -72,15 +78,21 @@ export async function executeRecoveredTextToolCall(
  */
 export function recoverTextToolCall(content) {
   const match = content.trim().match(/^([a-z][a-z0-9_]*)\[ARGS\]([\s\S]+)$/);
-  if (!match) return null;
+  if (!match) {
+    return null;
+  }
 
   const args = parseToolArguments(match[2]);
-  if (!isPlainObject(args)) return null;
+  if (!isPlainObject(args)) {
+    return null;
+  }
   return { name: match[1], args };
 }
 
 function parseToolArguments(value) {
-  if (!value) return {};
+  if (!value) {
+    return {};
+  }
   try {
     return JSON.parse(value);
   } catch {
@@ -93,16 +105,22 @@ function toToolCall(name, args) {
 }
 
 async function dispatchTool(call, tools, quiet) {
-  if (!quiet) process.stderr.write(formatToolCall(call.name, call.args) + '\n');
+  if (!quiet) {
+    process.stderr.write(formatToolCall(call.name, call.args) + '\n');
+  }
 
   const result = await tools.dispatch(call.name, call.args);
 
-  if (!quiet) process.stderr.write(formatToolResult(call.name, result) + '\n');
+  if (!quiet) {
+    process.stderr.write(formatToolResult(call.name, result) + '\n');
+  }
 
   return result;
 }
 
 function isPlainObject(value) {
-  if (!value || typeof value !== 'object') return false;
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
   return !Array.isArray(value);
 }

@@ -51,7 +51,9 @@ describe('harness eval', {
   });
 
   after(async () => {
-    if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
+    if (tmpDir) {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
   });
 
   it('creates a file when asked', { timeout: 120_000 }, async () => {

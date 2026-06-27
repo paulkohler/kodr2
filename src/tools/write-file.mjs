@@ -28,7 +28,9 @@ export default {
   },
 
   async execute({ path, content }, context) {
-    if (!path) return { error: 'path is required' };
+    if (!path) {
+      return { error: 'path is required' };
+    }
     if (content === undefined || content === null) {
       return { error: 'content is required' };
     }

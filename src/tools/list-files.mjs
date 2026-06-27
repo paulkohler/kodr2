@@ -57,11 +57,15 @@ export default {
     } else {
       const entries = await readdir(resolved, { withFileTypes: true });
       for (const entry of entries) {
-        if (shouldIgnoreEntry(entry.name)) continue;
+        if (shouldIgnoreEntry(entry.name)) {
+          continue;
+        }
         const rel = relative(root, join(resolved, entry.name));
         const suffix = entry.isDirectory() ? '/' : '';
         files.push(rel + suffix);
-        if (files.length >= MAX_ENTRIES) break;
+        if (files.length >= MAX_ENTRIES) {
+          break;
+        }
       }
     }
 
@@ -70,7 +74,9 @@ export default {
 };
 
 async function walk(dir, root, files) {
-  if (files.length >= MAX_ENTRIES) return;
+  if (files.length >= MAX_ENTRIES) {
+    return;
+  }
 
   let entries;
   try {
@@ -80,8 +86,12 @@ async function walk(dir, root, files) {
   }
 
   for (const entry of entries) {
-    if (files.length >= MAX_ENTRIES) return;
-    if (shouldIgnoreEntry(entry.name)) continue;
+    if (files.length >= MAX_ENTRIES) {
+      return;
+    }
+    if (shouldIgnoreEntry(entry.name)) {
+      continue;
+    }
 
     const full = join(dir, entry.name);
     const rel = relative(root, full);

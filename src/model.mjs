@@ -73,7 +73,9 @@ export function createClient(options = {}) {
    * @returns {Promise<string>}
    */
   async function resolveModel() {
-    if (model) return model;
+    if (model) {
+      return model;
+    }
     const list = await models();
     if (list.length === 0) {
       return 'default';
@@ -83,7 +85,9 @@ export function createClient(options = {}) {
 }
 
 function resolveConfiguredModel(model) {
-  if (model) return model;
+  if (model) {
+    return model;
+  }
   return process.env.KODR_MODEL || '';
 }
 
@@ -111,11 +115,15 @@ function createAssembler(onToken, onToolCall) {
       return;
     }
 
-    if (delta.role) role = delta.role;
+    if (delta.role) {
+      role = delta.role;
+    }
 
     if (delta.content) {
       content += delta.content;
-      if (onToken) onToken(delta.content);
+      if (onToken) {
+        onToken(delta.content);
+      }
     }
 
     if (delta.tool_calls) {
@@ -146,12 +154,16 @@ function pushToolCall(toolCalls, tc, onToolCall) {
     toolCalls[idx] = { id: tc.id || '', name: '', arguments: '' };
     if (tc.function?.name) {
       toolCalls[idx].name = tc.function.name;
-      if (onToolCall) onToolCall(toolCalls[idx].name);
+      if (onToolCall) {
+        onToolCall(toolCalls[idx].name);
+      }
     }
   }
   if (tc.function?.name && !toolCalls[idx].name) {
     toolCalls[idx].name = tc.function.name;
-    if (onToolCall) onToolCall(toolCalls[idx].name);
+    if (onToolCall) {
+      onToolCall(toolCalls[idx].name);
+    }
   }
   if (tc.function?.arguments) {
     toolCalls[idx].arguments += tc.function.arguments;
@@ -167,7 +179,9 @@ function pushToolCall(toolCalls, tc, onToolCall) {
  */
 export function assembleResponse(chunks, onToken, onToolCall) {
   const assembler = createAssembler(onToken, onToolCall);
-  for (const chunk of chunks) assembler.push(chunk);
+  for (const chunk of chunks) {
+    assembler.push(chunk);
+  }
   return assembler.result();
 }
 
@@ -179,9 +193,13 @@ function transportFor(url) {
 
 function parseSseLine(line) {
   const trimmed = line.trim();
-  if (!trimmed || !trimmed.startsWith('data: ')) return null;
+  if (!trimmed || !trimmed.startsWith('data: ')) {
+    return null;
+  }
   const payload = trimmed.slice(6);
-  if (payload === '[DONE]') return null;
+  if (payload === '[DONE]') {
+    return null;
+  }
   try {
     return JSON.parse(payload);
   } catch {
@@ -227,13 +245,17 @@ function streamRequest(url, body, timeout, callbacks) {
 
           for (const line of lines) {
             const chunk = parseSseLine(line);
-            if (chunk) assembler.push(chunk);
+            if (chunk) {
+              assembler.push(chunk);
+            }
           }
         });
 
         res.on('end', () => {
           const chunk = parseSseLine(buffer);
-          if (chunk) assembler.push(chunk);
+          if (chunk) {
+            assembler.push(chunk);
+          }
           resolve(assembler.result());
         });
 

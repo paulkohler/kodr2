@@ -25,7 +25,9 @@ describe('buildEnv', () => {
   const cleanup = [];
 
   afterEach(() => {
-    for (const name of cleanup.splice(0)) delete process.env[name];
+    for (const name of cleanup.splice(0)) {
+      delete process.env[name];
+    }
   });
 
   it('includes default allowlisted variables that are present', () => {

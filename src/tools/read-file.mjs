@@ -25,7 +25,9 @@ export default {
   },
 
   async execute({ path }, context) {
-    if (!path) return { error: 'path is required' };
+    if (!path) {
+      return { error: 'path is required' };
+    }
 
     let resolved;
     try {
@@ -66,7 +68,9 @@ export default {
 function isBinary(content) {
   for (let i = 0; i < Math.min(content.length, 8192); i++) {
     const code = content.charCodeAt(i);
-    if (code === 0) return true;
+    if (code === 0) {
+      return true;
+    }
   }
   return false;
 }

@@ -8,5 +8,14 @@
     "formatter": {
       "quoteStyle": "single"
     }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "style": {
+        "useBlockStatements": "error"
+      }
+    }
   }
 }
