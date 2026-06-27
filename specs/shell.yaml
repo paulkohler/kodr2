@@ -1,0 +1,55 @@
+name: shell runner
+status: implemented
+description: >
+  Shared command runner used by the run_command tool and verification.
+  Spawns /bin/sh -c with a curated environment, a generous timeout, and
+  bounded output. The single execution path so the two callers cannot
+  diverge.
+
+inputs:
+  command:
+    type: string
+    required: true
+    description: Shell command to run
+  cwd:
+    type: string
+    required: true
+    description: Working directory
+  timeout:
+    type: number
+    required: false
+    description: Timeout in ms (default 600,000 — 10 minutes)
+  maxOutput:
+    type: number
+    required: false
+    description: Max characters kept per stream (default 50,000)
+  env:
+    type: object
+    required: false
+    description: Child environment (defaults to the curated allowlist)
+
+outputs:
+  stdout:
+    type: string
+    description: Command stdout, truncated to maxOutput
+  stderr:
+    type: string
+    description: Command stderr, truncated to maxOutput
+  exitCode:
+    type: number
+    description: Process exit code
+
+constraints:
+  - Commands run via /bin/sh -c
+  - 10 minute timeout by default, generous for slow local-model-driven builds
+  - Never throws — non-zero exit, signal, timeout, and buffer overflow all map to a non-zero exitCode
+  - A numeric process exit code is preserved; anything else maps to 1
+  - Output is truncated per stream and marked with a trailing [truncated]
+
+tests:
+  unit:
+    - successful command returns exit code 0
+    - reports the process exit code on failure
+    - captures stdout and stderr separately
+    - truncates long output and marks it
+    - timed out command returns a non-zero exit code

@@ -17,7 +17,6 @@ import editFileTool from '../src/tools/edit-file.mjs';
 import listFilesTool from '../src/tools/list-files.mjs';
 import searchTool from '../src/tools/search.mjs';
 import runCommandTool from '../src/tools/run-command.mjs';
-import { executeCommand } from '../src/tools/run-command.mjs';
 
 let tmpDir;
 let context;
@@ -488,24 +487,5 @@ describe('run_command', () => {
     } finally {
       delete process.env.KODR_TEST_SECRET;
     }
-  });
-
-  it('truncates long output', async () => {
-    const result = await executeCommand(
-      `${process.execPath} -e "process.stdout.write('x'.repeat(200))"`,
-      tmpDir,
-      { maxOutput: 100 },
-    );
-    assert.ok(result.stdout.length <= 112);
-    assert.match(result.stdout, /\[truncated\]/);
-  });
-
-  it('times out long-running commands', async () => {
-    const result = await executeCommand(
-      `${process.execPath} -e "setTimeout(() => {}, 1000)"`,
-      tmpDir,
-      { timeout: 20 },
-    );
-    assert.notEqual(result.exitCode, 0);
   });
 });

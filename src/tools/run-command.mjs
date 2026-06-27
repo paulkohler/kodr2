@@ -2,21 +2,19 @@
  * run_command tool — execute shell commands in the workspace.
  */
 
-import { execFile } from 'node:child_process';
 import { readdir, stat } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 import { buildEnv } from '../env.mjs';
 import { shouldIgnoreEntry } from '../ignore.mjs';
+import { runShell } from '../shell.mjs';
 
-const DEFAULT_TIMEOUT = 30_000; // 30 seconds
-const MAX_OUTPUT = 50_000; // characters
 const MAX_SNAPSHOT_FILES = 1000;
 
 export default {
   definition: {
     name: 'run_command',
     description:
-      'Execute a shell command in the workspace directory. Returns stdout, stderr, and exit code. Commands time out after 30 seconds.',
+      'Execute a shell command in the workspace directory. Returns stdout, stderr, and exit code. Commands time out after 10 minutes.',
     parameters: {
       type: 'object',
       properties: {
@@ -41,7 +39,7 @@ export default {
       context.trackCommand();
     }
     const before = await snapshotWorkspace(context.cwd);
-    const result = await executeCommand(command, context.cwd, {
+    const result = await runShell(command, context.cwd, {
       env: buildEnv(context.envPassthrough),
     });
     const changed = await changedFiles(context.cwd, before);
@@ -145,44 +143,4 @@ function isInside(root, path) {
     return false;
   }
   return true;
-}
-
-export function executeCommand(command, cwd, options = {}) {
-  const timeout = options.timeout ?? DEFAULT_TIMEOUT;
-  const maxOutput = options.maxOutput ?? MAX_OUTPUT;
-  const env = options.env ?? buildEnv();
-  return new Promise((resolve) => {
-    execFile(
-      '/bin/sh',
-      ['-c', command],
-      {
-        cwd,
-        timeout,
-        maxBuffer: maxOutput * 2,
-        env,
-      },
-      (err, stdout, stderr) => {
-        let exitCode = 0;
-        if (err) {
-          exitCode = err.code ?? 1;
-        }
-        if (exitCode === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
-          exitCode = 1;
-        }
-
-        resolve({
-          stdout: truncate(stdout || '', maxOutput),
-          stderr: truncate(stderr || '', maxOutput),
-          exitCode: typeof exitCode === 'number' ? exitCode : 1,
-        });
-      },
-    );
-  });
-}
-
-function truncate(text, max) {
-  if (text.length <= max) {
-    return text;
-  }
-  return `${text.slice(0, max)}\n[truncated]`;
 }

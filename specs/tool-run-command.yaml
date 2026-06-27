@@ -28,9 +28,9 @@ outputs:
     description: Files created, modified, or deleted by the command
 
 constraints:
-  - Commands run via /bin/sh -c
-  - 30 second timeout
-  - Output truncated at 50,000 characters
+  - Commands run via /bin/sh -c (the shared shell runner, see shell spec)
+  - 10 minute timeout by default (configurable)
+  - Output truncated at 50,000 characters per stream
   - Runs in workspace directory (cwd)
   - Rejects explicit cd targets that resolve outside the workspace
   - Runs with a minimal curated environment, not the full process.env
@@ -45,8 +45,6 @@ tests:
     - tracks files changed by shell commands
     - rejects cd targets outside the workspace
     - allows cd targets inside the workspace
-    - truncates long output
-    - times out after 30 seconds
     - does not expose non-allowlisted environment variables by default
     - exposes extra variables named in envPassthrough
   eval:

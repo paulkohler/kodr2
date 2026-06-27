@@ -29,8 +29,9 @@ outputs:
     description: Process exit code
 
 constraints:
-  - 60 second timeout
+  - 10 minute timeout by default (configurable)
   - Output truncated at 20,000 characters
+  - Executes via the shared shell runner (see shell spec)
   - Runs with a minimal curated environment (see run_command spec)
   - Only runs when testCommand is configured and the workspace was touched (files written or a command run)
 
