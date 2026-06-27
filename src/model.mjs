@@ -151,25 +151,24 @@ function createAssembler(onToken, onToolCall) {
 function pushToolCall(toolCalls, tc, onToolCall) {
   const idx = tc.index ?? toolCalls.length;
   if (!toolCalls[idx]) {
-    toolCalls[idx] = { id: tc.id || '', name: '', arguments: '' };
-    if (tc.function?.name) {
-      toolCalls[idx].name = tc.function.name;
-      if (onToolCall) {
-        onToolCall(toolCalls[idx].name);
-      }
-    }
+    toolCalls[idx] = { id: '', name: '', arguments: '' };
   }
-  if (tc.function?.name && !toolCalls[idx].name) {
-    toolCalls[idx].name = tc.function.name;
+  const call = toolCalls[idx];
+
+  // A tool call streams across chunks: the name arrives once, arguments
+  // accumulate, and the id may land in any chunk. Fill each field as it first
+  // appears. onToolCall fires on the chunk that names the call.
+  if (tc.function?.name && !call.name) {
+    call.name = tc.function.name;
     if (onToolCall) {
-      onToolCall(toolCalls[idx].name);
+      onToolCall(call.name);
     }
   }
   if (tc.function?.arguments) {
-    toolCalls[idx].arguments += tc.function.arguments;
+    call.arguments += tc.function.arguments;
   }
-  if (tc.id && !toolCalls[idx].id) {
-    toolCalls[idx].id = tc.id;
+  if (tc.id && !call.id) {
+    call.id = tc.id;
   }
 }
 

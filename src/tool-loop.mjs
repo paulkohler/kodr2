@@ -24,7 +24,7 @@ export async function executeNativeToolCalls(message, tools, messages, quiet) {
   for (const tc of message.tool_calls) {
     const args = parseToolArguments(tc.function.arguments);
     const result = await dispatchTool(
-      toToolCall(tc.function.name, args),
+      { name: tc.function.name, args },
       tools,
       quiet,
     );
@@ -98,10 +98,6 @@ function parseToolArguments(value) {
   } catch {
     return {};
   }
-}
-
-function toToolCall(name, args) {
-  return { name, args };
 }
 
 async function dispatchTool(call, tools, quiet) {
