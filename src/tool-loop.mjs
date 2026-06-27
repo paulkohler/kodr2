@@ -106,13 +106,13 @@ function toToolCall(name, args) {
 
 async function dispatchTool(call, tools, quiet) {
   if (!quiet) {
-    process.stderr.write(formatToolCall(call.name, call.args) + '\n');
+    process.stderr.write(`${formatToolCall(call.name, call.args)}\n`);
   }
 
   const result = await tools.dispatch(call.name, call.args);
 
   if (!quiet) {
-    process.stderr.write(formatToolResult(call.name, result) + '\n');
+    process.stderr.write(`${formatToolResult(call.name, result)}\n`);
   }
 
   return result;

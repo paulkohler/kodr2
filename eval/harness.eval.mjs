@@ -80,7 +80,7 @@ describe('harness eval', {
       'export function add(a, b) {\n  return a - b; // BUG: should be +\n}\n',
     );
 
-    const result = await run(
+    await run(
       'Read buggy.mjs and fix the bug in the add function. It should add, not subtract.',
       { cwd: tmpDir, baseUrl: LM_STUDIO_URL, quiet: true },
     );

@@ -97,7 +97,7 @@ async function walk(dir, root, files) {
     const rel = relative(root, full);
 
     if (entry.isDirectory()) {
-      files.push(rel + '/');
+      files.push(`${rel}/`);
       await walk(full, root, files);
     } else {
       files.push(rel);

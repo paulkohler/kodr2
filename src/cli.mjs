@@ -227,7 +227,7 @@ Examples:
   kodr "fix the failing test" --test "node --test"
   kodr "add error handling" --continue last
 `;
-  process.stdout.write(help.trim() + '\n');
+  process.stdout.write(`${help.trim()}\n`);
 }
 
 async function printVersion() {

@@ -49,7 +49,7 @@ export default {
           error: `file too large: ${info.size} bytes (max ${MAX_SIZE})`,
         };
       }
-    } catch (e) {
+    } catch {
       return { error: `file not found: ${path}` };
     }
 

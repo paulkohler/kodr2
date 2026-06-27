@@ -4,7 +4,7 @@
  * that goes into the system prompt.
  */
 
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { resolveExistingPath } from './path-jail.mjs';
 import { discoverSkills } from './skills.mjs';

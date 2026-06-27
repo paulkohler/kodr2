@@ -124,8 +124,7 @@ export function validateCdTargets(command, cwd) {
 function findCdTargets(command) {
   const targets = [];
   const pattern = /(^|[;&|]\s*)cd\s+(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/g;
-  let match;
-  while ((match = pattern.exec(command)) !== null) {
+  for (const match of command.matchAll(pattern)) {
     const target = match[2] || match[3] || match[4];
     if (target) {
       targets.push(target);
@@ -153,7 +152,7 @@ export function executeCommand(command, cwd, options = {}) {
   const maxOutput = options.maxOutput ?? MAX_OUTPUT;
   const env = options.env ?? buildEnv();
   return new Promise((resolve) => {
-    const child = execFile(
+    execFile(
       '/bin/sh',
       ['-c', command],
       {
@@ -185,5 +184,5 @@ function truncate(text, max) {
   if (text.length <= max) {
     return text;
   }
-  return text.slice(0, max) + '\n[truncated]';
+  return `${text.slice(0, max)}\n[truncated]`;
 }

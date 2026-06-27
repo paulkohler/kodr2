@@ -193,7 +193,7 @@ function transportFor(url) {
 
 function parseSseLine(line) {
   const trimmed = line.trim();
-  if (!trimmed || !trimmed.startsWith('data: ')) {
+  if (!trimmed?.startsWith('data: ')) {
     return null;
   }
   const payload = trimmed.slice(6);

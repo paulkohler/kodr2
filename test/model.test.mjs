@@ -115,7 +115,7 @@ describe('model HTTP client', () => {
   });
 
   it('emits text tokens to onToken as they stream', async () => {
-    const baseUrl = await startServer((req, res) => {
+    const baseUrl = await startServer((_req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/event-stream' });
       res.end(
         'data: {"choices":[{"delta":{"role":"assistant","content":"he"}}]}\n\n' +
@@ -134,7 +134,7 @@ describe('model HTTP client', () => {
   });
 
   it('surfaces HTTP errors from model listing', async () => {
-    const baseUrl = await startServer((req, res) => {
+    const baseUrl = await startServer((_req, res) => {
       res.writeHead(503);
       res.end('unavailable');
     });
@@ -143,7 +143,7 @@ describe('model HTTP client', () => {
   });
 
   it('surfaces HTTP errors from chat', async () => {
-    const baseUrl = await startServer((req, res) => {
+    const baseUrl = await startServer((_req, res) => {
       res.writeHead(400);
       res.end('bad request');
     });

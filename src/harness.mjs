@@ -81,7 +81,7 @@ export async function run(prompt, options) {
   messages.push({ role: 'user', content: prompt });
 
   // Run tool loop
-  let totalUsage = { prompt: 0, completion: 0 };
+  const totalUsage = { prompt: 0, completion: 0 };
   let toolTurns = 0;
   let finalText = '';
   let completed = false;
@@ -138,7 +138,7 @@ export async function run(prompt, options) {
 
   // The model never produced a final response — it hit the tool-turn ceiling.
   if (!completed && !quiet) {
-    process.stderr.write(formatNotice(formatStopReason(stoppedReason)) + '\n');
+    process.stderr.write(`${formatNotice(formatStopReason(stoppedReason))}\n`);
   }
 
   // Build result
@@ -161,7 +161,7 @@ export async function run(prompt, options) {
     result.verification = verifyResult;
 
     if (!quiet) {
-      process.stderr.write(formatVerification(verifyResult) + '\n');
+      process.stderr.write(`${formatVerification(verifyResult)}\n`);
     }
 
     // Heal if verification failed
@@ -189,7 +189,7 @@ export async function run(prompt, options) {
   await saveRun(cwd, result, startedAt);
 
   if (!quiet) {
-    process.stderr.write(formatSummary(result) + '\n');
+    process.stderr.write(`${formatSummary(result)}\n`);
   }
 
   return result;

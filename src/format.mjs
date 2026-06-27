@@ -129,16 +129,16 @@ function summariseArgs(name, args) {
 function summariseResult(name, result) {
   if (name === 'read_file' && result.content) {
     const lines = result.content.split('\n').length;
-    return DIM + `${lines} lines` + RESET;
+    return `${DIM}${lines} lines${RESET}`;
   }
   if (name === 'list_files' && result.files) {
-    return DIM + `${result.files.length} entries` + RESET;
+    return `${DIM}${result.files.length} entries${RESET}`;
   }
   if (name === 'write_file') {
-    return DIM + 'written' + RESET;
+    return `${DIM}written${RESET}`;
   }
   if (name === 'search' && result.matches) {
-    return DIM + `${result.matches.length} matches` + RESET;
+    return `${DIM}${result.matches.length} matches${RESET}`;
   }
   if (name === 'run_command') {
     const code = result.exitCode === 0 ? 'exit 0' : `exit ${result.exitCode}`;

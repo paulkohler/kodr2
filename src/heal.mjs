@@ -39,11 +39,11 @@ export async function heal(params) {
   } = params;
 
   let lastOutput = failure.output;
-  let totalUsage = { prompt: 0, completion: 0 };
+  const totalUsage = { prompt: 0, completion: 0 };
 
   for (let turn = 1; turn <= maxTurns; turn++) {
     if (!quiet) {
-      process.stderr.write(formatHealTurn(turn, maxTurns) + '\n');
+      process.stderr.write(`${formatHealTurn(turn, maxTurns)}\n`);
     }
 
     // Add failure context
@@ -123,7 +123,7 @@ function normalizeOutput(output) {
 }
 
 async function runToolLoop(client, modelId, messages, tools, quiet) {
-  let totalUsage = { prompt: 0, completion: 0 };
+  const totalUsage = { prompt: 0, completion: 0 };
 
   let toolTurns = 0;
   while (toolTurns < MAX_TOOL_TURNS) {
