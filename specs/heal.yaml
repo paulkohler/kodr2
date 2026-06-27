@@ -29,6 +29,15 @@ inputs:
   maxTurns:
     type: number
     description: Maximum repair turns (default 3)
+  quiet:
+    type: boolean
+    description: Suppress streamed output (default false)
+  startedAt:
+    type: object
+    description: Run start time, for the run-budget check
+  maxRunMs:
+    type: number
+    description: Stop repairing between turns after this many ms (0 disables)
 
 outputs:
   healed:
@@ -45,9 +54,12 @@ outputs:
     description: Cumulative token usage
 
 constraints:
+  - Repair runs on the shared tool loop, the same one the main run uses, so behavior cannot diverge
   - No-progress detection stops early when consecutive failures are identical after normalizing timings and timestamps
   - Each turn adds failure context as a user message
   - Model gets full tool access during repair
+  - Repair output is streamed to the terminal unless quiet
+  - Honors the run budget — stops repairing if maxRunMs elapses during a turn
   - Turn limit prevents infinite loops
 
 tests:

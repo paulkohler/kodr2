@@ -10,12 +10,14 @@ import { buildEnv } from './env.mjs';
 import { verify } from './verify.mjs';
 import { heal } from './heal.mjs';
 import {
-  executeNativeToolCalls,
-  executeRecoveredTextToolCall,
+  MAX_TOOL_TURNS,
+  isRunBudgetExceeded,
+  runToolLoop,
 } from './tool-loop.mjs';
 import { formatNotice, formatVerification, formatSummary } from './format.mjs';
 
-const MAX_TOOL_TURNS = 20;
+// Re-exported for callers (and tests) that imported it from the harness.
+export { isRunBudgetExceeded };
 
 /**
  * Run the harness.
@@ -80,63 +82,20 @@ export async function run(prompt, options) {
 
   messages.push({ role: 'user', content: prompt });
 
-  // Run tool loop
-  const totalUsage = { prompt: 0, completion: 0 };
-  let toolTurns = 0;
-  let finalText = '';
-  let completed = false;
-  let stoppedReason = 'tool-limit';
+  // Run the tool loop
+  const loop = await runToolLoop({
+    client,
+    modelId,
+    messages,
+    tools,
+    quiet,
+    startedAt,
+    maxRunMs,
+  });
+  const totalUsage = loop.usage;
+  const { completed, stoppedReason, toolTurns } = loop;
 
-  while (toolTurns < MAX_TOOL_TURNS) {
-    if (isRunBudgetExceeded(startedAt, maxRunMs)) {
-      stoppedReason = 'budget-exceeded';
-      break;
-    }
-
-    const { message, usage } = await client.chat({
-      model: modelId,
-      messages,
-      tools: tools.definitions(),
-      onToken: quiet ? undefined : (t) => process.stdout.write(t),
-    });
-
-    totalUsage.prompt += usage.prompt;
-    totalUsage.completion += usage.completion;
-
-    messages.push(message);
-
-    const nativeCalls = await executeNativeToolCalls(
-      message,
-      tools,
-      messages,
-      quiet,
-    );
-    if (nativeCalls === 0) {
-      const recovered = await executeRecoveredTextToolCall(
-        message,
-        tools,
-        messages,
-        quiet,
-      );
-      if (!recovered) {
-        finalText = message.content || '';
-        completed = true;
-        stoppedReason = 'complete';
-        if (!quiet) {
-          process.stdout.write('\n');
-        }
-        break;
-      }
-    }
-
-    toolTurns++;
-    if (isRunBudgetExceeded(startedAt, maxRunMs)) {
-      stoppedReason = 'budget-exceeded';
-      break;
-    }
-  }
-
-  // The model never produced a final response — it hit the tool-turn ceiling.
+  // The model never produced a final response — it ran out of turns or budget.
   if (!completed && !quiet) {
     process.stderr.write(`${formatNotice(formatStopReason(stoppedReason))}\n`);
   }
@@ -144,7 +103,7 @@ export async function run(prompt, options) {
   // Build result
   const result = {
     metadata,
-    response: finalText,
+    response: loop.finalText,
     filesChanged: tools.filesChanged(),
     toolTurns,
     stoppedReason,
@@ -175,6 +134,8 @@ export async function run(prompt, options) {
         failure: verifyResult,
         maxTurns: maxHealTurns,
         quiet,
+        startedAt,
+        maxRunMs,
       });
 
       result.healed = healResult.healed;
@@ -193,13 +154,6 @@ export async function run(prompt, options) {
   }
 
   return result;
-}
-
-export function isRunBudgetExceeded(startedAt, maxRunMs) {
-  if (!maxRunMs) {
-    return false;
-  }
-  return Date.now() - startedAt.getTime() >= maxRunMs;
 }
 
 function formatStopReason(stoppedReason) {
