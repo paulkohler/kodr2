@@ -23,6 +23,10 @@ kodr "refactor the auth module" --test "node --test"
 kodr "now add error handling" --continue last
 ```
 
+For a worked multi-turn example — scaffolding an Express TODO API and
+extending it across several `--continue` turns — see
+[examples/todo-express.md](examples/todo-express.md).
+
 ## Requirements
 
 - Node.js 22+
