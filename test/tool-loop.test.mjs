@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 
 import {
   MAX_TOOL_TURNS,
+  executeNativeToolCalls,
   executeRecoveredTextToolCall,
   recoverTextToolCall,
   runToolLoop,
@@ -201,5 +202,122 @@ describe('runToolLoop', () => {
     assert.equal(loop.stoppedReason, 'budget-exceeded');
     assert.equal(loop.toolTurns, 0);
     assert.equal(client.calls.length, 0);
+  });
+});
+
+// Tool calls come straight from the model and are untrusted: argument JSON may
+// be malformed, names may be invented, and a single message may carry several
+// calls. executeNativeToolCalls must dispatch each one without throwing and
+// always feed back a parseable tool result.
+function nativeToolMessage(calls) {
+  return {
+    role: 'assistant',
+    content: '',
+    tool_calls: calls.map((call, i) => ({
+      id: call.id ?? `call_${i}`,
+      type: 'function',
+      function: { name: call.name, arguments: call.arguments },
+    })),
+  };
+}
+
+describe('executeNativeToolCalls (untrusted model output)', () => {
+  beforeEach(setup);
+  afterEach(teardown);
+
+  it('dispatches every call in a multi-call message, one result each', async () => {
+    await writeFile(join(tmpDir, 'a.txt'), 'contents');
+    const registry = createToolRegistry(tmpDir);
+    const messages = [];
+    const executed = await executeNativeToolCalls(
+      nativeToolMessage([
+        { name: 'list_files', arguments: '{}' },
+        { name: 'read_file', arguments: '{"path":"a.txt"}' },
+      ]),
+      registry,
+      messages,
+      true,
+    );
+
+    assert.equal(executed, 2);
+    assert.equal(messages.length, 2);
+    assert.deepEqual(
+      messages.map((m) => m.tool_call_id),
+      ['call_0', 'call_1'],
+    );
+    for (const message of messages) {
+      assert.equal(message.role, 'tool');
+      assert.doesNotThrow(() => JSON.parse(message.content));
+    }
+  });
+
+  it('tolerates malformed argument JSON by dispatching empty args', async () => {
+    const registry = createToolRegistry(tmpDir);
+    const messages = [];
+    const executed = await executeNativeToolCalls(
+      nativeToolMessage([{ name: 'read_file', arguments: 'not json{' }]),
+      registry,
+      messages,
+      true,
+    );
+
+    assert.equal(executed, 1);
+    const result = JSON.parse(messages[0].content);
+    assert.match(result.error, /path is required/);
+  });
+
+  it('handles repeated identical tool calls', async () => {
+    const registry = createToolRegistry(tmpDir);
+    const messages = [];
+    const executed = await executeNativeToolCalls(
+      nativeToolMessage([
+        { name: 'write_file', arguments: '{"path":"dup.txt","content":"x"}' },
+        { name: 'write_file', arguments: '{"path":"dup.txt","content":"y"}' },
+      ]),
+      registry,
+      messages,
+      true,
+    );
+
+    assert.equal(executed, 2);
+    assert.equal(messages.length, 2);
+    assert.equal(await readFile(join(tmpDir, 'dup.txt'), 'utf8'), 'y');
+    assert.deepEqual(registry.filesChanged(), ['dup.txt']);
+  });
+
+  it('surfaces model-invented tool names as error results', async () => {
+    const registry = createToolRegistry(tmpDir);
+    const messages = [];
+    const executed = await executeNativeToolCalls(
+      nativeToolMessage([{ name: 'destroy_everything', arguments: '{}' }]),
+      registry,
+      messages,
+      true,
+    );
+
+    assert.equal(executed, 1);
+    const result = JSON.parse(messages[0].content);
+    assert.match(result.error, /unknown tool/i);
+  });
+
+  it('treats a message with no tool calls as nothing to execute', async () => {
+    const registry = createToolRegistry(tmpDir);
+    const messages = [];
+    const empty = await executeNativeToolCalls(
+      { role: 'assistant', content: 'done', tool_calls: [] },
+      registry,
+      messages,
+      true,
+    );
+    const missing = await executeNativeToolCalls(
+      { role: 'assistant', content: 'done' },
+      registry,
+      messages,
+      true,
+    );
+
+    assert.equal(empty, 0);
+    assert.equal(missing, 0);
+    assert.equal(messages.length, 0);
   });
 });

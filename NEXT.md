@@ -18,5 +18,7 @@
 
 - Track live-eval pass rates across supported local models.
 - Add Windows coverage if `/bin/sh` command execution becomes portable.
-- Add adversarial evals for malformed and repeated model tool calls.
+- Adversarial unit coverage for malformed/repeated/unknown native tool
+  calls landed in `test/tool-loop.test.mjs`. Add live-model evals next, to
+  see how real local models recover when handed those error results.
 - Consider a longer-running tool-turn exhaustion eval outside required CI.

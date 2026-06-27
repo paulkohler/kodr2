@@ -94,6 +94,9 @@ tests:
     - workspace file listing skips operator logs and copied kodr artifacts
     - system prompt requires native tool-channel calls
     - recovers exact text-form tool calls through the tool registry
+    - shared tool loop completes, exhausts turns, and stops on budget
+    - dispatches multi-call and repeated native tool calls, one result each
+    - tolerates malformed argument JSON and model-invented tool names
   eval:
     - end-to-end run produces file changes on a simple task
     - tool loop terminates within turn limit
