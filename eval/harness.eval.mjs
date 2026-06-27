@@ -174,6 +174,27 @@ describe('harness eval', {
     assert.match(result.response, /42/);
   });
 
+  it('compacts a long session and still finishes', {
+    timeout: 180_000,
+  }, async () => {
+    // A tiny context window forces compaction after the first tool turn,
+    // exercising the full summarize-and-continue path against a real model.
+    await writeFile(join(tmpDir, 'count.txt'), '7');
+    const result = await run(
+      'Read count.txt, then create doubled.txt containing that number doubled.',
+      {
+        cwd: tmpDir,
+        baseUrl: LM_STUDIO_URL,
+        quiet: true,
+        contextWindow: 1,
+      },
+    );
+
+    assert.ok(result.compactions >= 1, 'should have compacted at least once');
+    const content = await readFile(join(tmpDir, 'doubled.txt'), 'utf8');
+    assert.match(content, /14/);
+  });
+
   it('continues a prior run through the CLI', {
     timeout: 180_000,
   }, async () => {

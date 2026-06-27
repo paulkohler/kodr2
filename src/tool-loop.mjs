@@ -10,7 +10,12 @@
  * `tool_name[ARGS]{...}` as assistant text after receiving tool results.
  */
 
-import { formatToolCall, formatToolResult } from './format.mjs';
+import { formatNotice, formatToolCall, formatToolResult } from './format.mjs';
+import {
+  COMPACTION_THRESHOLD,
+  compactMessages,
+  needsCompaction,
+} from './compact.mjs';
 
 export const MAX_TOOL_TURNS = 20;
 
@@ -25,14 +30,18 @@ export const MAX_TOOL_TURNS = 20;
  * @param {boolean} [params.quiet] - Suppress streamed output
  * @param {Date} [params.startedAt] - Run start, for the budget check
  * @param {number} [params.maxRunMs] - Stop between turns after this many ms (0 disables)
- * @returns {Promise<{ finalText: string, completed: boolean, stoppedReason: string, toolTurns: number, usage: { prompt: number, completion: number } }>}
+ * @param {number} [params.contextWindow] - Max context window in tokens (0 disables compaction)
+ * @param {number} [params.compactThreshold] - Fraction of the window that triggers compaction
+ * @returns {Promise<{ finalText: string, completed: boolean, stoppedReason: string, toolTurns: number, compactions: number, usage: { prompt: number, completion: number } }>}
  */
 export async function runToolLoop(params) {
   const { client, modelId, messages, tools, quiet = false } = params;
   const { startedAt, maxRunMs = 0 } = params;
+  const { contextWindow = 0, compactThreshold = COMPACTION_THRESHOLD } = params;
 
   const usage = { prompt: 0, completion: 0 };
   let toolTurns = 0;
+  let compactions = 0;
   let finalText = '';
   let completed = false;
   let stoppedReason = 'tool-limit';
@@ -52,6 +61,7 @@ export async function runToolLoop(params) {
 
     usage.prompt += turnUsage.prompt;
     usage.completion += turnUsage.completion;
+    const lastPromptTokens = turnUsage.prompt;
     messages.push(message);
 
     const nativeCalls = await executeNativeToolCalls(
@@ -83,9 +93,62 @@ export async function runToolLoop(params) {
       stoppedReason = 'budget-exceeded';
       break;
     }
+
+    const compacted = await maybeCompact({
+      client,
+      modelId,
+      messages,
+      lastPromptTokens,
+      contextWindow,
+      compactThreshold,
+      quiet,
+      usage,
+    });
+    if (compacted) {
+      compactions++;
+    }
   }
 
-  return { finalText, completed, stoppedReason, toolTurns, usage };
+  return { finalText, completed, stoppedReason, toolTurns, compactions, usage };
+}
+
+/**
+ * Compact the conversation in place when the live context has crossed the
+ * threshold. Best effort: a failed summary leaves the conversation untouched
+ * and the loop continues.
+ * @param {object} params
+ * @returns {Promise<boolean>} Whether the conversation was compacted
+ */
+async function maybeCompact(params) {
+  const { client, modelId, messages, lastPromptTokens, usage, quiet } = params;
+  const { contextWindow, compactThreshold } = params;
+
+  if (!needsCompaction(lastPromptTokens, contextWindow, compactThreshold)) {
+    return false;
+  }
+
+  if (!quiet) {
+    const limit = Math.round(contextWindow * compactThreshold);
+    process.stderr.write(
+      `${formatNotice(`compacting context (${lastPromptTokens} >= ${limit} tokens)`)}\n`,
+    );
+  }
+
+  const result = await compactMessages({ client, modelId, messages, quiet });
+  usage.prompt += result.usage.prompt;
+  usage.completion += result.usage.completion;
+
+  if (result.error) {
+    if (!quiet) {
+      process.stderr.write(
+        `${formatNotice(`compaction skipped: ${result.error}`)}\n`,
+      );
+    }
+    return false;
+  }
+
+  messages.splice(0, messages.length, ...result.messages);
+  return true;
 }
 
 /**

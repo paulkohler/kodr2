@@ -57,6 +57,28 @@ describe('parseArgs', () => {
     assert.equal(args.maxRunMs, 1000);
   });
 
+  it('parses --context-window flag', () => {
+    const args = parseArgs(['run', 'hi', '--context-window', '32768']);
+    assert.equal(args.contextWindow, 32768);
+  });
+
+  it('defaults context window to null (harness resolves it)', () => {
+    const args = parseArgs(['run', 'hi']);
+    assert.equal(args.contextWindow, null);
+  });
+
+  it('parses the "models" subcommand without a prompt', () => {
+    const args = parseArgs(['models']);
+    assert.equal(args.command, 'models');
+    assert.equal(args.prompt, null);
+  });
+
+  it('treats "/compact" as the prompt', () => {
+    const args = parseArgs(['/compact']);
+    assert.equal(args.prompt, '/compact');
+    assert.equal(args.command, 'run');
+  });
+
   it('parses --quiet flag', () => {
     const args = parseArgs(['run', 'hi', '--quiet']);
     assert.equal(args.quiet, true);

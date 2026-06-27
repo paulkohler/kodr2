@@ -22,7 +22,9 @@ const DEFAULT_MAX_TURNS = 3;
  * @param {boolean} [params.quiet] - Suppress terminal output
  * @param {Date} [params.startedAt] - Run start, for the budget check
  * @param {number} [params.maxRunMs] - Stop between turns after this many ms (0 disables)
- * @returns {Promise<{ healed: boolean, turns: number, verification: object, usage: { prompt: number, completion: number } }>}
+ * @param {number} [params.contextWindow] - Max context window in tokens (0 disables compaction)
+ * @param {number} [params.compactThreshold] - Fraction of the window that triggers compaction
+ * @returns {Promise<{ healed: boolean, turns: number, verification: object, compactions: number, usage: { prompt: number, completion: number } }>}
  */
 export async function heal(params) {
   const {
@@ -36,9 +38,12 @@ export async function heal(params) {
     quiet = false,
     startedAt,
     maxRunMs = 0,
+    contextWindow = 0,
+    compactThreshold,
   } = params;
 
   let lastOutput = failure.output;
+  let compactions = 0;
   const totalUsage = { prompt: 0, completion: 0 };
 
   for (let turn = 1; turn <= maxTurns; turn++) {
@@ -69,9 +74,12 @@ ${lastOutput}
       quiet,
       startedAt,
       maxRunMs,
+      contextWindow,
+      compactThreshold,
     });
     totalUsage.prompt += loop.usage.prompt;
     totalUsage.completion += loop.usage.completion;
+    compactions += loop.compactions || 0;
 
     // Re-verify
     const result = await verifyFn();
@@ -80,6 +88,7 @@ ${lastOutput}
         healed: true,
         turns: turn,
         verification: result,
+        compactions,
         usage: totalUsage,
       };
     }
@@ -90,6 +99,7 @@ ${lastOutput}
         healed: false,
         turns: turn,
         verification: result,
+        compactions,
         usage: totalUsage,
       };
     }
@@ -100,6 +110,7 @@ ${lastOutput}
         healed: false,
         turns: turn,
         verification: result,
+        compactions,
         usage: totalUsage,
       };
     }
@@ -113,6 +124,7 @@ ${lastOutput}
     healed: finalResult.passed,
     turns: maxTurns,
     verification: finalResult,
+    compactions,
     usage: totalUsage,
   };
 }

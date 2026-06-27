@@ -1,0 +1,57 @@
+name: models-command
+status: implemented
+description: >
+  Surface LM Studio's model context windows so the operator can tell when a
+  model is loaded far below the window it could support. Adds a `kodr models`
+  listing and a startup warning during runs when the loaded window has unused
+  headroom — because a window loaded well under the model's max means more
+  compactions than necessary, and the operator may simply not have noticed.
+
+inputs:
+  baseUrl:
+    type: string
+    description: LM Studio API URL (default localhost:1234)
+  model:
+    type: string
+    description: Model identifier (for the run-time warning; the resolved model)
+
+outputs:
+  listing:
+    type: string
+    description: >
+      For `kodr models` — each model with its load state, loaded/max context
+      windows, and a headroom flag on loaded models with room to grow
+  warning:
+    type: string
+    description: >
+      During a run — a one-line notice when the loaded window is at least
+      HEADROOM_FACTOR (2×) below the model's max
+
+constraints:
+  - Context info is read from LM Studio's /api/v0/models endpoint, which reports
+    state, loaded_context_length, and max_context_length per model
+  - hasContextHeadroom is true when max >= loaded * HEADROOM_FACTOR (2×), and
+    false when either length is unknown or loaded is non-positive
+  - The headroom warning only fires on the probe path (no explicit
+    --context-window / KODR_CONTEXT_WINDOW), since an explicit setting is a
+    deliberate choice
+  - The warning is suppressed in quiet mode
+  - `kodr models` is a standalone subcommand that takes no prompt
+  - `kodr models` degrades gracefully: an unreachable or missing /api/v0/models
+    endpoint yields a clear "no models reported" message, not an error
+  - Loaded models are marked; not-loaded models show only their max window
+
+tests:
+  unit:
+    - hasContextHeadroom flags a model loaded well below its max
+    - hasContextHeadroom does not flag a model at or near its max
+    - hasContextHeadroom returns false when a length is unknown
+    - pickContextInfo returns loaded and max for the matching model
+    - pickContextInfo falls back to any loaded model
+    - pickContextInfo returns nulls when nothing is loaded
+    - client contextInfo probes loaded and max from /api/v0/models
+    - client richModels returns an empty array when the endpoint is absent
+    - formatModelsList shows loaded/max windows and flags headroom
+    - formatModelsList does not warn when loaded is near max
+    - formatModelsList reports when no models are available
+    - parseArgs parses the "models" subcommand without a prompt

@@ -1,0 +1,93 @@
+name: compaction
+status: implemented
+description: >
+  Keep a run inside the model's context window by compacting the
+  conversation when it grows large. The system prompt stays intact and
+  tool definitions are supplied fresh on every model call, so only the
+  message history is compressed: the older turns are summarized by the
+  model into one dense summary message that replaces them. Triggered
+  automatically between tool turns when the live context crosses a
+  threshold, and on demand via the "/compact" command.
+
+inputs:
+  client:
+    type: object
+    required: true
+    description: Model client used to generate the summary
+  modelId:
+    type: string
+    required: true
+    description: Model to summarize with
+  messages:
+    type: array
+    required: true
+    description: Conversation so far (system message first)
+  contextWindow:
+    type: number
+    description: >
+      Max context window in tokens (0 disables auto-compaction). Resolved on
+      startup by precedence: explicit option / KODR_CONTEXT_WINDOW env, then the
+      model's loaded context length probed from LM Studio, then the default.
+  compactThreshold:
+    type: number
+    description: Fraction of the context window that triggers compaction (default 0.8)
+  quiet:
+    type: boolean
+    description: Suppress streamed summary output (default false)
+
+outputs:
+  messages:
+    type: array
+    description: Compacted conversation — system message plus one summary message
+  summary:
+    type: string
+    description: The dense summary text the model produced
+  usage:
+    type: object
+    description: "{ prompt, completion } tokens spent generating the summary"
+  error:
+    type: string
+    description: Present when summarization failed; messages are returned unchanged
+
+constraints:
+  - The system message is preserved verbatim — never summarized or dropped
+  - Tool definitions are not part of the message history; they are supplied
+    fresh on every model call, so compaction always keeps full tool access
+  - Only the non-system messages (the history) are compressed
+  - The history is replaced by a single user message holding the summary,
+    so no assistant tool_call is left without its matching tool result
+  - Auto-compaction is checked between tool turns, after the turn's results
+    are appended, using the most recent request's prompt-token count
+  - needsCompaction is true when promptTokens >= contextWindow * threshold,
+    and always false when the context window is 0 or unknown
+  - The summary model call adds its token usage to the run total
+  - A failed or empty summary leaves the conversation unchanged (best effort);
+    the run continues rather than aborting
+  - "/compact" compacts the prior conversation on demand; with no prior
+    conversation it reports there is nothing to compact
+  - The context window is resolved on startup: an explicit option or
+    KODR_CONTEXT_WINDOW wins; otherwise the model's loaded context length is
+    probed from LM Studio's /api/v0/models endpoint; otherwise the default is used
+  - Probing falls back silently to the default when /api/v0/models is absent or
+    reports no loaded context length
+  - The resolved context window is recorded in run metadata and the number of
+    compactions in the run record
+
+tests:
+  unit:
+    - needsCompaction is false when the context window is zero
+    - needsCompaction is false below the threshold
+    - needsCompaction is true at or above the threshold
+    - renderTranscript flattens user, assistant, tool-call, and tool messages
+    - renderTranscript skips the system message
+    - compactMessages keeps the system message and replaces history with a summary
+    - compactMessages leaves messages unchanged when summarization fails
+    - compactMessages is a no-op when there is no history to compact
+    - tool loop compacts in place when a turn crosses the threshold
+    - tool loop does not compact when below the threshold
+    - isCompactCommand recognizes "/compact"
+    - configuredContextWindow reads an explicit value and the env var, else null
+    - pickLoadedContextLength selects the model's loaded length, else null
+    - client probes loaded context length from /api/v0/models
+  eval:
+    - a long multi-turn session compacts and still completes the task

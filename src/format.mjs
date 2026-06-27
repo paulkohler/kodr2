@@ -4,6 +4,8 @@
  * in a compact, readable format for the terminal.
  */
 
+import { hasContextHeadroom } from './model.mjs';
+
 const RESET = '\x1b[0m';
 const DIM = '\x1b[2m';
 const BOLD = '\x1b[1m';
@@ -103,6 +105,63 @@ export function formatSummary(result) {
   }
 
   return lines.join('\n');
+}
+
+/**
+ * Format the model listing for `kodr models`: each model with its load state
+ * and loaded/max context windows, flagging any loaded model that has unused
+ * context headroom.
+ * @param {Array} models - The `data` array from /api/v0/models
+ * @param {string} [baseUrl]
+ * @returns {string}
+ */
+export function formatModelsList(models, baseUrl) {
+  const url = baseUrl || 'http://localhost:1234/v1';
+  if (!models || models.length === 0) {
+    return `${formatNotice(`No models reported by ${url} — is LM Studio running with its /api/v0/models endpoint available?`)}`;
+  }
+
+  const lines = [`${BOLD}LM Studio models${RESET} ${DIM}${url}${RESET}`, ''];
+  let anyHeadroom = false;
+
+  for (const model of models) {
+    const loaded = model.state === 'loaded';
+    const dot = loaded ? `${GREEN}●${RESET}` : `${DIM}○${RESET}`;
+    lines.push(`  ${dot} ${model.id}  ${modelContextSummary(model)}`);
+    if (
+      loaded &&
+      hasContextHeadroom(model.loaded_context_length, model.max_context_length)
+    ) {
+      anyHeadroom = true;
+    }
+  }
+
+  if (anyHeadroom) {
+    lines.push('');
+    lines.push(
+      `${YELLOW}⚠${RESET} ${DIM}A loaded model below its max can be reloaded with a larger context length in LM Studio. A bigger window means longer sessions and fewer compactions, at the cost of more memory.${RESET}`,
+    );
+  }
+  return lines.join('\n');
+}
+
+function modelContextSummary(model) {
+  const max = Number.isInteger(model.max_context_length)
+    ? model.max_context_length
+    : null;
+
+  if (
+    model.state === 'loaded' &&
+    Number.isInteger(model.loaded_context_length)
+  ) {
+    const loaded = model.loaded_context_length;
+    let summary = `${DIM}loaded ${RESET}${loaded}${DIM} / ${max ?? '?'} max${RESET}`;
+    if (hasContextHeadroom(loaded, max)) {
+      summary += ` ${YELLOW}⚠ ${Math.floor(max / loaded)}× headroom${RESET}`;
+    }
+    return summary;
+  }
+  return `${DIM}${max ?? '?'} max${RESET}`;
 }
 
 // --- helpers ---

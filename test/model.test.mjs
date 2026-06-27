@@ -2,7 +2,12 @@ import { after, afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 
-import { assembleResponse, createClient } from '../src/model.mjs';
+import {
+  assembleResponse,
+  createClient,
+  hasContextHeadroom,
+  pickContextInfo,
+} from '../src/model.mjs';
 
 const servers = [];
 const originalKodrModel = process.env.KODR_MODEL;
@@ -155,6 +160,125 @@ describe('model HTTP client', () => {
     const baseUrl = await startServer(() => {});
     const client = createClient({ baseUrl, timeout: 20 });
     await assert.rejects(client.models(), /timed out/i);
+  });
+
+  it('probes loaded and max context from /api/v0/models', async () => {
+    let probedPath;
+    const baseUrl = await startServer((req, res) => {
+      probedPath = req.url;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          data: [
+            {
+              id: 'a/model',
+              state: 'loaded',
+              loaded_context_length: 8192,
+              max_context_length: 131072,
+            },
+            {
+              id: 'b/model',
+              state: 'loaded',
+              loaded_context_length: 32768,
+              max_context_length: 262144,
+            },
+          ],
+        }),
+      );
+    });
+    const client = createClient({ baseUrl, model: 'b/model' });
+    assert.deepEqual(await client.contextInfo('b/model'), {
+      loaded: 32768,
+      max: 262144,
+    });
+    assert.equal(probedPath, '/api/v0/models');
+  });
+
+  it('returns nulls when the probe endpoint is unavailable', async () => {
+    const baseUrl = await startServer((_req, res) => {
+      res.writeHead(404);
+      res.end('not found');
+    });
+    const client = createClient({ baseUrl, model: 'test' });
+    assert.deepEqual(await client.contextInfo('test'), {
+      loaded: null,
+      max: null,
+    });
+  });
+
+  it('richModels returns an empty array when the endpoint is absent', async () => {
+    const baseUrl = await startServer((_req, res) => {
+      res.writeHead(404);
+      res.end('not found');
+    });
+    const client = createClient({ baseUrl, model: 'test' });
+    assert.deepEqual(await client.richModels(), []);
+  });
+});
+
+describe('pickContextInfo', () => {
+  it('prefers the entry matching the model id', () => {
+    const models = [
+      {
+        id: 'a',
+        state: 'loaded',
+        loaded_context_length: 4096,
+        max_context_length: 8192,
+      },
+      {
+        id: 'b',
+        state: 'loaded',
+        loaded_context_length: 8192,
+        max_context_length: 131072,
+      },
+    ];
+    assert.deepEqual(pickContextInfo(models, 'b'), {
+      loaded: 8192,
+      max: 131072,
+    });
+  });
+
+  it('falls back to any loaded model when the id is missing', () => {
+    const models = [
+      { id: 'a', state: 'not-loaded', max_context_length: 200000 },
+      {
+        id: 'b',
+        state: 'loaded',
+        loaded_context_length: 16384,
+        max_context_length: 262144,
+      },
+    ];
+    assert.deepEqual(pickContextInfo(models, 'missing'), {
+      loaded: 16384,
+      max: 262144,
+    });
+  });
+
+  it('returns nulls when no loaded length is reported', () => {
+    const models = [{ id: 'a', state: 'not-loaded', max_context_length: 1000 }];
+    assert.deepEqual(pickContextInfo(models, 'a'), { loaded: null, max: null });
+  });
+
+  it('returns nulls for an empty listing', () => {
+    assert.deepEqual(pickContextInfo([], 'a'), { loaded: null, max: null });
+  });
+});
+
+describe('hasContextHeadroom', () => {
+  it('flags a model loaded well below its max', () => {
+    assert.equal(hasContextHeadroom(32768, 262144), true);
+    assert.equal(hasContextHeadroom(8192, 131072), true);
+  });
+
+  it('does not flag a model loaded at (or near) its max', () => {
+    assert.equal(hasContextHeadroom(32768, 32768), false);
+    assert.equal(hasContextHeadroom(32768, 49152), false);
+  });
+
+  it('returns false when either length is unknown', () => {
+    assert.equal(hasContextHeadroom(null, 262144), false);
+    assert.equal(hasContextHeadroom(8192, null), false);
+    assert.equal(hasContextHeadroom(0, 262144), false);
   });
 });
 

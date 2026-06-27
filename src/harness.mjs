@@ -4,7 +4,7 @@
  */
 
 import { buildSystemPrompt } from './context.mjs';
-import { createClient } from './model.mjs';
+import { createClient, hasContextHeadroom } from './model.mjs';
 import { createToolRegistry } from './tools/index.mjs';
 import { buildEnv } from './env.mjs';
 import { verify } from './verify.mjs';
@@ -15,6 +15,12 @@ import {
   runToolLoop,
 } from './tool-loop.mjs';
 import { formatNotice, formatVerification, formatSummary } from './format.mjs';
+import {
+  DEFAULT_CONTEXT_WINDOW,
+  compactMessages,
+  configuredContextWindow,
+  isCompactCommand,
+} from './compact.mjs';
 
 // Re-exported for callers (and tests) that imported it from the harness.
 export { isRunBudgetExceeded };
@@ -32,6 +38,7 @@ export { isRunBudgetExceeded };
  * @param {boolean} [options.quiet] - Suppress terminal output
  * @param {Array} [options.priorMessages] - Continuation from previous run
  * @param {string[]} [options.envPassthrough] - Extra env var names for commands
+ * @param {number} [options.contextWindow] - Max context window in tokens (0 disables compaction)
  * @returns {Promise<object>} Run result
  */
 export async function run(prompt, options) {
@@ -52,6 +59,12 @@ export async function run(prompt, options) {
   });
 
   const modelId = await client.resolveModel();
+  const contextWindow = await resolveContextWindow({
+    option: options.contextWindow,
+    client,
+    modelId,
+    quiet,
+  });
   const metadata = {
     cwd,
     prompt,
@@ -61,6 +74,7 @@ export async function run(prompt, options) {
     maxHealTurns,
     maxRunMs,
     envPassthrough,
+    contextWindow,
     startedAt: startedAt.toISOString(),
   };
   const tools = createToolRegistry(cwd, { envPassthrough });
@@ -80,6 +94,20 @@ export async function run(prompt, options) {
     }
   }
 
+  // On-demand compaction: "/compact" compresses the prior conversation
+  // instead of running a new task.
+  if (isCompactCommand(prompt)) {
+    return await runManualCompaction({
+      client,
+      modelId,
+      cwd,
+      messages,
+      metadata,
+      quiet,
+      startedAt,
+    });
+  }
+
   messages.push({ role: 'user', content: prompt });
 
   // Run the tool loop
@@ -91,9 +119,11 @@ export async function run(prompt, options) {
     quiet,
     startedAt,
     maxRunMs,
+    contextWindow,
   });
   const totalUsage = loop.usage;
   const { completed, stoppedReason, toolTurns } = loop;
+  let compactions = loop.compactions;
 
   // The model never produced a final response — it ran out of turns or budget.
   if (!completed && !quiet) {
@@ -108,6 +138,7 @@ export async function run(prompt, options) {
     toolTurns,
     stoppedReason,
     usage: totalUsage,
+    compactions,
     messages,
   };
 
@@ -136,11 +167,14 @@ export async function run(prompt, options) {
         quiet,
         startedAt,
         maxRunMs,
+        contextWindow,
       });
 
       result.healed = healResult.healed;
       result.healTurns = healResult.turns;
       result.verification = healResult.verification;
+      compactions += healResult.compactions || 0;
+      result.compactions = compactions;
       totalUsage.prompt += healResult.usage.prompt;
       totalUsage.completion += healResult.usage.completion;
     }
@@ -154,6 +188,118 @@ export async function run(prompt, options) {
   }
 
   return result;
+}
+
+/**
+ * On-demand compaction. Compresses the prior conversation in `messages` and
+ * saves the result as a run, rather than running a new task.
+ * @param {object} params
+ * @returns {Promise<object>} Run result
+ */
+async function runManualCompaction(params) {
+  const { client, modelId, cwd, messages, metadata, quiet, startedAt } = params;
+
+  // messages holds the fresh system prompt plus any continued conversation.
+  const hasHistory = messages.some((message) => message.role !== 'system');
+  if (!hasHistory) {
+    const result = emptyCompactionResult(
+      metadata,
+      messages,
+      'Nothing to compact — no prior conversation. Use --continue to load one.',
+    );
+    await saveRun(cwd, result, startedAt);
+    if (!quiet) {
+      process.stderr.write(`${formatNotice(result.response)}\n`);
+    }
+    return result;
+  }
+
+  const compactResult = await compactMessages({
+    client,
+    modelId,
+    messages,
+    quiet,
+  });
+
+  if (!compactResult.error) {
+    messages.splice(0, messages.length, ...compactResult.messages);
+  }
+
+  const result = {
+    metadata,
+    response: compactResult.error
+      ? `Compaction failed: ${compactResult.error}`
+      : compactResult.summary,
+    filesChanged: [],
+    toolTurns: 0,
+    stoppedReason: 'complete',
+    usage: compactResult.usage,
+    compactions: compactResult.error ? 0 : 1,
+    messages,
+  };
+
+  await saveRun(cwd, result, startedAt);
+  if (!quiet) {
+    process.stderr.write(`${formatSummary(result)}\n`);
+  }
+  return result;
+}
+
+function emptyCompactionResult(metadata, messages, response) {
+  return {
+    metadata,
+    response,
+    filesChanged: [],
+    toolTurns: 0,
+    stoppedReason: 'complete',
+    usage: { prompt: 0, completion: 0 },
+    compactions: 0,
+    messages,
+  };
+}
+
+/**
+ * Resolve the context window for a run. Precedence: an explicit option or the
+ * KODR_CONTEXT_WINDOW env var, then the model's loaded context length probed
+ * from LM Studio, then the built-in default. Emits a one-line notice on startup
+ * so the operator can see which window is in effect.
+ * @param {object} params
+ * @param {number} [params.option] - Explicit --context-window value
+ * @param {object} params.client - Model client (for probing)
+ * @param {string} params.modelId - Resolved model id
+ * @param {boolean} [params.quiet] - Suppress the startup notice
+ * @returns {Promise<number>}
+ */
+export async function resolveContextWindow(params) {
+  const { option, client, modelId, quiet = false } = params;
+
+  const configured = configuredContextWindow(option);
+  if (configured !== null) {
+    return configured;
+  }
+
+  const { loaded, max } = await client.contextInfo(modelId);
+  if (Number.isInteger(loaded) && loaded > 0) {
+    if (!quiet) {
+      process.stderr.write(
+        `${formatNotice(`context window ${loaded} tokens (loaded for ${modelId})`)}\n`,
+      );
+      if (hasContextHeadroom(loaded, max)) {
+        const factor = Math.floor(max / loaded);
+        process.stderr.write(
+          `${formatNotice(`${modelId} supports up to ${max} tokens (${factor}× more) — reload it with a larger context in LM Studio for longer sessions and fewer compactions. Costs more memory.`)}\n`,
+        );
+      }
+    }
+    return loaded;
+  }
+
+  if (!quiet) {
+    process.stderr.write(
+      `${formatNotice(`context window ${DEFAULT_CONTEXT_WINDOW} tokens (default; probe unavailable)`)}\n`,
+    );
+  }
+  return DEFAULT_CONTEXT_WINDOW;
 }
 
 function formatStopReason(stoppedReason) {
@@ -191,6 +337,7 @@ export function createRunRecord(result, finish = {}) {
     toolTurns: result.toolTurns,
     stoppedReason: result.stoppedReason,
     usage: result.usage,
+    compactions: result.compactions ?? null,
     verified: result.verification?.passed ?? null,
     healed: result.healed ?? null,
     healTurns: result.healTurns ?? null,

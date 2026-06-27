@@ -23,7 +23,7 @@ export function createClient(options = {}) {
   const model = resolveConfiguredModel(options.model);
   const timeout = options.timeout || DEFAULT_TIMEOUT;
 
-  return { chat, models, resolveModel };
+  return { chat, models, resolveModel, contextInfo, richModels };
 
   /**
    * Send a chat completion request with optional tool definitions.
@@ -82,7 +82,80 @@ export function createClient(options = {}) {
     }
     return list[0].id;
   }
+
+  /**
+   * The full `/api/v0/models` listing — LM Studio's richer endpoint that
+   * (unlike the OpenAI-compatible `/v1/models`) reports each model's state and
+   * loaded/max context lengths. Returns an empty array when the endpoint is
+   * absent or unreachable, so callers can degrade gracefully.
+   * @returns {Promise<Array>}
+   */
+  async function richModels() {
+    try {
+      const origin = new URL(baseUrl).origin;
+      const data = await jsonRequest(`${origin}/api/v0/models`, timeout);
+      return data.data || [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Probe the context window the model is actually loaded with, plus the
+   * model's maximum supported window. Both fields are null when unknown, so
+   * callers can fall back to a default.
+   * @param {string} modelId
+   * @returns {Promise<{ loaded: number|null, max: number|null }>}
+   */
+  async function contextInfo(modelId) {
+    return pickContextInfo(await richModels(), modelId);
+  }
 }
+
+/**
+ * Pick the loaded and max context lengths for a model from an `/api/v0/models`
+ * listing. Prefers the entry matching modelId; otherwise falls back to any
+ * loaded model (the one actually serving requests).
+ * @param {Array} models - The `data` array from /api/v0/models
+ * @param {string} modelId
+ * @returns {{ loaded: number|null, max: number|null }}
+ */
+export function pickContextInfo(models, modelId) {
+  const byId = models.find(
+    (m) => m.id === modelId && Number.isInteger(m.loaded_context_length),
+  );
+  const chosen =
+    byId ||
+    models.find(
+      (m) => m.state === 'loaded' && Number.isInteger(m.loaded_context_length),
+    );
+  if (!chosen) {
+    return { loaded: null, max: null };
+  }
+  return {
+    loaded: chosen.loaded_context_length,
+    max: Number.isInteger(chosen.max_context_length)
+      ? chosen.max_context_length
+      : null,
+  };
+}
+
+/**
+ * Whether a model loaded at `loaded` tokens has meaningful unused headroom —
+ * its max is at least HEADROOM_FACTOR times the loaded window, so reloading it
+ * larger in LM Studio would buy a materially bigger context.
+ * @param {number|null} loaded
+ * @param {number|null} max
+ * @returns {boolean}
+ */
+export function hasContextHeadroom(loaded, max) {
+  if (!Number.isInteger(loaded) || !Number.isInteger(max) || loaded <= 0) {
+    return false;
+  }
+  return max >= loaded * HEADROOM_FACTOR;
+}
+
+export const HEADROOM_FACTOR = 2;
 
 function resolveConfiguredModel(model) {
   if (model) {

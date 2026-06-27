@@ -8,7 +8,14 @@ import {
   formatHealTurn,
   formatNotice,
   formatSummary,
+  formatModelsList,
 } from '../src/format.mjs';
+
+// Strip ANSI escapes so assertions read against plain text.
+function plain(text) {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI
+  return text.replace(/\x1b\[[0-9;]*m/g, '');
+}
 
 describe('formatToolCall', () => {
   it('includes tool name', () => {
@@ -91,5 +98,55 @@ describe('formatSummary', () => {
     const out = formatSummary({ usage: { prompt: 100, completion: 50 } });
     assert.ok(out.includes('100'));
     assert.ok(out.includes('50'));
+  });
+});
+
+describe('formatModelsList', () => {
+  it('shows loaded/max windows and flags headroom', () => {
+    const out = plain(
+      formatModelsList(
+        [
+          {
+            id: 'google/gemma',
+            state: 'loaded',
+            loaded_context_length: 32768,
+            max_context_length: 262144,
+          },
+          {
+            id: 'openai/gpt-oss',
+            state: 'not-loaded',
+            max_context_length: 131072,
+          },
+        ],
+        'http://localhost:1234/v1',
+      ),
+    );
+
+    assert.match(out, /google\/gemma/);
+    assert.match(out, /loaded 32768 \/ 262144 max/);
+    assert.match(out, /8× headroom/);
+    // Not-loaded models show only their max, no headroom marker.
+    assert.match(out, /openai\/gpt-oss {2}131072 max/);
+    assert.match(out, /reloaded with a larger context length/);
+  });
+
+  it('does not warn when the loaded model is near its max', () => {
+    const out = plain(
+      formatModelsList([
+        {
+          id: 'm',
+          state: 'loaded',
+          loaded_context_length: 32768,
+          max_context_length: 32768,
+        },
+      ]),
+    );
+    assert.doesNotMatch(out, /headroom/);
+    assert.doesNotMatch(out, /reloaded with a larger context/);
+  });
+
+  it('reports when no models are available', () => {
+    const out = plain(formatModelsList([], 'http://localhost:1234/v1'));
+    assert.match(out, /No models reported/);
   });
 });

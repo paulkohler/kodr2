@@ -44,6 +44,28 @@ prompt → context assembly → model + tools loop → verify → heal → done
 3. **Verify** — if `--test` is set and files were changed, runs the test command
 4. **Heal** — if verification failed, feeds the failure back to the model for up to 3 repair turns
 
+Long runs stay inside the model's context window through **compaction**: between
+tool turns, once the live prompt crosses 80% of the context window, the older
+message history is summarized into one dense message and replaces it. The system
+prompt is kept verbatim and the tools stay available (they are supplied fresh on
+every model call), so only the history shrinks. The window is detected on
+startup from the model's loaded context length (LM Studio's `/api/v0/models`);
+override it with `--context-window` (or `KODR_CONTEXT_WINDOW`), and `0` disables
+it. You can also compact a saved conversation on demand:
+`kodr "/compact" --continue last`.
+
+Because LM Studio often loads a model far below the context length it supports,
+`kodr models` lists every model with its loaded vs. max window and flags any
+with unused headroom — and a run warns when the loaded window could be much
+larger. A bigger window means longer sessions and fewer compactions, at the cost
+of memory.
+
+```
+$ kodr models
+● google/gemma-4-26b-a4b  loaded 32768 / 262144 max  ⚠ 8× headroom
+○ openai/gpt-oss-20b      131072 max
+```
+
 ## Tools
 
 The model has these tools available:
@@ -65,6 +87,7 @@ The model has these tools available:
 --model <id>           Model identifier (or KODR_MODEL; auto-detected if omitted)
 --test <command>       Verification command (e.g. "npm test")
 --heal-turns <n>       Max repair turns (default: 3)
+--context-window <n>   Max context tokens; compact at 80% (auto-detected; 0 disables)
 --env <a,b,c>          Extra env vars to expose to commands (CSV of names)
 --continue <last|path> Continue from a prior run
 --quiet, -q            Suppress streaming output

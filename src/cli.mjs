@@ -5,6 +5,8 @@
 import { resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { run } from './harness.mjs';
+import { createClient } from './model.mjs';
+import { formatModelsList } from './format.mjs';
 import { parseEnvNames } from './env.mjs';
 
 /**
@@ -25,6 +27,11 @@ export async function main(argv) {
     return;
   }
 
+  if (args.command === 'models') {
+    await printModels(args);
+    return;
+  }
+
   if (!args.prompt) {
     process.stderr.write('Usage: kodr run "your prompt here"\n');
     process.stderr.write('Run `kodr --help` for more options.\n');
@@ -42,6 +49,14 @@ export async function main(argv) {
     process.exitCode = 1;
     return;
   }
+  if (
+    args.contextWindow !== null &&
+    (!Number.isInteger(args.contextWindow) || args.contextWindow < 0)
+  ) {
+    process.stderr.write('--context-window must be a non-negative integer.\n');
+    process.exitCode = 1;
+    return;
+  }
 
   const cwd = resolve(args.cwd || '.');
   const options = {
@@ -54,6 +69,9 @@ export async function main(argv) {
     quiet: args.quiet,
     envPassthrough: args.env,
   };
+  if (args.contextWindow !== null) {
+    options.contextWindow = args.contextWindow;
+  }
 
   // Handle continuation
   if (args.continue) {
@@ -103,6 +121,7 @@ export function parseArgs(argv) {
     test: null,
     healTurns: 3,
     maxRunMs: 0,
+    contextWindow: null,
     quiet: false,
     env: [],
     continue: null,
@@ -164,6 +183,11 @@ export function parseArgs(argv) {
       i++;
       continue;
     }
+    if (arg === '--context-window' && argv[i + 1]) {
+      args.contextWindow = parseInt(argv[++i], 10);
+      i++;
+      continue;
+    }
     if (arg === '--env' && argv[i + 1]) {
       args.env = parseEnvNames(argv[++i]);
       i++;
@@ -190,6 +214,8 @@ export function parseArgs(argv) {
   // `kodr "prompt"` — no command, prompt is the first arg
   if (args.command === 'run') {
     // prompt is already set from positional
+  } else if (args.command === 'models') {
+    // standalone subcommand — lists models, takes no prompt
   } else if (args.command && !args.prompt) {
     // Treat the command as the prompt (shorthand)
     args.prompt = args.command;
@@ -206,6 +232,7 @@ kodr — a one-shot coding harness for LM Studio
 Usage:
   kodr run "your prompt"          Run a coding task
   kodr "your prompt"              Shorthand for 'kodr run'
+  kodr models                     List LM Studio models and their context windows
 
 Options:
   --cwd <path>                    Workspace directory (default: .)
@@ -215,6 +242,7 @@ Options:
   --test <command>                Verification command (e.g. "npm test")
   --heal-turns <n>                Max repair turns (default: 3)
   --max-run-ms <n>                Stop between turns after this many ms (default: 0, disabled)
+  --context-window <n>            Max context window in tokens; compact at 80% (default: 8192, 0 disables)
   --env <a,b,c>                   Extra env vars to expose to commands (CSV of names)
   --continue <last|path>          Continue from a prior run
   --quiet, -q                     Suppress streaming output
@@ -226,8 +254,15 @@ Examples:
   kodr run -p "add input validation to server.mjs"
   kodr "fix the failing test" --test "node --test"
   kodr "add error handling" --continue last
+  kodr "/compact" --continue last
 `;
   process.stdout.write(`${help.trim()}\n`);
+}
+
+async function printModels(args) {
+  const client = createClient({ baseUrl: args.baseUrl, model: args.model });
+  const models = await client.richModels();
+  process.stdout.write(`${formatModelsList(models, args.baseUrl)}\n`);
 }
 
 async function printVersion() {
