@@ -53,6 +53,12 @@ describe('CLI integration', () => {
 });
 
 describe('npm package integration', () => {
+  it('declares no npm dependencies', async () => {
+    const pkg = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8'));
+    assert.deepEqual(pkg.dependencies || {}, {});
+    assert.deepEqual(pkg.devDependencies || {}, {});
+  });
+
   it('contains only public runtime files', async () => {
     const packed = await pack();
     const paths = packed.files.map((file) => file.path);

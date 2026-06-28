@@ -28,18 +28,19 @@
     "kodr": "./bin/kodr.mjs"
   },
   "scripts": {
+    "assert:zero-deps": "node scripts/assert-zero-deps.mjs",
+    "pretest": "npm run assert:zero-deps",
     "test": "node --test test/*.test.mjs",
     "eval": "node --test eval/*.eval.mjs",
     "check": "node --check bin/*.mjs && node --check src/*.mjs && node --check src/tools/*.mjs",
     "format": "biome format --write bin src test eval specs *.md *.json",
     "format:check": "biome format bin src test eval specs *.md *.json",
     "lint": "biome lint bin src test eval",
-    "lint:fix": "biome lint --write bin src test eval"
+    "lint:fix": "biome lint --write bin src test eval",
+    "prepack": "npm run assert:zero-deps",
+    "prepublishOnly": "npm run assert:zero-deps"
   },
   "engines": {
     "node": ">=22"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "2.4.15"
   }
 }

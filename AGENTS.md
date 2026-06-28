@@ -6,7 +6,7 @@ Rules for AI agents working in this repo.
 
 - Node.js 22+, ESM, zero runtime dependencies.
 - LM Studio only (OpenAI-compatible API at localhost:1234).
-- Biome for formatting (globally installed).
+- Biome for formatting as an external developer tool. Prefer a globally or environment-provided `biome` binary; do not add Biome to `dependencies` or `devDependencies`.
 - `node:test` for all tests.
 
 ## Code style
@@ -29,6 +29,7 @@ Rules for AI agents working in this repo.
 - No model mocks. Tests either need the model (eval) or don't (unit).
 - Run tests: `npm test` (`node --test test/*.test.mjs`)
 - Run evals: `npm run eval` (`node --test eval/*.eval.mjs`)
+- `npm test`, `npm pack`, and `npm publish` run the zero-dependency guard. `package.json` must not contain entries in `dependencies` or `devDependencies`.
 
 ## Specs
 
