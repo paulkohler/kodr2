@@ -14,8 +14,8 @@ import { buildEnv } from './env.mjs';
 
 // Local models are slow and may drive long builds or test suites, so the
 // default is generous. Callers can shorten it per command.
-const DEFAULT_TIMEOUT = 600_000; // 10 minutes
-const DEFAULT_MAX_OUTPUT = 50_000; // characters per stream
+export const DEFAULT_TIMEOUT = 600_000; // 10 minutes
+export const DEFAULT_MAX_OUTPUT = 50_000; // characters per stream
 
 /**
  * Run a shell command and resolve with its captured output.

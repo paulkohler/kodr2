@@ -30,6 +30,7 @@ outputs:
 
 constraints:
   - 10 minute timeout by default (configurable)
+  - Timeout can be supplied by callers and is capped by the remaining maxRunMs budget during harness runs
   - Output truncated at 20,000 characters
   - Executes via the shared shell runner (see shell spec)
   - Runs with a minimal curated environment (see run_command spec)

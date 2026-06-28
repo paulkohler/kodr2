@@ -18,6 +18,7 @@ import listFilesTool from '../src/tools/list-files.mjs';
 import searchTool from '../src/tools/search.mjs';
 import runCommandTool from '../src/tools/run-command.mjs';
 import { isPackageManagerCommand } from '../src/tools/run-command.mjs';
+import { commandTimeout } from '../src/tools/run-command.mjs';
 
 let tmpDir;
 let context;
@@ -500,5 +501,15 @@ describe('run_command', () => {
     assert.equal(isPackageManagerCommand('go get example.com/mod'), true);
     assert.equal(isPackageManagerCommand('npm test'), false);
     assert.equal(isPackageManagerCommand('cargo test'), false);
+  });
+
+  it('caps command timeout to the remaining run budget', () => {
+    const timeout = commandTimeout({
+      commandTimeoutMs: 600_000,
+      startedAt: new Date(Date.now() - 900),
+      maxRunMs: 1000,
+    });
+    assert.ok(timeout > 0);
+    assert.ok(timeout <= 100);
   });
 });

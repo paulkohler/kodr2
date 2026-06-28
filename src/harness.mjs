@@ -78,7 +78,11 @@ export async function run(prompt, options) {
     contextWindow,
     startedAt: startedAt.toISOString(),
   };
-  const tools = createToolRegistry(cwd, { envPassthrough });
+  const tools = createToolRegistry(cwd, {
+    envPassthrough,
+    startedAt,
+    maxRunMs,
+  });
   const commandEnv = buildEnv(envPassthrough);
   const systemPrompt = await buildSystemPrompt(cwd);
 
@@ -153,7 +157,10 @@ export async function run(prompt, options) {
     const touchedWorkspace =
       tools.filesChanged().length > 0 || tools.commandsRun() > 0;
     if (testCommand && touchedWorkspace && stoppedReason === 'complete') {
-      const verifyResult = await verify(testCommand, cwd, { env: commandEnv });
+      const verifyResult = await verify(testCommand, cwd, {
+        env: commandEnv,
+        timeout: remainingRunBudgetMs(startedAt, maxRunMs),
+      });
       result.verification = verifyResult;
 
       if (!quiet) {
@@ -167,7 +174,11 @@ export async function run(prompt, options) {
           modelId,
           messages,
           tools,
-          verifyFn: () => verify(testCommand, cwd, { env: commandEnv }),
+          verifyFn: () =>
+            verify(testCommand, cwd, {
+              env: commandEnv,
+              timeout: remainingRunBudgetMs(startedAt, maxRunMs),
+            }),
           failure: verifyResult,
           maxTurns: maxHealTurns,
           quiet,
@@ -226,6 +237,14 @@ function createErrorResult(params) {
     compactions: 0,
     messages,
   };
+}
+
+export function remainingRunBudgetMs(startedAt, maxRunMs) {
+  if (!maxRunMs) {
+    return undefined;
+  }
+  const remaining = maxRunMs - (Date.now() - startedAt.getTime());
+  return Math.max(1, remaining);
 }
 
 /**

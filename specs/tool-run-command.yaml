@@ -30,6 +30,7 @@ outputs:
 constraints:
   - Commands run via /bin/sh -c (the shared shell runner, see shell spec)
   - 10 minute timeout by default (configurable)
+  - Timeout is capped by the remaining maxRunMs budget when a run budget is active
   - Output truncated at 50,000 characters per stream
   - Runs in workspace directory (cwd)
   - Rejects explicit cd targets that resolve outside the workspace
@@ -47,5 +48,6 @@ tests:
     - allows cd targets inside the workspace
     - does not expose non-allowlisted environment variables by default
     - exposes extra variables named in envPassthrough
+    - caps command timeout to the remaining run budget
   eval:
     - model uses run_command to run tests

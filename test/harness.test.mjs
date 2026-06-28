@@ -5,7 +5,12 @@ import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { createRunRecord, isRunBudgetExceeded, run } from '../src/harness.mjs';
+import {
+  createRunRecord,
+  isRunBudgetExceeded,
+  remainingRunBudgetMs,
+  run,
+} from '../src/harness.mjs';
 
 describe('createRunRecord', () => {
   it('includes run metadata and duration', () => {
@@ -58,6 +63,17 @@ describe('isRunBudgetExceeded', () => {
   it('returns true when elapsed time reaches the budget', () => {
     const startedAt = new Date(Date.now() - 1000);
     assert.equal(isRunBudgetExceeded(startedAt, 100), true);
+  });
+});
+
+describe('remainingRunBudgetMs', () => {
+  it('returns undefined when no budget is configured', () => {
+    assert.equal(remainingRunBudgetMs(new Date(), 0), undefined);
+  });
+
+  it('returns at least one millisecond when the budget is spent', () => {
+    const startedAt = new Date(Date.now() - 1000);
+    assert.equal(remainingRunBudgetMs(startedAt, 100), 1);
   });
 });
 

@@ -20,6 +20,7 @@ Rules for AI agents working in this repo.
 - No async/await deeper than 3 levels. Extract a function.
 - File names are kebab-case: `read-file.mjs`.
 - Keep functions short. If it scrolls, split it.
+- Timeouts and resource limits must be configurable or overridable. Defaults are fine, but do not hide fixed delays, retry counts, model request limits, command timeouts, output limits, or similar operational limits in code that callers cannot change.
 
 ## Testing
 

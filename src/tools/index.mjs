@@ -25,6 +25,9 @@ const ALL_TOOLS = [
  * @param {string} cwd - Workspace root (absolute path)
  * @param {object} [options]
  * @param {string[]} [options.envPassthrough] - Extra env var names for run_command
+ * @param {number} [options.commandTimeoutMs] - Default shell timeout for run_command
+ * @param {Date} [options.startedAt] - Run start, for remaining-budget timeouts
+ * @param {number} [options.maxRunMs] - Overall run budget in ms
  * @returns {object} Registry with `definitions`, `dispatch`, and `context`
  */
 export function createToolRegistry(cwd, options = {}) {
@@ -35,6 +38,9 @@ export function createToolRegistry(cwd, options = {}) {
   const context = {
     cwd,
     envPassthrough: options.envPassthrough ?? [],
+    commandTimeoutMs: options.commandTimeoutMs,
+    startedAt: options.startedAt,
+    maxRunMs: options.maxRunMs ?? 0,
     trackWrite(path) {
       if (!filesChanged.includes(path)) {
         filesChanged.push(path);

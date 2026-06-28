@@ -6,7 +6,7 @@ import { readdir, stat } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 import { buildEnv } from '../env.mjs';
 import { shouldIgnoreEntry } from '../ignore.mjs';
-import { runShell } from '../shell.mjs';
+import { DEFAULT_TIMEOUT, runShell } from '../shell.mjs';
 
 const MAX_SNAPSHOT_FILES = 1000;
 
@@ -44,6 +44,7 @@ export default {
     const before = await snapshotWorkspace(context.cwd);
     const result = await runShell(command, context.cwd, {
       env: buildEnv(context.envPassthrough),
+      timeout: commandTimeout(context),
     });
     const changed = await changedFiles(context.cwd, before);
     for (const path of changed) {
@@ -57,6 +58,22 @@ export default {
     return result;
   },
 };
+
+export function commandTimeout(context) {
+  const configured = context.commandTimeoutMs ?? DEFAULT_TIMEOUT;
+  const remaining = remainingRunBudgetMs(context);
+  if (remaining === null) {
+    return configured;
+  }
+  return Math.max(1, Math.min(configured, remaining));
+}
+
+function remainingRunBudgetMs(context) {
+  if (!context.maxRunMs || !context.startedAt) {
+    return null;
+  }
+  return context.maxRunMs - (Date.now() - context.startedAt.getTime());
+}
 
 export async function snapshotWorkspace(cwd) {
   const files = new Map();
