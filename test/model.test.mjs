@@ -162,6 +162,19 @@ describe('model HTTP client', () => {
     await assert.rejects(client.models(), /timed out/i);
   });
 
+  it('times out long streaming requests even when chunks arrive', async () => {
+    const baseUrl = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write('data: {"choices":[{"delta":{"content":"still"}}]}\n\n');
+      const timer = setInterval(() => {
+        res.write('data: {"choices":[{"delta":{"content":" going"}}]}\n\n');
+      }, 5);
+      res.on('close', () => clearInterval(timer));
+    });
+    const client = createClient({ baseUrl, model: 'test', timeout: 30 });
+    await assert.rejects(client.chat({ messages: [] }), /timed out/i);
+  });
+
   it('probes loaded and max context from /api/v0/models', async () => {
     let probedPath;
     const baseUrl = await startServer((req, res) => {

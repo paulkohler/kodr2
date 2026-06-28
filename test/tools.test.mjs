@@ -17,6 +17,7 @@ import editFileTool from '../src/tools/edit-file.mjs';
 import listFilesTool from '../src/tools/list-files.mjs';
 import searchTool from '../src/tools/search.mjs';
 import runCommandTool from '../src/tools/run-command.mjs';
+import { isPackageManagerCommand } from '../src/tools/run-command.mjs';
 
 let tmpDir;
 let context;
@@ -487,5 +488,17 @@ describe('run_command', () => {
     } finally {
       delete process.env.KODR_TEST_SECRET;
     }
+  });
+
+  it('detects package-manager mutation commands across ecosystems', () => {
+    assert.equal(isPackageManagerCommand('npm install express'), true);
+    assert.equal(
+      isPackageManagerCommand('python -m pip install requests'),
+      true,
+    );
+    assert.equal(isPackageManagerCommand('cargo add serde'), true);
+    assert.equal(isPackageManagerCommand('go get example.com/mod'), true);
+    assert.equal(isPackageManagerCommand('npm test'), false);
+    assert.equal(isPackageManagerCommand('cargo test'), false);
   });
 });

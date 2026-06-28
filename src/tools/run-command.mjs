@@ -38,6 +38,9 @@ export default {
     if (context.trackCommand) {
       context.trackCommand();
     }
+    if (isPackageManagerCommand(command) && context.trackPackageCommand) {
+      context.trackPackageCommand(command);
+    }
     const before = await snapshotWorkspace(context.cwd);
     const result = await runShell(command, context.cwd, {
       env: buildEnv(context.envPassthrough),
@@ -117,6 +120,34 @@ export function validateCdTargets(command, cwd) {
     }
   }
   return null;
+}
+
+export function isPackageManagerCommand(command) {
+  return splitCommandSegments(command).some((segment) =>
+    PACKAGE_COMMAND_PATTERNS.some((pattern) => pattern.test(segment)),
+  );
+}
+
+const PACKAGE_COMMAND_PATTERNS = [
+  /^npm\s+(install|i|add|uninstall|remove|rm)\b/,
+  /^pnpm\s+(install|i|add|remove|rm)\b/,
+  /^yarn\s+(add|remove|install)\b/,
+  /^bun\s+(install|add|remove)\b/,
+  /^pip\s+(install|uninstall)\b/,
+  /^pip3\s+(install|uninstall)\b/,
+  /^python\s+-m\s+pip\s+(install|uninstall)\b/,
+  /^python3\s+-m\s+pip\s+(install|uninstall)\b/,
+  /^uv\s+(add|remove|pip\s+install|pip\s+uninstall)\b/,
+  /^poetry\s+(add|remove|install)\b/,
+  /^cargo\s+(add|remove|install)\b/,
+  /^go\s+get\b/,
+];
+
+function splitCommandSegments(command) {
+  return command
+    .split(/&&|;|\n/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
 }
 
 function findCdTargets(command) {

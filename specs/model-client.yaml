@@ -34,7 +34,7 @@ constraints:
   - KODR_MODEL configures the model when no model option is provided
   - Explicit model option takes precedence over KODR_MODEL
   - HTTP errors surface as thrown exceptions
-  - Timeout applies to the full request lifecycle
+  - Timeout applies to the full request lifecycle, even when streaming chunks keep arriving
 
 tests:
   unit:
@@ -46,6 +46,7 @@ tests:
     - explicit model option takes precedence over KODR_MODEL
     - HTTP errors from model listing and chat are surfaced
     - stalled requests time out
+    - long streaming requests time out even when chunks arrive
   eval:
     - connects to LM Studio and lists models
     - sends a simple prompt and gets a response

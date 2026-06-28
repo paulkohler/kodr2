@@ -29,6 +29,7 @@ const ALL_TOOLS = [
  */
 export function createToolRegistry(cwd, options = {}) {
   const filesChanged = [];
+  const packageCommands = [];
   let commandCount = 0;
 
   const context = {
@@ -41,6 +42,9 @@ export function createToolRegistry(cwd, options = {}) {
     },
     trackCommand() {
       commandCount++;
+    },
+    trackPackageCommand(command) {
+      packageCommands.push(command);
     },
   };
 
@@ -89,6 +93,14 @@ export function createToolRegistry(cwd, options = {}) {
      */
     commandsRun() {
       return commandCount;
+    },
+
+    /**
+     * Package-manager commands observed during this run.
+     * @returns {string[]}
+     */
+    packageCommands() {
+      return [...packageCommands];
     },
   };
 }

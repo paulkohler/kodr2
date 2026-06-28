@@ -79,4 +79,14 @@ describe('createToolRegistry', () => {
     await registry.dispatch('run_command', { command: 'true' });
     assert.equal(registry.commandsRun(), 2);
   });
+
+  it('tracks package-manager commands without blocking them', async () => {
+    const registry = createToolRegistry(tmpDir);
+    await registry.dispatch('run_command', {
+      command: 'node --version && npm install --help',
+    });
+    assert.deepEqual(registry.packageCommands(), [
+      'node --version && npm install --help',
+    ]);
+  });
 });

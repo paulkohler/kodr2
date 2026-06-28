@@ -284,8 +284,25 @@ function streamRequest(url, body, timeout, callbacks) {
     const parsed = new URL(url);
     const payload = JSON.stringify(body);
     const assembler = createAssembler(callbacks.onToken, callbacks.onToolCall);
+    let settled = false;
+    let req;
+    const hardTimer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      if (req) {
+        req.destroy();
+      }
+      reject(new Error(`Request timed out after ${timeout}ms`));
+    }, timeout);
 
-    const req = transportFor(parsed)(
+    function finish(fn, value) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(hardTimer);
+      fn(value);
+    }
+
+    req = transportFor(parsed)(
       {
         hostname: parsed.hostname,
         port: parsed.port,
@@ -302,7 +319,7 @@ function streamRequest(url, body, timeout, callbacks) {
           let data = '';
           res.on('data', (c) => (data += c));
           res.on('end', () =>
-            reject(new Error(`HTTP ${res.statusCode}: ${data}`)),
+            finish(reject, new Error(`HTTP ${res.statusCode}: ${data}`)),
           );
           return;
         }
@@ -328,19 +345,22 @@ function streamRequest(url, body, timeout, callbacks) {
           if (chunk) {
             assembler.push(chunk);
           }
-          resolve(assembler.result());
+          finish(resolve, assembler.result());
         });
 
-        res.on('error', reject);
+        res.on('error', (err) => finish(reject, err));
       },
     );
 
     req.on('timeout', () => {
       req.destroy();
-      reject(new Error(`Request timed out after ${timeout}ms`));
+      finish(reject, new Error(`Request timed out after ${timeout}ms`));
     });
 
-    req.on('error', reject);
+    req.on('error', (err) => {
+      if (settled) return;
+      finish(reject, err);
+    });
     req.write(payload);
     req.end();
   });
@@ -349,8 +369,25 @@ function streamRequest(url, body, timeout, callbacks) {
 function jsonRequest(url, timeout) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
+    let settled = false;
+    let req;
+    const hardTimer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      if (req) {
+        req.destroy();
+      }
+      reject(new Error(`Request timed out after ${timeout}ms`));
+    }, timeout);
 
-    const req = transportFor(parsed)(
+    function finish(fn, value) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(hardTimer);
+      fn(value);
+    }
+
+    req = transportFor(parsed)(
       {
         hostname: parsed.hostname,
         port: parsed.port,
@@ -365,25 +402,28 @@ function jsonRequest(url, timeout) {
         res.on('data', (c) => (data += c));
         res.on('end', () => {
           if (res.statusCode >= 400) {
-            reject(new Error(`HTTP ${res.statusCode}: ${data}`));
+            finish(reject, new Error(`HTTP ${res.statusCode}: ${data}`));
             return;
           }
           try {
-            resolve(JSON.parse(data));
+            finish(resolve, JSON.parse(data));
           } catch (e) {
-            reject(new Error(`Invalid JSON: ${e.message}`));
+            finish(reject, new Error(`Invalid JSON: ${e.message}`));
           }
         });
-        res.on('error', reject);
+        res.on('error', (err) => finish(reject, err));
       },
     );
 
     req.on('timeout', () => {
       req.destroy();
-      reject(new Error(`Request timed out after ${timeout}ms`));
+      finish(reject, new Error(`Request timed out after ${timeout}ms`));
     });
 
-    req.on('error', reject);
+    req.on('error', (err) => {
+      if (settled) return;
+      finish(reject, err);
+    });
     req.end();
   });
 }

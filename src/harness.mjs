@@ -56,6 +56,7 @@ export async function run(prompt, options) {
   const client = createClient({
     baseUrl: options.baseUrl,
     model: options.model,
+    timeout: maxRunMs || undefined,
   });
 
   const modelId = await client.resolveModel();
@@ -110,73 +111,90 @@ export async function run(prompt, options) {
 
   messages.push({ role: 'user', content: prompt });
 
-  // Run the tool loop
-  const loop = await runToolLoop({
-    client,
-    modelId,
-    messages,
-    tools,
-    quiet,
-    startedAt,
-    maxRunMs,
-    contextWindow,
-  });
-  const totalUsage = loop.usage;
-  const { completed, stoppedReason, toolTurns } = loop;
-  let compactions = loop.compactions;
+  let result;
+  try {
+    // Run the tool loop
+    const loop = await runToolLoop({
+      client,
+      modelId,
+      messages,
+      tools,
+      quiet,
+      startedAt,
+      maxRunMs,
+      contextWindow,
+    });
+    const totalUsage = loop.usage;
+    const { completed, stoppedReason, toolTurns } = loop;
+    let compactions = loop.compactions;
 
-  // The model never produced a final response — it ran out of turns or budget.
-  if (!completed && !quiet) {
-    process.stderr.write(`${formatNotice(formatStopReason(stoppedReason))}\n`);
-  }
-
-  // Build result
-  const result = {
-    metadata,
-    response: loop.finalText,
-    filesChanged: tools.filesChanged(),
-    toolTurns,
-    stoppedReason,
-    usage: totalUsage,
-    compactions,
-    messages,
-  };
-
-  // Verify if a test command is set and the model touched the workspace
-  // (writes, or shell commands that may have changed files).
-  const touchedWorkspace =
-    tools.filesChanged().length > 0 || tools.commandsRun() > 0;
-  if (testCommand && touchedWorkspace && stoppedReason === 'complete') {
-    const verifyResult = await verify(testCommand, cwd, { env: commandEnv });
-    result.verification = verifyResult;
-
-    if (!quiet) {
-      process.stderr.write(`${formatVerification(verifyResult)}\n`);
+    // The model never produced a final response — it ran out of turns or budget.
+    if (!completed && !quiet) {
+      process.stderr.write(
+        `${formatNotice(formatStopReason(stoppedReason))}\n`,
+      );
     }
 
-    // Heal if verification failed
-    if (!verifyResult.passed && !isRunBudgetExceeded(startedAt, maxRunMs)) {
-      const healResult = await heal({
-        client,
-        modelId,
-        messages,
-        tools,
-        verifyFn: () => verify(testCommand, cwd, { env: commandEnv }),
-        failure: verifyResult,
-        maxTurns: maxHealTurns,
-        quiet,
-        startedAt,
-        maxRunMs,
-        contextWindow,
-      });
+    // Build result
+    result = {
+      metadata,
+      response: loop.finalText,
+      filesChanged: tools.filesChanged(),
+      packageCommands: tools.packageCommands(),
+      toolTurns,
+      stoppedReason,
+      usage: totalUsage,
+      compactions,
+      messages,
+    };
 
-      result.healed = healResult.healed;
-      result.healTurns = healResult.turns;
-      result.verification = healResult.verification;
-      compactions += healResult.compactions || 0;
-      result.compactions = compactions;
-      totalUsage.prompt += healResult.usage.prompt;
-      totalUsage.completion += healResult.usage.completion;
+    // Verify if a test command is set and the model touched the workspace
+    // (writes, or shell commands that may have changed files).
+    const touchedWorkspace =
+      tools.filesChanged().length > 0 || tools.commandsRun() > 0;
+    if (testCommand && touchedWorkspace && stoppedReason === 'complete') {
+      const verifyResult = await verify(testCommand, cwd, { env: commandEnv });
+      result.verification = verifyResult;
+
+      if (!quiet) {
+        process.stderr.write(`${formatVerification(verifyResult)}\n`);
+      }
+
+      // Heal if verification failed
+      if (!verifyResult.passed && !isRunBudgetExceeded(startedAt, maxRunMs)) {
+        const healResult = await heal({
+          client,
+          modelId,
+          messages,
+          tools,
+          verifyFn: () => verify(testCommand, cwd, { env: commandEnv }),
+          failure: verifyResult,
+          maxTurns: maxHealTurns,
+          quiet,
+          startedAt,
+          maxRunMs,
+          contextWindow,
+        });
+
+        result.healed = healResult.healed;
+        result.healTurns = healResult.turns;
+        result.verification = healResult.verification;
+        compactions += healResult.compactions || 0;
+        result.compactions = compactions;
+        result.packageCommands = tools.packageCommands();
+        totalUsage.prompt += healResult.usage.prompt;
+        totalUsage.completion += healResult.usage.completion;
+      }
+    }
+  } catch (err) {
+    result = createErrorResult({
+      metadata,
+      err,
+      messages,
+      tools,
+    });
+    if (!quiet) {
+      process.stderr.write(`${formatNotice(`run failed: ${err.message}`)}\n`);
     }
   }
 
@@ -188,6 +206,26 @@ export async function run(prompt, options) {
   }
 
   return result;
+}
+
+function createErrorResult(params) {
+  const { metadata, err, messages, tools } = params;
+  return {
+    metadata,
+    response: '',
+    error: {
+      message: err.message,
+      name: err.name,
+      stack: err.stack,
+    },
+    filesChanged: tools.filesChanged(),
+    packageCommands: tools.packageCommands(),
+    toolTurns: 0,
+    stoppedReason: 'error',
+    usage: { prompt: 0, completion: 0 },
+    compactions: 0,
+    messages,
+  };
 }
 
 /**
@@ -334,10 +372,12 @@ export function createRunRecord(result, finish = {}) {
     metadata: result.metadata || {},
     durationMs: finish.durationMs ?? null,
     filesChanged: result.filesChanged,
+    packageCommands: result.packageCommands ?? [],
     toolTurns: result.toolTurns,
     stoppedReason: result.stoppedReason,
     usage: result.usage,
     compactions: result.compactions ?? null,
+    error: result.error ?? null,
     verified: result.verification?.passed ?? null,
     healed: result.healed ?? null,
     healTurns: result.healTurns ?? null,
