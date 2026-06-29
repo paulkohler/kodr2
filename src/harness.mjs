@@ -7,7 +7,7 @@ import { buildSystemPrompt } from './context.mjs';
 import { createClient, hasContextHeadroom } from './model.mjs';
 import { createToolRegistry } from './tools/index.mjs';
 import { buildEnv } from './env.mjs';
-import { verify } from './verify.mjs';
+import { loadHooks, runStopHooks, stopHooks } from './hooks.mjs';
 import { heal } from './heal.mjs';
 import {
   MAX_TOOL_TURNS,
@@ -152,34 +152,49 @@ export async function run(prompt, options) {
       messages,
     };
 
-    // Verify if a test command is set and the model touched the workspace
-    // (writes, or shell commands that may have changed files).
-    const touchedWorkspace =
-      tools.filesChanged().length > 0 || tools.commandsRun() > 0;
-    if (testCommand && touchedWorkspace && stoppedReason === 'complete') {
-      const verifyResult = await verify(testCommand, cwd, {
-        env: commandEnv,
-        timeout: remainingRunBudgetMs(startedAt, maxRunMs),
-      });
-      result.verification = verifyResult;
-
-      if (!quiet) {
-        process.stderr.write(`${formatVerification(verifyResult)}\n`);
+    // Stop hooks: run when the agent finishes a turn. The `--test` command is
+    // the first Stop hook, followed by any in .kodr/hooks.json. Each hook gates
+    // on whether the workspace was touched (writes or shell commands), unless it
+    // opts in with runWhenUnchanged. A failing blocking hook feeds back to heal.
+    if (stoppedReason === 'complete') {
+      const { config, error: hooksError } = await loadHooks(cwd);
+      if (hooksError && !quiet) {
+        process.stderr.write(`${formatNotice(hooksError)}\n`);
       }
 
-      // Heal if verification failed
-      if (!verifyResult.passed && !isRunBudgetExceeded(startedAt, maxRunMs)) {
+      const stops = stopHooks(config, testCommand);
+      const touchedWorkspace =
+        tools.filesChanged().length > 0 || tools.commandsRun() > 0;
+      const runHooks = () =>
+        runStopHooks(stops, cwd, {
+          env: commandEnv,
+          budgetMs: remainingRunBudgetMs(startedAt, maxRunMs),
+          touchedWorkspace,
+        });
+
+      const hookResult = await runHooks();
+      // Only treat hooks as verification when at least one actually ran.
+      if (hookResult.results.length > 0) {
+        result.verification = hookResult;
+
+        if (!quiet) {
+          process.stderr.write(`${formatVerification(hookResult)}\n`);
+        }
+      }
+
+      // Heal if a blocking hook failed
+      if (
+        hookResult.results.length > 0 &&
+        !hookResult.passed &&
+        !isRunBudgetExceeded(startedAt, maxRunMs)
+      ) {
         const healResult = await heal({
           client,
           modelId,
           messages,
           tools,
-          verifyFn: () =>
-            verify(testCommand, cwd, {
-              env: commandEnv,
-              timeout: remainingRunBudgetMs(startedAt, maxRunMs),
-            }),
-          failure: verifyResult,
+          verifyFn: runHooks,
+          failure: hookResult,
           maxTurns: maxHealTurns,
           quiet,
           startedAt,

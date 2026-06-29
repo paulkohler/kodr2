@@ -1,0 +1,135 @@
+name: hooks
+status: implemented
+description: >
+  User-defined shell commands bound to harness lifecycle events. Hooks are the
+  deterministic, user-controlled counterpart to the model's tool calls: the
+  operator decides what runs and when, and the harness runs it.
+
+  The first event is "Stop", which fires when the agent finishes its turn. A
+  Stop hook that exits non-zero blocks the stop: its output is fed back to the
+  model and the agent loops to address it (the existing heal mechanism). This
+  generalizes the current testCommand/verify/heal flow — verify becomes a
+  built-in Stop hook (see "verify migration" below).
+
+  Hooks are user-defined and therefore trusted, unlike model output. They still
+  run with the curated child environment (see env/run_command specs) and a
+  workspace-jailed cwd.
+
+events:
+  Stop:
+    status: implemented
+    fires: >
+      After the tool loop returns with stoppedReason "complete" (the model
+      answered with no tool call). Runs at the harness level, in place of the
+      current verify block.
+    blocking: true
+    feedback: >
+      On non-zero exit, the hook's combined output is fed to the model via the
+      heal loop, bounded by maxHealTurns. The full Stop hook sequence re-runs
+      from the top after each heal pass, so a fix that breaks an earlier hook is
+      caught.
+  # Reserved for future specs; not implemented by this one. Listed so the
+  # config schema and dispatch are designed to extend without breaking.
+  PreToolUse:
+    status: future
+    blocking: true
+  PostToolUse:
+    status: future
+    blocking: true
+  SessionStart:
+    status: future
+    blocking: false
+  SessionEnd:
+    status: future
+    blocking: false
+
+config:
+  location: .kodr/hooks.json
+  format: >
+    JSON (zero runtime dependencies — no YAML parser is available at runtime).
+    A missing file means no hooks. A malformed file returns an error value, the
+    harness emits a one-line notice and continues with no hooks (never throws,
+    never aborts the run).
+  schema: |
+    {
+      "hooks": {
+        "Stop": [
+          {
+            "run": "npm run build",   // required: shell command
+            "name": "build",          // optional: label for output/logs
+            "runWhenUnchanged": false,// optional: run even if workspace untouched (default false)
+            "timeout": 600000         // optional: ms, defaults to verify default, capped by maxRunMs
+          }
+        ]
+      }
+    }
+
+inputs:
+  cwd:
+    type: string
+    required: true
+    description: Workspace root (absolute, path-jailed)
+  event:
+    type: string
+    required: true
+    description: Lifecycle event name (e.g. "Stop")
+  hooks:
+    type: array
+    required: true
+    description: Ordered hook definitions for the event, loaded from config
+
+outputs:
+  results:
+    type: array
+    description: One per hook run, each { name, command, passed, output, exitCode }
+  blocked:
+    type: boolean
+    description: true if any blocking hook failed (drives the heal loop)
+
+behavior:
+  - Hooks for an event run sequentially in declared order.
+  - The first failing blocking hook stops the sequence and triggers feedback.
+  - A passing sequence (all exit 0) lets the agent stop normally.
+  - Stop hooks skip when the workspace was not touched (no files written, no
+    commands run), unless runWhenUnchanged is true — matching current verify.
+  - "--test <cmd>" appends a Stop hook (preserves the existing flag); explicit
+    .kodr/hooks.json Stop hooks run after it.
+
+verify_migration:
+  - The testCommand/verify/heal flow becomes a built-in Stop hook.
+  - verify() remains as the per-hook executor: it already returns the per-hook
+    result shape { passed, command, output, exitCode }. The verify spec stays
+    "implemented"; only its when-to-run gating moved into this layer.
+  - heal() is the feedback loop for blocking-hook failures, unchanged.
+  - --test is sugar for the first Stop hook; behavior is backward compatible.
+
+constraints:
+  - Zero runtime dependencies; config is JSON parsed with JSON.parse.
+  - Hooks run via the shared shell runner with the curated env (env spec).
+  - cwd is the path-jailed workspace root.
+  - Per-hook timeout is overridable; default is the verify default and is capped
+    by the remaining maxRunMs budget (per CLAUDE.md: operational limits must be
+    configurable).
+  - Output truncated at the verify output limit (overridable).
+  - No tri-state flags: runWhenUnchanged is a plain boolean.
+  - Errors at the config boundary are returned values, not thrown.
+  - Security: .kodr/hooks.json may be checked into a repo. Document that hooks
+    run shell commands on the operator's machine; commands are the operator's
+    responsibility, run with the curated env, never with the harness's full
+    process.env.
+
+tests:
+  unit:
+    - loads Stop hooks from .kodr/hooks.json
+    - missing config file yields no hooks and no error
+    - malformed config returns an error value and the run continues with no hooks
+    - a passing Stop hook (exit 0) produces no feedback and lets the agent stop
+    - a failing Stop hook feeds its output back and invokes heal
+    - multiple Stop hooks run in declared order
+    - the first failing blocking hook stops the sequence
+    - the full Stop sequence re-runs after a heal pass
+    - "--test" is appended as a Stop hook
+    - runWhenUnchanged false skips when the workspace is untouched
+    - runWhenUnchanged true runs even when the workspace is untouched
+    - per-hook timeout is honored and capped by the remaining run budget
+    - hook output is truncated at the configured limit

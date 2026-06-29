@@ -239,7 +239,7 @@ Options:
   --base-url <url>                LM Studio URL (default: http://localhost:1234/v1)
   --model <id>                    Model identifier
   --prompt, -p <text>             Prompt text (compatibility alias)
-  --test <command>                Verification command (e.g. "npm test")
+  --test <command>                First Stop hook (e.g. "npm test"); see .kodr/hooks.json
   --heal-turns <n>                Max repair turns (default: 3)
   --max-run-ms <n>                Stop between turns after this many ms (default: 0, disabled)
   --context-window <n>            Max context window in tokens; compact at 80% (default: 8192, 0 disables)
@@ -252,7 +252,7 @@ Options:
 Examples:
   kodr run "add input validation to server.mjs"
   kodr run -p "add input validation to server.mjs"
-  kodr "fix the failing test" --test "node --test"
+  kodr "fix the failing test" --test "node --test"   # --test is a Stop hook
   kodr "add error handling" --continue last
   kodr "/compact" --continue last
 `;
