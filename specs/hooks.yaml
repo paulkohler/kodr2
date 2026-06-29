@@ -50,13 +50,26 @@ events:
       The tool result is never revoked. Every matching hook runs; a hook that
       exits non-zero contributes its output as a hookFeedback field appended to
       the model-visible tool result, so the model can react.
-  # Reserved for future specs. Listed so the schema and dispatch extend cleanly.
   SessionStart:
-    status: future
+    status: implemented
+    fires: >
+      Once at the start of a run, before the task prompt is added and before the
+      tool loop. Does not run for the "/compact" management command.
     blocking: false
+    feedback: >
+      Non-blocking. A hook that succeeds with stdout has its output injected into
+      the conversation as a context message (priming the model) ahead of the
+      task prompt. A failing hook surfaces a notice and the run continues.
   SessionEnd:
-    status: future
+    status: implemented
+    fires: >
+      Once as the session closes, after the run transcript is saved. Runs even
+      when the run errored.
     blocking: false
+    feedback: >
+      Non-blocking, side effects only (cleanup) — there is nothing left to feed
+      back into. Failures surface a notice. Not capped by the run budget so
+      cleanup still happens when the budget is spent.
 
 config:
   location: .kodr/hooks.json
@@ -90,6 +103,12 @@ config:
             "name": "format",
             "match": "write_file|edit_file"
           }
+        ],
+        "SessionStart": [
+          { "run": "cat package.json", "name": "project" }
+        ],
+        "SessionEnd": [
+          { "run": "rm -f .kodr/scratch", "name": "cleanup" }
         ]
       }
     }
@@ -135,6 +154,8 @@ behavior:
     matches (the hook is skipped).
   - PreToolUse stops at the first denying hook; PostToolUse runs every matching
     hook and concatenates the feedback of any that failed.
+  - SessionStart runs before the task prompt; successful stdout is injected as
+    context. SessionEnd runs after the transcript is saved, even on error.
 
 verify_migration:
   - The testCommand/verify/heal flow becomes a built-in Stop hook.
@@ -183,3 +204,7 @@ tests:
     - a failing PostToolUse hook appends hookFeedback to the result, tool kept
     - PostToolUse hooks that pass leave the result unchanged
     - tool hooks fire inside the tool loop for native and recovered calls
+    - SessionStart hook stdout is returned as injectable context
+    - a failing SessionStart hook is reported as a failure, not context
+    - SessionEnd hooks run for side effects and report failures
+    - session hooks parse run, name, and timeout, dropping invalid entries

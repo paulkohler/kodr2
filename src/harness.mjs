@@ -7,7 +7,14 @@ import { buildSystemPrompt } from './context.mjs';
 import { createClient, hasContextHeadroom } from './model.mjs';
 import { createToolRegistry } from './tools/index.mjs';
 import { buildEnv } from './env.mjs';
-import { loadHooks, runStopHooks, stopHooks, toolHooks } from './hooks.mjs';
+import {
+  loadHooks,
+  runSessionHooks,
+  runStopHooks,
+  sessionHooks,
+  stopHooks,
+  toolHooks,
+} from './hooks.mjs';
 import { heal } from './heal.mjs';
 import {
   MAX_TOOL_TURNS,
@@ -113,10 +120,9 @@ export async function run(prompt, options) {
     });
   }
 
-  messages.push({ role: 'user', content: prompt });
-
-  // Hooks are loaded once: Stop hooks gate completion, tool hooks fire inside
-  // the loop (and during heal).
+  // Hooks are loaded once: SessionStart primes the conversation, Stop hooks
+  // gate completion, tool hooks fire inside the loop (and during heal), and
+  // SessionEnd runs as the session closes.
   const { config: hooksConfig, error: hooksError } = await loadHooks(cwd);
   if (hooksError && !quiet) {
     process.stderr.write(`${formatNotice(hooksError)}\n`);
@@ -126,6 +132,20 @@ export async function run(prompt, options) {
     PreToolUse: toolHooks(hooksConfig, 'PreToolUse'),
     PostToolUse: toolHooks(hooksConfig, 'PostToolUse'),
   };
+  const endHooks = sessionHooks(hooksConfig, 'SessionEnd');
+
+  // SessionStart: run before the task prompt so its output primes the model.
+  await runSessionStart({
+    hooks: sessionHooks(hooksConfig, 'SessionStart'),
+    cwd,
+    commandEnv,
+    messages,
+    startedAt,
+    maxRunMs,
+    quiet,
+  });
+
+  messages.push({ role: 'user', content: prompt });
 
   let result;
   try {
@@ -239,11 +259,68 @@ export async function run(prompt, options) {
   // Save run transcript
   await saveRun(cwd, result, startedAt);
 
+  // SessionEnd: cleanup as the session closes. Non-blocking, runs even on
+  // error, and is not capped by the run budget (cleanup should still happen).
+  await runSessionEnd({ hooks: endHooks, cwd, commandEnv, quiet });
+
   if (!quiet) {
     process.stderr.write(`${formatSummary(result)}\n`);
   }
 
   return result;
+}
+
+/**
+ * Run SessionStart hooks before the task prompt. Successful hook output is
+ * injected as context messages so the model sees it; failures surface a notice.
+ * @param {object} params
+ */
+async function runSessionStart(params) {
+  const { hooks, cwd, commandEnv, messages, startedAt, maxRunMs, quiet } =
+    params;
+  if (hooks.length === 0) {
+    return;
+  }
+
+  const { context, failures } = await runSessionHooks(hooks, cwd, {
+    env: commandEnv,
+    budgetMs: remainingRunBudgetMs(startedAt, maxRunMs),
+  });
+
+  for (const item of context) {
+    messages.push({
+      role: 'user',
+      content: `SessionStart hook "${item.name}" output:\n${item.output}`,
+    });
+  }
+  if (!quiet) {
+    for (const failure of failures) {
+      process.stderr.write(
+        `${formatNotice(`SessionStart hook "${failure.name}" failed: ${failure.output}`)}\n`,
+      );
+    }
+  }
+}
+
+/**
+ * Run SessionEnd hooks as the session closes. Side effects only; failures
+ * surface a notice. Not capped by the run budget.
+ * @param {object} params
+ */
+async function runSessionEnd(params) {
+  const { hooks, cwd, commandEnv, quiet } = params;
+  if (hooks.length === 0) {
+    return;
+  }
+
+  const { failures } = await runSessionHooks(hooks, cwd, { env: commandEnv });
+  if (!quiet) {
+    for (const failure of failures) {
+      process.stderr.write(
+        `${formatNotice(`SessionEnd hook "${failure.name}" failed: ${failure.output}`)}\n`,
+      );
+    }
+  }
 }
 
 function createErrorResult(params) {

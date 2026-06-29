@@ -316,3 +316,59 @@ function safeStringify(value) {
     return '{}';
   }
 }
+
+/**
+ * Build the normalized hook list for a session event (SessionStart /
+ * SessionEnd). Invalid entries are dropped.
+ * @param {{ hooks?: object }} config
+ * @param {string} event - "SessionStart" or "SessionEnd"
+ * @returns {Array<{ run: string, name: string, timeout?: number }>}
+ */
+export function sessionHooks(config, event) {
+  const list = [];
+  const configured = config?.hooks?.[event];
+  if (Array.isArray(configured)) {
+    for (const hook of configured) {
+      if (isValidHook(hook)) {
+        list.push(normalizeSessionHook(hook));
+      }
+    }
+  }
+  return list;
+}
+
+function normalizeSessionHook(hook) {
+  const normalized = { run: hook.run, name: hook.name || hook.run };
+  if (Number.isInteger(hook.timeout) && hook.timeout > 0) {
+    normalized.timeout = hook.timeout;
+  }
+  return normalized;
+}
+
+/**
+ * Run session hooks in declared order. Non-blocking: a failure never aborts the
+ * run. Hooks that succeed with stdout contribute context (SessionStart injects
+ * it into the conversation); hooks that fail contribute a failure notice.
+ * @param {Array} hooks - Normalized session hooks
+ * @param {string} cwd
+ * @param {object} [options]
+ * @param {Record<string, string>} [options.env]
+ * @param {number} [options.budgetMs]
+ * @returns {Promise<{ context: Array<{ name: string, output: string }>, failures: Array<{ name: string, output: string }> }>}
+ */
+export async function runSessionHooks(hooks, cwd, options = {}) {
+  const context = [];
+  const failures = [];
+  for (const hook of hooks) {
+    const result = await verify(hook.run, cwd, {
+      env: options.env,
+      timeout: resolveHookTimeout(hook.timeout, options.budgetMs),
+    });
+    if (!result.passed) {
+      failures.push({ name: hook.name, output: result.output });
+    } else if (result.output) {
+      context.push({ name: hook.name, output: result.output });
+    }
+  }
+  return { context, failures };
+}

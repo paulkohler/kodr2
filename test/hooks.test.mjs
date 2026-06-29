@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -10,7 +10,9 @@ import {
   resolveHookTimeout,
   runPostToolHooks,
   runPreToolHooks,
+  runSessionHooks,
   runStopHooks,
+  sessionHooks,
   stopHooks,
   toolHooks,
 } from '../src/hooks.mjs';
@@ -349,5 +351,67 @@ describe('runPostToolHooks', () => {
       tmpDir,
     );
     assert.equal(result.feedback, '');
+  });
+});
+
+describe('sessionHooks', () => {
+  it('parses run, name, and timeout, dropping invalid entries', () => {
+    const config = {
+      hooks: {
+        SessionStart: [
+          { run: 'a', name: 'first', timeout: 5000 },
+          { name: 'no-run' },
+          { run: 'b' },
+        ],
+      },
+    };
+    assert.deepEqual(sessionHooks(config, 'SessionStart'), [
+      { run: 'a', name: 'first', timeout: 5000 },
+      { run: 'b', name: 'b' },
+    ]);
+  });
+
+  it('returns an empty list for an absent event', () => {
+    assert.deepEqual(sessionHooks({ hooks: {} }, 'SessionEnd'), []);
+  });
+});
+
+describe('runSessionHooks', () => {
+  it('returns hook stdout as injectable context', async () => {
+    const hooks = sessionHooks(
+      { hooks: { SessionStart: [{ run: 'echo hello-context', name: 'ctx' }] } },
+      'SessionStart',
+    );
+    const { context, failures } = await runSessionHooks(hooks, tmpDir);
+    assert.equal(failures.length, 0);
+    assert.equal(context.length, 1);
+    assert.equal(context[0].name, 'ctx');
+    assert.match(context[0].output, /hello-context/);
+  });
+
+  it('reports a failing hook as a failure, not context', async () => {
+    const hooks = sessionHooks(
+      {
+        hooks: {
+          SessionStart: [{ run: 'echo boom >&2; exit 1', name: 'bad' }],
+        },
+      },
+      'SessionStart',
+    );
+    const { context, failures } = await runSessionHooks(hooks, tmpDir);
+    assert.equal(context.length, 0);
+    assert.equal(failures.length, 1);
+    assert.match(failures[0].output, /boom/);
+  });
+
+  it('runs SessionEnd hooks for their side effects', async () => {
+    await writeFile(join(tmpDir, 'marker.txt'), 'x');
+    const hooks = sessionHooks(
+      { hooks: { SessionEnd: [{ run: 'rm marker.txt', name: 'cleanup' }] } },
+      'SessionEnd',
+    );
+    const { failures } = await runSessionHooks(hooks, tmpDir);
+    assert.equal(failures.length, 0);
+    await assert.rejects(() => readFile(join(tmpDir, 'marker.txt')));
   });
 });
