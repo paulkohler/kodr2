@@ -12,6 +12,7 @@
 
 import { formatNotice, formatToolCall, formatToolResult } from './format.mjs';
 import { runPostToolHooks, runPreToolHooks } from './hooks.mjs';
+import { recoverToolCalls, recoverToolName } from './tool-recovery.mjs';
 import {
   COMPACTION_THRESHOLD,
   compactMessages,
@@ -193,13 +194,9 @@ export async function executeNativeToolCalls(
 
   let executed = 0;
   for (const tc of message.tool_calls) {
+    const name = recoverToolName(tc.function.name);
     const args = parseToolArguments(tc.function.arguments);
-    const result = await dispatchTool(
-      { name: tc.function.name, args },
-      tools,
-      quiet,
-      hookCtx,
-    );
+    const result = await dispatchTool({ name, args }, tools, quiet, hookCtx);
 
     messages.push({
       role: 'tool',
@@ -213,11 +210,14 @@ export async function executeNativeToolCalls(
 }
 
 /**
- * Execute a recovered text-form tool call if the message contains exactly one.
+ * Execute any text-form tool calls recovered from the message (a compatibility
+ * fallback when the model emits calls as text). Runs every recovered call and
+ * feeds each result back. Returns true if at least one ran.
  * @param {object} message
  * @param {object} tools
  * @param {Array} messages
  * @param {boolean} quiet
+ * @param {object} [hookCtx]
  * @returns {Promise<boolean>}
  */
 export async function executeRecoveredTextToolCall(
@@ -230,37 +230,23 @@ export async function executeRecoveredTextToolCall(
   if (message.tool_calls && message.tool_calls.length > 0) {
     return false;
   }
-  const call = recoverTextToolCall(message.content || '');
-  if (!call) {
+  const calls = recoverToolCalls(message.content || '');
+  if (calls.length === 0) {
     return false;
   }
 
-  const result = await dispatchTool(call, tools, quiet, hookCtx);
-  messages.push({
-    role: 'user',
-    content: `Recovered text-form tool call ${call.name}. Result:\n${JSON.stringify(result)}`,
-  });
+  for (const call of calls) {
+    const result = await dispatchTool(call, tools, quiet, hookCtx);
+    messages.push({
+      role: 'user',
+      content: `Recovered text-form tool call ${call.name}. Result:\n${JSON.stringify(result)}`,
+    });
+  }
   return true;
 }
 
-/**
- * Recover a single text-form tool call in the exact shape:
- * `tool_name[ARGS]{...}`.
- * @param {string} content
- * @returns {{ name: string, args: object } | null}
- */
-export function recoverTextToolCall(content) {
-  const match = content.trim().match(/^([a-z][a-z0-9_]*)\[ARGS\]([\s\S]+)$/);
-  if (!match) {
-    return null;
-  }
-
-  const args = parseToolArguments(match[2]);
-  if (!isPlainObject(args)) {
-    return null;
-  }
-  return { name: match[1], args };
-}
+// Re-exported so existing callers and tests keep importing it from here.
+export { recoverTextToolCall } from './tool-recovery.mjs';
 
 function parseToolArguments(value) {
   if (!value) {
@@ -372,11 +358,4 @@ function remainingHookBudgetMs(hookCtx) {
   const remaining =
     hookCtx.maxRunMs - (Date.now() - hookCtx.startedAt.getTime());
   return Math.max(1, remaining);
-}
-
-function isPlainObject(value) {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-  return !Array.isArray(value);
 }

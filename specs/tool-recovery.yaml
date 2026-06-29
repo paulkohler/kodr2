@@ -1,0 +1,95 @@
+name: tool-recovery
+status: proposed
+description: >
+  Recover tool calls that a model emitted as assistant text instead of through
+  the native tool channel. Native API tool calls are always the primary path;
+  recovery is a compatibility fallback that runs only when a message carries no
+  native tool_calls. Local models (especially Mistral-family) frequently leak
+  their internal tool-call framing into content — this turns those leaks back
+  into executable calls instead of wasting a turn.
+
+  Recovery is deterministic: it keys off explicit, unambiguous framings, not
+  heuristics over prose. Recovered calls are untrusted exactly like native ones
+  and go through the same dispatch (validation, path-jail).
+
+  Recovery has two entry points: text recovery (recoverToolCalls) for messages
+  with no native tool_calls, and native-name recovery (recoverToolName) for
+  native tool_calls whose function name was polluted by the framing token. The
+  latter is the common Mistral failure: the model echoes a prior result and the
+  [TOOL_CALLS] token into the function name while passing correct arguments, so
+  the call arrives native but with a garbage name like
+  `{"written":true}[TOOL_CALLS]write_file`.
+
+inputs:
+  content:
+    type: string
+    required: true
+    description: The assistant message text (when there were no native tool_calls)
+
+outputs:
+  calls:
+    type: array
+    description: Zero or more { name, args } objects, in emission order
+
+framings:
+  - name: mistral-token
+    shape: "[TOOL_CALLS] then a JSON array, name[ARGS]{...}, or name{...}"
+    note: >
+      Text is split on [TOOL_CALLS]; only segments after a token are parsed, so
+      echoed prose or a prior tool result before the token is ignored. Multiple
+      tokens yield multiple calls.
+  - name: args-marker
+    shape: "name[ARGS]{...}  (the existing form)"
+    note: The brace block is the arguments object.
+  - name: bare-named
+    shape: "name{...} or name[...]  at the start of the payload"
+    note: Anchored to the payload start to avoid matching prose.
+  - name: json-object
+    shape: '{"name":"...","arguments":{...}}'
+    note: Key aliases — name|tool|tool_name|function, arguments|args|parameters|input.
+  - name: json-array
+    shape: '[{"name":"...","arguments":{...}}, ...]'
+    note: Each element becomes a call.
+  - name: fenced
+    shape: "a ```json / ```tool_call / ```tool_code (or bare ```) code block"
+    note: The inner block is parsed with the rules above.
+
+native_name_recovery:
+  - recoverToolName cleans a native tool_call name polluted by the framing.
+  - Only token-framed names are touched: the real name is the leading identifier
+    after the last [TOOL_CALLS]. A clean name, or an odd name with no token, is
+    returned unchanged so dispatch rejects it as before.
+  - Arguments on the native call are used as-is (in the observed failure they are
+    correct; only the name is polluted).
+
+constraints:
+  - Text recovery only runs as a fallback when the message has no native
+    tool_calls; native-name recovery runs on every native call.
+  - A recovered name must match the tool-name shape ^[a-z][a-z0-9_]*$.
+  - Arguments must resolve to a plain object; a JSON-string arguments value is
+    parsed once. Non-object args drop the call.
+  - JSON extents are found by balanced-brace scanning that respects strings and
+    escapes, so trailing text after a call is ignored.
+  - No recovery from prose: bare named/JSON forms must begin the payload.
+  - Returns an empty array when nothing is confidently recoverable.
+  - Recovered calls are dispatched through the normal tool registry; unknown
+    names surface as error results, never crashes.
+
+tests:
+  unit:
+    - recovers a single name[ARGS]{...} call (back-compatible)
+    - rejects non-object args
+    - does not recover a call embedded in prose
+    - strips a leading [TOOL_CALLS] token and ignores echoed text before it
+    - recovers name{...} after a [TOOL_CALLS] token (no [ARGS] marker)
+    - recovers a [TOOL_CALLS] JSON array as multiple calls
+    - recovers a bare JSON object with name/arguments
+    - recovers JSON using key aliases (tool/parameters)
+    - parses a JSON-string arguments value
+    - recovers a call from a fenced ```json block
+    - ignores trailing text after the call's JSON
+    - returns an empty array for plain prose
+    - recoverToolName returns a clean name unchanged
+    - recoverToolName extracts the real name after a [TOOL_CALLS] token
+    - recoverToolName leaves an unframed odd name unchanged
+    - a native tool_call with a token-polluted name dispatches to the real tool

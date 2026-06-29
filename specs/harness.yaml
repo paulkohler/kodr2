@@ -75,7 +75,10 @@ constraints:
   - The main run and the heal pass share one tool loop, limited to 20 turns to prevent runaway
   - Optional maxRunMs stops between turns, caps in-flight model requests, caps tool and verification command timeouts, before healing, and during healing when the budget is exceeded
   - Native API tool calls are the primary tool-use path
-  - Text-form tool calls in the exact shape tool_name[ARGS]{...} are recovered as a compatibility fallback
+  - Text-form tool calls are recovered as a compatibility fallback across known
+    framings (Mistral [TOOL_CALLS] token, name[ARGS]{...}, JSON object/array,
+    fenced blocks); see the tool-recovery spec. Every recovered call in a
+    message is executed.
   - Hitting the tool-turn ceiling sets stoppedReason "tool-limit" and emits a notice
   - Run transcript saved to .kodr/runs/ after every run
   - Run transcript saved even when model requests fail after run metadata is available
@@ -104,7 +107,7 @@ tests:
     - failed model requests still save a run record
     - workspace file listing skips operator logs and copied kodr artifacts
     - system prompt requires native tool-channel calls
-    - recovers exact text-form tool calls through the tool registry
+    - recovers text-form tool calls (all framings) through the tool registry
     - shared tool loop completes, exhausts turns, and stops on budget
     - dispatches multi-call and repeated native tool calls, one result each
     - tolerates malformed argument JSON and model-invented tool names

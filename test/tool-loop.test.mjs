@@ -74,6 +74,50 @@ describe('executeRecoveredTextToolCall', () => {
       /Recovered text-form tool call edit_file/,
     );
   });
+
+  it('recovers a [TOOL_CALLS]-framed write that earlier failed as unknown tool', async () => {
+    const registry = createToolRegistry(tmpDir);
+    const messages = [];
+    // The exact dogfood shape: an echoed prior result, the framing token, then
+    // the real write_file call — previously dropped as an "unknown tool".
+    const recovered = await executeRecoveredTextToolCall(
+      {
+        role: 'assistant',
+        content:
+          '{"written":true,"path":"server.js"}[TOOL_CALLS]write_file{"path":"README.md","content":"# TODO API\\n"}',
+      },
+      registry,
+      messages,
+      true,
+    );
+
+    assert.equal(recovered, true);
+    assert.equal(
+      await readFile(join(tmpDir, 'README.md'), 'utf8'),
+      '# TODO API\n',
+    );
+    assert.deepEqual(registry.filesChanged(), ['README.md']);
+  });
+
+  it('executes every recovered call in a multi-call message', async () => {
+    const registry = createToolRegistry(tmpDir);
+    const messages = [];
+    const recovered = await executeRecoveredTextToolCall(
+      {
+        role: 'assistant',
+        content:
+          '[TOOL_CALLS][{"name":"write_file","arguments":{"path":"a.txt","content":"a"}},{"name":"write_file","arguments":{"path":"b.txt","content":"b"}}]',
+      },
+      registry,
+      messages,
+      true,
+    );
+
+    assert.equal(recovered, true);
+    assert.equal(messages.length, 2);
+    assert.equal(await readFile(join(tmpDir, 'a.txt'), 'utf8'), 'a');
+    assert.equal(await readFile(join(tmpDir, 'b.txt'), 'utf8'), 'b');
+  });
 });
 
 // A scripted model client: returns queued responses in order, repeating the
@@ -298,6 +342,31 @@ describe('executeNativeToolCalls (untrusted model output)', () => {
     assert.equal(executed, 1);
     const result = JSON.parse(messages[0].content);
     assert.match(result.error, /unknown tool/i);
+  });
+
+  it('recovers a token-polluted native tool name and dispatches the real tool', async () => {
+    // The real dogfood mechanism: the call arrives NATIVE with the framing and
+    // an echoed result fused into the function name, but correct arguments.
+    const registry = createToolRegistry(tmpDir);
+    const messages = [];
+    const executed = await executeNativeToolCalls(
+      nativeToolMessage([
+        {
+          name: '{"written":true,"path":"server.js"}[TOOL_CALLS]write_file',
+          arguments: '{"path":"README.md","content":"# TODO API\\n"}',
+        },
+      ]),
+      registry,
+      messages,
+      true,
+    );
+
+    assert.equal(executed, 1);
+    assert.equal(
+      await readFile(join(tmpDir, 'README.md'), 'utf8'),
+      '# TODO API\n',
+    );
+    assert.deepEqual(registry.filesChanged(), ['README.md']);
   });
 
   it('treats a message with no tool calls as nothing to execute', async () => {
