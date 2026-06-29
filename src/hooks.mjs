@@ -16,6 +16,7 @@
 
 import { join } from 'node:path';
 import { readFile } from 'node:fs/promises';
+import { buildEnv } from './env.mjs';
 import { verify } from './verify.mjs';
 
 /**
@@ -180,4 +181,138 @@ function aggregate(results, passed, failed) {
     };
   }
   return { passed, command: '', output: '', exitCode: 0, results };
+}
+
+/**
+ * Build the normalized hook list for a tool event (PreToolUse / PostToolUse).
+ * Invalid entries are dropped.
+ * @param {{ hooks?: object }} config
+ * @param {string} event - "PreToolUse" or "PostToolUse"
+ * @returns {Array<{ run: string, name: string, match?: string, timeout?: number }>}
+ */
+export function toolHooks(config, event) {
+  const list = [];
+  const configured = config?.hooks?.[event];
+  if (Array.isArray(configured)) {
+    for (const hook of configured) {
+      if (isValidHook(hook)) {
+        list.push(normalizeToolHook(hook));
+      }
+    }
+  }
+  return list;
+}
+
+function normalizeToolHook(hook) {
+  const normalized = { run: hook.run, name: hook.name || hook.run };
+  if (typeof hook.match === 'string' && hook.match.trim() !== '') {
+    normalized.match = hook.match;
+  }
+  if (Number.isInteger(hook.timeout) && hook.timeout > 0) {
+    normalized.timeout = hook.timeout;
+  }
+  return normalized;
+}
+
+/**
+ * Whether a tool hook applies to a tool name. A hook with no match runs for
+ * every tool; an invalid match regex never matches.
+ * @param {{ match?: string }} hook
+ * @param {string} toolName
+ * @returns {boolean}
+ */
+export function hookMatches(hook, toolName) {
+  if (!hook.match) {
+    return true;
+  }
+  try {
+    return new RegExp(hook.match).test(toolName);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Run PreToolUse hooks for a call. The first matching hook that exits non-zero
+ * denies the call.
+ * @param {Array} hooks - Normalized PreToolUse hooks
+ * @param {{ name: string, args: object }} call
+ * @param {string} cwd
+ * @param {object} [options]
+ * @param {Record<string, string>} [options.env]
+ * @param {number} [options.budgetMs]
+ * @returns {Promise<{ denied: boolean, reason: string }>}
+ */
+export async function runPreToolHooks(hooks, call, cwd, options = {}) {
+  for (const hook of hooks) {
+    if (!hookMatches(hook, call.name)) {
+      continue;
+    }
+    const result = await verify(hook.run, cwd, {
+      env: toolHookEnv(options.env, call),
+      timeout: resolveHookTimeout(hook.timeout, options.budgetMs),
+    });
+    if (!result.passed) {
+      const reason =
+        `denied by PreToolUse hook "${hook.name}": ${result.output}`.trim();
+      return { denied: true, reason };
+    }
+  }
+  return { denied: false, reason: '' };
+}
+
+/**
+ * Run PostToolUse hooks for a completed call. Hooks never revoke the result;
+ * any that fail contribute feedback for the model.
+ * @param {Array} hooks - Normalized PostToolUse hooks
+ * @param {{ name: string, args: object }} call
+ * @param {*} result - The tool result
+ * @param {string} cwd
+ * @param {object} [options]
+ * @param {Record<string, string>} [options.env]
+ * @param {number} [options.budgetMs]
+ * @returns {Promise<{ feedback: string }>}
+ */
+export async function runPostToolHooks(hooks, call, result, cwd, options = {}) {
+  const notes = [];
+  for (const hook of hooks) {
+    if (!hookMatches(hook, call.name)) {
+      continue;
+    }
+    const hookResult = await verify(hook.run, cwd, {
+      env: toolHookEnv(options.env, call, result),
+      timeout: resolveHookTimeout(hook.timeout, options.budgetMs),
+    });
+    if (!hookResult.passed) {
+      notes.push(
+        `PostToolUse hook "${hook.name}" failed: ${hookResult.output}`.trim(),
+      );
+    }
+  }
+  return { feedback: notes.join('\n') };
+}
+
+/**
+ * Build the child environment for a tool hook: the curated env plus the call's
+ * name, arguments, target file, and (for PostToolUse) the result.
+ */
+function toolHookEnv(baseEnv, call, result) {
+  const env = { ...(baseEnv || buildEnv()) };
+  env.KODR_TOOL_NAME = call.name;
+  env.KODR_TOOL_ARGS = safeStringify(call.args);
+  if (call.args && typeof call.args.path === 'string') {
+    env.KODR_TOOL_FILE = call.args.path;
+  }
+  if (result !== undefined) {
+    env.KODR_TOOL_RESULT = safeStringify(result);
+  }
+  return env;
+}
+
+function safeStringify(value) {
+  try {
+    return JSON.stringify(value ?? {});
+  } catch {
+    return '{}';
+  }
 }

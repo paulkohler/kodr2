@@ -28,14 +28,29 @@ events:
       heal loop, bounded by maxHealTurns. The full Stop hook sequence re-runs
       from the top after each heal pass, so a fix that breaks an earlier hook is
       caught.
-  # Reserved for future specs; not implemented by this one. Listed so the
-  # config schema and dispatch are designed to extend without breaking.
   PreToolUse:
-    status: future
+    status: implemented
+    fires: >
+      Before each tool call (native or text-recovered) executes, inside the tool
+      loop. Runs during the main run and during heal.
     blocking: true
+    feedback: >
+      The first matching hook that exits non-zero denies the call: the tool does
+      not run and its result becomes { error: 'denied by PreToolUse hook
+      "<name>": <output>' }, fed back to the model so it re-plans. A passing
+      sequence lets the call proceed.
   PostToolUse:
-    status: future
-    blocking: true
+    status: implemented
+    fires: >
+      After a tool call executes (skipped when PreToolUse denied it). Runs during
+      the main run and during heal. The primary use is side effects such as
+      auto-formatting a written file.
+    blocking: false
+    feedback: >
+      The tool result is never revoked. Every matching hook runs; a hook that
+      exits non-zero contributes its output as a hookFeedback field appended to
+      the model-visible tool result, so the model can react.
+  # Reserved for future specs. Listed so the schema and dispatch extend cleanly.
   SessionStart:
     status: future
     blocking: false
@@ -60,9 +75,30 @@ config:
             "runWhenUnchanged": false,// optional: run even if workspace untouched (default false)
             "timeout": 600000         // optional: ms, defaults to verify default, capped by maxRunMs
           }
+        ],
+        "PreToolUse": [
+          {
+            "run": "./policy.sh",     // required: shell command; non-zero denies the call
+            "name": "policy",         // optional: label
+            "match": "run_command",   // optional: regex on the tool name; absent = all tools
+            "timeout": 30000          // optional: ms, capped by maxRunMs
+          }
+        ],
+        "PostToolUse": [
+          {
+            "run": "biome format --write \"$KODR_TOOL_FILE\"",
+            "name": "format",
+            "match": "write_file|edit_file"
+          }
         ]
       }
     }
+  tool_hook_env: >
+    Tool hooks (PreToolUse, PostToolUse) receive the call via environment
+    variables on top of the curated env: KODR_TOOL_NAME (the tool name),
+    KODR_TOOL_ARGS (the arguments as JSON), KODR_TOOL_FILE (args.path when the
+    call targets a file), and — PostToolUse only — KODR_TOOL_RESULT (the tool
+    result as JSON).
 
 inputs:
   cwd:
@@ -94,6 +130,11 @@ behavior:
     commands run), unless runWhenUnchanged is true — matching current verify.
   - "--test <cmd>" appends a Stop hook (preserves the existing flag); explicit
     .kodr/hooks.json Stop hooks run after it.
+  - Tool hooks with a "match" run only when the regex matches the tool name; a
+    hook without "match" runs for every tool. An invalid match regex never
+    matches (the hook is skipped).
+  - PreToolUse stops at the first denying hook; PostToolUse runs every matching
+    hook and concatenates the feedback of any that failed.
 
 verify_migration:
   - The testCommand/verify/heal flow becomes a built-in Stop hook.
@@ -133,3 +174,12 @@ tests:
     - runWhenUnchanged true runs even when the workspace is untouched
     - per-hook timeout is honored and capped by the remaining run budget
     - hook output is truncated at the configured limit
+    - PreToolUse hook matching the tool name by regex; absent match runs always
+    - PreToolUse with an invalid match regex is skipped
+    - a failing PreToolUse hook denies the call with an error result, tool unrun
+    - a passing PreToolUse sequence lets the tool run
+    - tool hooks receive KODR_TOOL_NAME, KODR_TOOL_ARGS, KODR_TOOL_FILE in env
+    - PostToolUse hook receives KODR_TOOL_RESULT and runs after the tool
+    - a failing PostToolUse hook appends hookFeedback to the result, tool kept
+    - PostToolUse hooks that pass leave the result unchanged
+    - tool hooks fire inside the tool loop for native and recovered calls

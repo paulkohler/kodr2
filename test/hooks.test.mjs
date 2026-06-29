@@ -5,10 +5,14 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import {
+  hookMatches,
   loadHooks,
   resolveHookTimeout,
+  runPostToolHooks,
+  runPreToolHooks,
   runStopHooks,
   stopHooks,
+  toolHooks,
 } from '../src/hooks.mjs';
 
 let tmpDir;
@@ -194,5 +198,156 @@ describe('resolveHookTimeout', () => {
   it('returns the smaller of the two', () => {
     assert.equal(resolveHookTimeout(5000, 3000), 3000);
     assert.equal(resolveHookTimeout(2000, 3000), 2000);
+  });
+});
+
+describe('toolHooks', () => {
+  it('parses run, match, and timeout, dropping invalid entries', () => {
+    const config = {
+      hooks: {
+        PreToolUse: [
+          { run: 'a', match: 'run_command', timeout: 5000 },
+          { name: 'no-run' },
+          { run: 'b' },
+        ],
+      },
+    };
+    const hooks = toolHooks(config, 'PreToolUse');
+    assert.deepEqual(hooks, [
+      { run: 'a', name: 'a', match: 'run_command', timeout: 5000 },
+      { run: 'b', name: 'b' },
+    ]);
+  });
+
+  it('returns an empty list for an absent event', () => {
+    assert.deepEqual(toolHooks({ hooks: {} }, 'PostToolUse'), []);
+  });
+});
+
+describe('hookMatches', () => {
+  it('matches every tool when no match is set', () => {
+    assert.equal(hookMatches({}, 'anything'), true);
+  });
+
+  it('applies the match regex to the tool name', () => {
+    assert.equal(
+      hookMatches({ match: 'write_file|edit_file' }, 'edit_file'),
+      true,
+    );
+    assert.equal(hookMatches({ match: 'write_file' }, 'read_file'), false);
+  });
+
+  it('never matches when the regex is invalid', () => {
+    assert.equal(hookMatches({ match: '(' }, 'read_file'), false);
+  });
+});
+
+describe('runPreToolHooks', () => {
+  const call = { name: 'run_command', args: { command: 'rm -rf /' } };
+
+  it('lets the call proceed when all matching hooks pass', async () => {
+    const hooks = toolHooks(
+      { hooks: { PreToolUse: [{ run: 'exit 0' }] } },
+      'PreToolUse',
+    );
+    const result = await runPreToolHooks(hooks, call, tmpDir);
+    assert.equal(result.denied, false);
+  });
+
+  it('denies the call on the first failing hook', async () => {
+    const hooks = toolHooks(
+      {
+        hooks: {
+          PreToolUse: [{ run: 'echo nope >&2; exit 1', name: 'policy' }],
+        },
+      },
+      'PreToolUse',
+    );
+    const result = await runPreToolHooks(hooks, call, tmpDir);
+    assert.equal(result.denied, true);
+    assert.match(result.reason, /PreToolUse hook "policy"/);
+    assert.match(result.reason, /nope/);
+  });
+
+  it('skips hooks whose match does not apply', async () => {
+    const hooks = toolHooks(
+      { hooks: { PreToolUse: [{ run: 'exit 1', match: 'write_file' }] } },
+      'PreToolUse',
+    );
+    const result = await runPreToolHooks(hooks, call, tmpDir);
+    assert.equal(result.denied, false);
+  });
+
+  it('exposes the tool name, args, and file in the hook env', async () => {
+    const hooks = toolHooks(
+      {
+        hooks: {
+          PreToolUse: [
+            {
+              run: '[ "$KODR_TOOL_NAME" = "write_file" ] && [ "$KODR_TOOL_FILE" = "a.txt" ] && echo "$KODR_TOOL_ARGS" | grep -q hello',
+            },
+          ],
+        },
+      },
+      'PreToolUse',
+    );
+    const writeCall = {
+      name: 'write_file',
+      args: { path: 'a.txt', content: 'hello' },
+    };
+    const result = await runPreToolHooks(hooks, writeCall, tmpDir);
+    assert.equal(result.denied, false);
+  });
+});
+
+describe('runPostToolHooks', () => {
+  const call = { name: 'write_file', args: { path: 'a.txt' } };
+
+  it('returns no feedback when every hook passes', async () => {
+    const hooks = toolHooks(
+      { hooks: { PostToolUse: [{ run: 'exit 0' }] } },
+      'PostToolUse',
+    );
+    const result = await runPostToolHooks(hooks, call, { ok: true }, tmpDir);
+    assert.equal(result.feedback, '');
+  });
+
+  it('collects feedback from every failing hook', async () => {
+    const hooks = toolHooks(
+      {
+        hooks: {
+          PostToolUse: [
+            { run: 'echo first >&2; exit 1', name: 'one' },
+            { run: 'echo second >&2; exit 1', name: 'two' },
+          ],
+        },
+      },
+      'PostToolUse',
+    );
+    const result = await runPostToolHooks(hooks, call, { ok: true }, tmpDir);
+    assert.match(result.feedback, /hook "one" failed/);
+    assert.match(result.feedback, /hook "two" failed/);
+  });
+
+  it('exposes the tool result in the hook env', async () => {
+    const hooks = toolHooks(
+      {
+        hooks: {
+          PostToolUse: [
+            {
+              run: 'echo "$KODR_TOOL_RESULT" | grep -q written || (echo missing >&2; exit 1)',
+            },
+          ],
+        },
+      },
+      'PostToolUse',
+    );
+    const result = await runPostToolHooks(
+      hooks,
+      call,
+      { status: 'written' },
+      tmpDir,
+    );
+    assert.equal(result.feedback, '');
   });
 });

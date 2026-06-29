@@ -7,7 +7,7 @@ import { buildSystemPrompt } from './context.mjs';
 import { createClient, hasContextHeadroom } from './model.mjs';
 import { createToolRegistry } from './tools/index.mjs';
 import { buildEnv } from './env.mjs';
-import { loadHooks, runStopHooks, stopHooks } from './hooks.mjs';
+import { loadHooks, runStopHooks, stopHooks, toolHooks } from './hooks.mjs';
 import { heal } from './heal.mjs';
 import {
   MAX_TOOL_TURNS,
@@ -115,6 +115,18 @@ export async function run(prompt, options) {
 
   messages.push({ role: 'user', content: prompt });
 
+  // Hooks are loaded once: Stop hooks gate completion, tool hooks fire inside
+  // the loop (and during heal).
+  const { config: hooksConfig, error: hooksError } = await loadHooks(cwd);
+  if (hooksError && !quiet) {
+    process.stderr.write(`${formatNotice(hooksError)}\n`);
+  }
+  const stops = stopHooks(hooksConfig, testCommand);
+  const toolHookSets = {
+    PreToolUse: toolHooks(hooksConfig, 'PreToolUse'),
+    PostToolUse: toolHooks(hooksConfig, 'PostToolUse'),
+  };
+
   let result;
   try {
     // Run the tool loop
@@ -127,6 +139,9 @@ export async function run(prompt, options) {
       startedAt,
       maxRunMs,
       contextWindow,
+      toolHooks: toolHookSets,
+      cwd,
+      commandEnv,
     });
     const totalUsage = loop.usage;
     const { completed, stoppedReason, toolTurns } = loop;
@@ -157,12 +172,6 @@ export async function run(prompt, options) {
     // on whether the workspace was touched (writes or shell commands), unless it
     // opts in with runWhenUnchanged. A failing blocking hook feeds back to heal.
     if (stoppedReason === 'complete') {
-      const { config, error: hooksError } = await loadHooks(cwd);
-      if (hooksError && !quiet) {
-        process.stderr.write(`${formatNotice(hooksError)}\n`);
-      }
-
-      const stops = stopHooks(config, testCommand);
       const touchedWorkspace =
         tools.filesChanged().length > 0 || tools.commandsRun() > 0;
       const runHooks = () =>
@@ -200,6 +209,9 @@ export async function run(prompt, options) {
           startedAt,
           maxRunMs,
           contextWindow,
+          toolHooks: toolHookSets,
+          cwd,
+          commandEnv,
         });
 
         result.healed = healResult.healed;

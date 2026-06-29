@@ -11,6 +11,7 @@
  */
 
 import { formatNotice, formatToolCall, formatToolResult } from './format.mjs';
+import { runPostToolHooks, runPreToolHooks } from './hooks.mjs';
 import {
   COMPACTION_THRESHOLD,
   compactMessages,
@@ -32,12 +33,16 @@ export const MAX_TOOL_TURNS = 20;
  * @param {number} [params.maxRunMs] - Stop between turns after this many ms (0 disables)
  * @param {number} [params.contextWindow] - Max context window in tokens (0 disables compaction)
  * @param {number} [params.compactThreshold] - Fraction of the window that triggers compaction
+ * @param {{ PreToolUse: Array, PostToolUse: Array }} [params.toolHooks] - Tool hooks
+ * @param {string} [params.cwd] - Workspace root (for tool hooks)
+ * @param {Record<string, string>} [params.commandEnv] - Curated env (for tool hooks)
  * @returns {Promise<{ finalText: string, completed: boolean, stoppedReason: string, toolTurns: number, compactions: number, usage: { prompt: number, completion: number } }>}
  */
 export async function runToolLoop(params) {
   const { client, modelId, messages, tools, quiet = false } = params;
   const { startedAt, maxRunMs = 0 } = params;
   const { contextWindow = 0, compactThreshold = COMPACTION_THRESHOLD } = params;
+  const hookCtx = buildHookCtx(params);
 
   const usage = { prompt: 0, completion: 0 };
   let toolTurns = 0;
@@ -69,6 +74,7 @@ export async function runToolLoop(params) {
       tools,
       messages,
       quiet,
+      hookCtx,
     );
     if (nativeCalls === 0) {
       const recovered = await executeRecoveredTextToolCall(
@@ -76,6 +82,7 @@ export async function runToolLoop(params) {
         tools,
         messages,
         quiet,
+        hookCtx,
       );
       if (!recovered) {
         finalText = message.content || '';
@@ -173,7 +180,13 @@ export function isRunBudgetExceeded(startedAt, maxRunMs) {
  * @param {boolean} quiet
  * @returns {Promise<number>} Number of executed calls
  */
-export async function executeNativeToolCalls(message, tools, messages, quiet) {
+export async function executeNativeToolCalls(
+  message,
+  tools,
+  messages,
+  quiet,
+  hookCtx,
+) {
   if (!message.tool_calls || message.tool_calls.length === 0) {
     return 0;
   }
@@ -185,6 +198,7 @@ export async function executeNativeToolCalls(message, tools, messages, quiet) {
       { name: tc.function.name, args },
       tools,
       quiet,
+      hookCtx,
     );
 
     messages.push({
@@ -211,6 +225,7 @@ export async function executeRecoveredTextToolCall(
   tools,
   messages,
   quiet,
+  hookCtx,
 ) {
   if (message.tool_calls && message.tool_calls.length > 0) {
     return false;
@@ -220,7 +235,7 @@ export async function executeRecoveredTextToolCall(
     return false;
   }
 
-  const result = await dispatchTool(call, tools, quiet);
+  const result = await dispatchTool(call, tools, quiet, hookCtx);
   messages.push({
     role: 'user',
     content: `Recovered text-form tool call ${call.name}. Result:\n${JSON.stringify(result)}`,
@@ -258,18 +273,105 @@ function parseToolArguments(value) {
   }
 }
 
-async function dispatchTool(call, tools, quiet) {
+async function dispatchTool(call, tools, quiet, hookCtx) {
   if (!quiet) {
     process.stderr.write(`${formatToolCall(call.name, call.args)}\n`);
   }
 
-  const result = await tools.dispatch(call.name, call.args);
-
-  if (!quiet) {
-    process.stderr.write(`${formatToolResult(call.name, result)}\n`);
+  const denial = await denyByPreToolHooks(call, hookCtx);
+  if (denial) {
+    if (!quiet) {
+      process.stderr.write(`${formatToolResult(call.name, denial)}\n`);
+    }
+    return denial;
   }
 
-  return result;
+  const result = await tools.dispatch(call.name, call.args);
+  const finalResult = await applyPostToolHooks(call, result, hookCtx);
+
+  if (!quiet) {
+    process.stderr.write(`${formatToolResult(call.name, finalResult)}\n`);
+  }
+
+  return finalResult;
+}
+
+/**
+ * Assemble the tool-hook context from loop params, or null when no tool hooks
+ * are configured (keeping dispatch a no-op fast path).
+ */
+function buildHookCtx(params) {
+  const sets = params.toolHooks;
+  if (!sets) {
+    return null;
+  }
+  return {
+    pre: sets.PreToolUse || [],
+    post: sets.PostToolUse || [],
+    cwd: params.cwd,
+    env: params.commandEnv,
+    startedAt: params.startedAt,
+    maxRunMs: params.maxRunMs || 0,
+  };
+}
+
+/**
+ * Run PreToolUse hooks; return an error result when the call is denied, else
+ * null to let the tool run.
+ */
+async function denyByPreToolHooks(call, hookCtx) {
+  if (!hookCtx || hookCtx.pre.length === 0) {
+    return null;
+  }
+  const { denied, reason } = await runPreToolHooks(
+    hookCtx.pre,
+    call,
+    hookCtx.cwd,
+    {
+      env: hookCtx.env,
+      budgetMs: remainingHookBudgetMs(hookCtx),
+    },
+  );
+  if (denied) {
+    return { error: reason };
+  }
+  return null;
+}
+
+/**
+ * Run PostToolUse hooks; attach their feedback to the result when any failed.
+ */
+async function applyPostToolHooks(call, result, hookCtx) {
+  if (!hookCtx || hookCtx.post.length === 0) {
+    return result;
+  }
+  const { feedback } = await runPostToolHooks(
+    hookCtx.post,
+    call,
+    result,
+    hookCtx.cwd,
+    { env: hookCtx.env, budgetMs: remainingHookBudgetMs(hookCtx) },
+  );
+  if (!feedback) {
+    return result;
+  }
+  return withHookFeedback(result, feedback);
+}
+
+function withHookFeedback(result, feedback) {
+  if (result && typeof result === 'object' && !Array.isArray(result)) {
+    return { ...result, hookFeedback: feedback };
+  }
+  return { result, hookFeedback: feedback };
+}
+
+function remainingHookBudgetMs(hookCtx) {
+  if (!hookCtx.startedAt || !hookCtx.maxRunMs) {
+    return undefined;
+  }
+  const remaining =
+    hookCtx.maxRunMs - (Date.now() - hookCtx.startedAt.getTime());
+  return Math.max(1, remaining);
 }
 
 function isPlainObject(value) {

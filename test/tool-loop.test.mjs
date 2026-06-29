@@ -321,3 +321,89 @@ describe('executeNativeToolCalls (untrusted model output)', () => {
     assert.equal(messages.length, 0);
   });
 });
+
+// Records each dispatch so tests can assert whether a tool actually ran.
+function recordingTools() {
+  const dispatched = [];
+  return {
+    dispatched,
+    definitions: () => [],
+    dispatch: async (name, args) => {
+      dispatched.push({ name, args });
+      return { ok: true };
+    },
+  };
+}
+
+describe('tool hooks in dispatch', () => {
+  beforeEach(setup);
+  afterEach(teardown);
+
+  it('PreToolUse denial blocks the tool and feeds back an error', async () => {
+    const tools = recordingTools();
+    const messages = [];
+    const hookCtx = {
+      pre: [{ run: 'echo blocked >&2; exit 1', name: 'policy' }],
+      post: [],
+      cwd: tmpDir,
+    };
+    await executeNativeToolCalls(
+      nativeToolMessage([
+        { name: 'run_command', arguments: '{"command":"x"}' },
+      ]),
+      tools,
+      messages,
+      true,
+      hookCtx,
+    );
+
+    assert.equal(tools.dispatched.length, 0);
+    const result = JSON.parse(messages[0].content);
+    assert.match(result.error, /denied by PreToolUse hook "policy"/);
+  });
+
+  it('PreToolUse pass lets the tool run', async () => {
+    const tools = recordingTools();
+    const messages = [];
+    const hookCtx = {
+      pre: [{ run: 'exit 0', name: 'ok' }],
+      post: [],
+      cwd: tmpDir,
+    };
+    await executeNativeToolCalls(
+      nativeToolMessage([{ name: 'list_files', arguments: '{}' }]),
+      tools,
+      messages,
+      true,
+      hookCtx,
+    );
+
+    assert.equal(tools.dispatched.length, 1);
+    const result = JSON.parse(messages[0].content);
+    assert.equal(result.ok, true);
+  });
+
+  it('PostToolUse failure appends hookFeedback but keeps the result', async () => {
+    const tools = recordingTools();
+    const messages = [];
+    const hookCtx = {
+      pre: [],
+      post: [{ run: 'echo lint-failed >&2; exit 1', name: 'lint' }],
+      cwd: tmpDir,
+    };
+    await executeNativeToolCalls(
+      nativeToolMessage([
+        { name: 'write_file', arguments: '{"path":"a.txt"}' },
+      ]),
+      tools,
+      messages,
+      true,
+      hookCtx,
+    );
+
+    assert.equal(tools.dispatched.length, 1);
+    const result = JSON.parse(messages[0].content);
+    assert.equal(result.ok, true);
+    assert.match(result.hookFeedback, /PostToolUse hook "lint" failed/);
+  });
+});

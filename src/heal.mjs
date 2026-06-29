@@ -24,6 +24,9 @@ const DEFAULT_MAX_TURNS = 3;
  * @param {number} [params.maxRunMs] - Stop between turns after this many ms (0 disables)
  * @param {number} [params.contextWindow] - Max context window in tokens (0 disables compaction)
  * @param {number} [params.compactThreshold] - Fraction of the window that triggers compaction
+ * @param {{ PreToolUse: Array, PostToolUse: Array }} [params.toolHooks] - Tool hooks for the loop
+ * @param {string} [params.cwd] - Workspace root (for tool hooks)
+ * @param {Record<string, string>} [params.commandEnv] - Curated env (for tool hooks)
  * @returns {Promise<{ healed: boolean, turns: number, verification: object, compactions: number, usage: { prompt: number, completion: number } }>}
  */
 export async function heal(params) {
@@ -40,6 +43,9 @@ export async function heal(params) {
     maxRunMs = 0,
     contextWindow = 0,
     compactThreshold,
+    toolHooks,
+    cwd,
+    commandEnv,
   } = params;
 
   let lastOutput = failure.output;
@@ -76,6 +82,9 @@ ${lastOutput}
       maxRunMs,
       contextWindow,
       compactThreshold,
+      toolHooks,
+      cwd,
+      commandEnv,
     });
     totalUsage.prompt += loop.usage.prompt;
     totalUsage.completion += loop.usage.completion;
