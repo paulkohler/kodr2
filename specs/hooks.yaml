@@ -27,7 +27,9 @@ events:
       On non-zero exit, the hook's combined output is fed to the model via the
       heal loop, bounded by maxHealTurns. The full Stop hook sequence re-runs
       from the top after each heal pass, so a fix that breaks an earlier hook is
-      caught.
+      caught. When a run budget (maxRunMs) is set, the initial verification is
+      capped to hold back a heal reserve (KODR_HEAL_RESERVE, default 0.25) so a
+      Stop hook that hangs cannot consume the whole budget and starve repair.
   PreToolUse:
     status: implemented
     fires: >
@@ -172,6 +174,10 @@ constraints:
   - Per-hook timeout is overridable; default is the verify default and is capped
     by the remaining maxRunMs budget (per CLAUDE.md: operational limits must be
     configurable).
+  - The initial Stop verification is additionally capped to hold back a heal
+    reserve fraction of the run budget (KODR_HEAL_RESERVE or the healReserve
+    option, default 0.25, clamped to [0, 0.9]; 0 disables). This only applies
+    when maxRunMs is set. Heal's own re-verifies use the full remaining budget.
   - Output truncated at the verify output limit (overridable).
   - No tri-state flags: runWhenUnchanged is a plain boolean.
   - Errors at the config boundary are returned values, not thrown.
@@ -208,3 +214,5 @@ tests:
     - a failing SessionStart hook is reported as a failure, not context
     - SessionEnd hooks run for side effects and report failures
     - session hooks parse run, name, and timeout, dropping invalid entries
+    - healReserveFraction resolves option over env over default and clamps
+    - stopVerifyBudgetMs holds back the reserve and is undefined without a budget

@@ -46,6 +46,7 @@ export { isRunBudgetExceeded };
  * @param {Array} [options.priorMessages] - Continuation from previous run
  * @param {string[]} [options.envPassthrough] - Extra env var names for commands
  * @param {number} [options.contextWindow] - Max context window in tokens (0 disables compaction)
+ * @param {number} [options.healReserve] - Fraction of the run budget held back for heal (0..0.9; default KODR_HEAL_RESERVE or 0.25)
  * @returns {Promise<object>} Run result
  */
 export async function run(prompt, options) {
@@ -133,6 +134,7 @@ export async function run(prompt, options) {
     PostToolUse: toolHooks(hooksConfig, 'PostToolUse'),
   };
   const endHooks = sessionHooks(hooksConfig, 'SessionEnd');
+  const reserveFraction = healReserveFraction(options.healReserve);
 
   // SessionStart: run before the task prompt so its output primes the model.
   await runSessionStart({
@@ -194,14 +196,19 @@ export async function run(prompt, options) {
     if (stoppedReason === 'complete') {
       const touchedWorkspace =
         tools.filesChanged().length > 0 || tools.commandsRun() > 0;
-      const runHooks = () =>
+      // The initial verify is capped to leave a heal reserve, so a hook that
+      // hangs cannot consume the whole budget and starve repair. Heal's own
+      // re-verifies use the full remaining budget (the reserve plus leftover).
+      const runHooks = (budgetMs) =>
         runStopHooks(stops, cwd, {
           env: commandEnv,
-          budgetMs: remainingRunBudgetMs(startedAt, maxRunMs),
+          budgetMs,
           touchedWorkspace,
         });
 
-      const hookResult = await runHooks();
+      const hookResult = await runHooks(
+        stopVerifyBudgetMs(startedAt, maxRunMs, reserveFraction),
+      );
       // Only treat hooks as verification when at least one actually ran.
       if (hookResult.results.length > 0) {
         result.verification = hookResult;
@@ -222,7 +229,7 @@ export async function run(prompt, options) {
           modelId,
           messages,
           tools,
-          verifyFn: runHooks,
+          verifyFn: () => runHooks(remainingRunBudgetMs(startedAt, maxRunMs)),
           failure: hookResult,
           maxTurns: maxHealTurns,
           quiet,
@@ -349,6 +356,59 @@ export function remainingRunBudgetMs(startedAt, maxRunMs) {
   }
   const remaining = maxRunMs - (Date.now() - startedAt.getTime());
   return Math.max(1, remaining);
+}
+
+export const DEFAULT_HEAL_RESERVE = 0.25;
+
+/**
+ * Fraction of the run budget held back from the initial verification so the
+ * heal pass still has time to run. A pathological Stop hook (e.g. a test that
+ * hangs on an open handle) can otherwise consume the whole budget and starve
+ * repair. Resolved from an explicit option, then KODR_HEAL_RESERVE, then the
+ * default; clamped to [0, 0.9].
+ * @param {number} [option]
+ * @returns {number}
+ */
+export function healReserveFraction(option) {
+  let fraction = DEFAULT_HEAL_RESERVE;
+  const fromEnv = parseFraction(process.env.KODR_HEAL_RESERVE);
+  if (Number.isFinite(fromEnv)) {
+    fraction = fromEnv;
+  }
+  if (Number.isFinite(option)) {
+    fraction = option;
+  }
+  if (fraction < 0) {
+    return 0;
+  }
+  if (fraction > 0.9) {
+    return 0.9;
+  }
+  return fraction;
+}
+
+function parseFraction(value) {
+  if (value === undefined || value === '') {
+    return Number.NaN;
+  }
+  return Number.parseFloat(value);
+}
+
+/**
+ * Budget cap for the initial Stop-hook verification: the remaining run budget
+ * minus the heal reserve. Returns undefined when no run budget is set, so the
+ * verify falls back to its own default timeout.
+ * @param {Date} startedAt
+ * @param {number} maxRunMs
+ * @param {number} reserveFraction
+ * @returns {number | undefined}
+ */
+export function stopVerifyBudgetMs(startedAt, maxRunMs, reserveFraction) {
+  const remaining = remainingRunBudgetMs(startedAt, maxRunMs);
+  if (remaining === undefined) {
+    return undefined;
+  }
+  return Math.max(1, Math.floor(remaining * (1 - reserveFraction)));
 }
 
 /**

@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test';
+import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
@@ -6,10 +6,13 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import {
+  DEFAULT_HEAL_RESERVE,
   createRunRecord,
+  healReserveFraction,
   isRunBudgetExceeded,
   remainingRunBudgetMs,
   run,
+  stopVerifyBudgetMs,
 } from '../src/harness.mjs';
 
 describe('createRunRecord', () => {
@@ -74,6 +77,57 @@ describe('remainingRunBudgetMs', () => {
   it('returns at least one millisecond when the budget is spent', () => {
     const startedAt = new Date(Date.now() - 1000);
     assert.equal(remainingRunBudgetMs(startedAt, 100), 1);
+  });
+});
+
+describe('healReserveFraction', () => {
+  const saved = process.env.KODR_HEAL_RESERVE;
+  afterEach(() => {
+    if (saved === undefined) {
+      delete process.env.KODR_HEAL_RESERVE;
+    } else {
+      process.env.KODR_HEAL_RESERVE = saved;
+    }
+  });
+
+  it('defaults when nothing is configured', () => {
+    delete process.env.KODR_HEAL_RESERVE;
+    assert.equal(healReserveFraction(undefined), DEFAULT_HEAL_RESERVE);
+  });
+
+  it('reads KODR_HEAL_RESERVE from the environment', () => {
+    process.env.KODR_HEAL_RESERVE = '0.4';
+    assert.equal(healReserveFraction(undefined), 0.4);
+  });
+
+  it('prefers an explicit option over the environment', () => {
+    process.env.KODR_HEAL_RESERVE = '0.4';
+    assert.equal(healReserveFraction(0.1), 0.1);
+  });
+
+  it('clamps to [0, 0.9]', () => {
+    delete process.env.KODR_HEAL_RESERVE;
+    assert.equal(healReserveFraction(-1), 0);
+    assert.equal(healReserveFraction(5), 0.9);
+  });
+});
+
+describe('stopVerifyBudgetMs', () => {
+  it('returns undefined when no run budget is set', () => {
+    assert.equal(stopVerifyBudgetMs(new Date(), 0, 0.25), undefined);
+  });
+
+  it('holds back the reserve fraction of the remaining budget', () => {
+    const startedAt = new Date(Date.now());
+    const budget = stopVerifyBudgetMs(startedAt, 1000, 0.25);
+    // ~750 of 1000, leaving ~250 for heal (allowing for elapsed ms).
+    assert.ok(budget <= 750 && budget >= 700, `got ${budget}`);
+  });
+
+  it('reserves nothing when the fraction is zero', () => {
+    const startedAt = new Date(Date.now());
+    const budget = stopVerifyBudgetMs(startedAt, 1000, 0);
+    assert.ok(budget >= 950, `got ${budget}`);
   });
 });
 
