@@ -66,7 +66,7 @@ export async function main(argv) {
     testCommand: args.test,
     maxHealTurns: args.healTurns,
     maxRunMs: args.maxRunMs,
-    quiet: args.quiet,
+    quiet: args.quiet || args.json,
     envPassthrough: args.env,
     runsDir: args.runsDir,
     noSave: args.noSave,
@@ -93,13 +93,45 @@ export async function main(argv) {
 
   try {
     const result = await run(args.prompt, options);
+    if (args.json) {
+      process.stdout.write(`${JSON.stringify(summarizeResult(result))}\n`);
+    }
     if (shouldFailProcess(result)) {
       process.exitCode = 1;
     }
   } catch (err) {
-    process.stderr.write(`Error: ${err.message}\n`);
+    if (args.json) {
+      process.stdout.write(
+        `${JSON.stringify({ stoppedReason: 'error', error: err.message })}\n`,
+      );
+    } else {
+      process.stderr.write(`Error: ${err.message}\n`);
+    }
     process.exitCode = 1;
   }
+}
+
+/**
+ * A compact, machine-readable summary of a run for --json mode. Lets an external
+ * harness/adapter read what Kodr did (outcome and cost) without scraping output.
+ * @param {object} result
+ * @returns {object}
+ */
+export function summarizeResult(result) {
+  return {
+    stoppedReason: result.stoppedReason,
+    completed: result.stoppedReason === 'complete',
+    toolTurns: result.toolTurns ?? 0,
+    usage: result.usage ?? { prompt: 0, completion: 0 },
+    compactions: result.compactions ?? 0,
+    healed: result.healed ?? null,
+    healTurns: result.healTurns ?? null,
+    verified: result.verification?.passed ?? null,
+    filesChanged: result.filesChanged ?? [],
+    packageCommands: result.packageCommands ?? [],
+    response: result.response ?? '',
+    error: result.error?.message ?? null,
+  };
 }
 
 export function shouldFailProcess(result) {
@@ -133,6 +165,7 @@ export function parseArgs(argv) {
     continue: null,
     runsDir: null,
     noSave: false,
+    json: false,
     help: false,
     version: false,
   };
@@ -216,6 +249,11 @@ export function parseArgs(argv) {
       i++;
       continue;
     }
+    if (arg === '--json') {
+      args.json = true;
+      i++;
+      continue;
+    }
 
     // Positional: first is command, second is prompt
     if (!args.command) {
@@ -265,6 +303,7 @@ Options:
   --continue <last|path>          Continue from a prior run
   --runs-dir <path>               Where to write run transcripts (or KODR_RUNS_DIR)
   --no-save                       Don't write a run transcript (or KODR_NO_SAVE)
+  --json                          Print a machine-readable run summary to stdout
   --quiet, -q                     Suppress streaming output
   --help, -h                      Show this help
   --version, -v                   Show version

@@ -92,6 +92,7 @@ constraints:
   - Healing only attempted when verification fails
   - CLI exits non-zero when final verification fails
   - CLI accepts -p/--prompt as a compatibility alias for prompt text
+  - CLI --json prints a single machine-readable run summary to stdout (implies --quiet) so an external harness/adapter can record outcome and cost; for container runs combine with --no-save / --runs-dir and run without --test
 
 tests:
   unit:
@@ -100,6 +101,7 @@ tests:
     - parseArgs extracts prompt from -p/--prompt
     - parseArgs handles all flag variants
     - CLI process failure follows final verification failure
+    - summarizeResult produces a compact machine-readable run summary
     - CLI process fails when run stopped before completion
     - maxRunMs budget detection works
     - remaining run budget can be used as a command timeout

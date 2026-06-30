@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseArgs, shouldFailProcess } from '../src/cli.mjs';
+import { parseArgs, shouldFailProcess, summarizeResult } from '../src/cli.mjs';
 
 describe('parseArgs', () => {
   it('extracts prompt from "run" command', () => {
@@ -117,6 +117,11 @@ describe('parseArgs', () => {
     assert.equal(args.noSave, false);
   });
 
+  it('parses --json (default false)', () => {
+    assert.equal(parseArgs(['run', 'hi', '--json']).json, true);
+    assert.equal(parseArgs(['run', 'hi']).json, false);
+  });
+
   it('defaults env to an empty list', () => {
     const args = parseArgs(['run', 'hi']);
     assert.deepEqual(args.env, []);
@@ -140,6 +145,38 @@ describe('parseArgs', () => {
   it('defaults quiet to false', () => {
     const args = parseArgs(['run', 'hi']);
     assert.equal(args.quiet, false);
+  });
+});
+
+describe('summarizeResult', () => {
+  it('produces a compact machine-readable summary', () => {
+    const summary = summarizeResult({
+      stoppedReason: 'complete',
+      toolTurns: 5,
+      usage: { prompt: 100, completion: 20 },
+      healed: true,
+      healTurns: 2,
+      verification: { passed: true },
+      filesChanged: ['server.js'],
+      packageCommands: [],
+      response: 'done',
+    });
+    assert.equal(summary.completed, true);
+    assert.equal(summary.verified, true);
+    assert.equal(summary.healed, true);
+    assert.equal(summary.toolTurns, 5);
+    assert.deepEqual(summary.filesChanged, ['server.js']);
+    assert.equal(summary.error, null);
+  });
+
+  it('marks incomplete runs and surfaces errors', () => {
+    const summary = summarizeResult({
+      stoppedReason: 'error',
+      error: { message: 'HTTP 500' },
+    });
+    assert.equal(summary.completed, false);
+    assert.equal(summary.verified, null);
+    assert.equal(summary.error, 'HTTP 500');
   });
 });
 
