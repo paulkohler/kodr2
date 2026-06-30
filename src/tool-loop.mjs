@@ -67,6 +67,7 @@ export async function runToolLoop(params) {
       messages,
       tools: tools.definitions(),
       onToken: quiet ? undefined : (t) => process.stdout.write(t),
+      timeoutMs: remainingRunBudgetMs(startedAt, maxRunMs),
     });
 
     usage.prompt += turnUsage.prompt;
@@ -175,6 +176,22 @@ export function isRunBudgetExceeded(startedAt, maxRunMs) {
     return false;
   }
   return Date.now() - startedAt.getTime() >= maxRunMs;
+}
+
+/**
+ * Time left in the run's wall-clock budget, for capping a single request
+ * (e.g. an LLM completion) so it can't outlive the run deadline. Returns
+ * undefined when no run budget is set.
+ * @param {Date} startedAt
+ * @param {number} maxRunMs
+ * @returns {number | undefined}
+ */
+export function remainingRunBudgetMs(startedAt, maxRunMs) {
+  if (!maxRunMs) {
+    return undefined;
+  }
+  const remaining = maxRunMs - (Date.now() - startedAt.getTime());
+  return Math.max(1, remaining);
 }
 
 /**

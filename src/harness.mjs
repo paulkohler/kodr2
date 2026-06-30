@@ -20,6 +20,7 @@ import { heal } from './heal.mjs';
 import {
   MAX_TOOL_TURNS,
   isRunBudgetExceeded,
+  remainingRunBudgetMs,
   runToolLoop,
 } from './tool-loop.mjs';
 import { formatNotice, formatVerification, formatSummary } from './format.mjs';
@@ -30,8 +31,8 @@ import {
   isCompactCommand,
 } from './compact.mjs';
 
-// Re-exported for callers (and tests) that imported it from the harness.
-export { isRunBudgetExceeded };
+// Re-exported for callers (and tests) that imported them from the harness.
+export { isRunBudgetExceeded, remainingRunBudgetMs };
 
 /**
  * Run the harness.
@@ -358,14 +359,6 @@ function createErrorResult(params) {
     compactions: 0,
     messages,
   };
-}
-
-export function remainingRunBudgetMs(startedAt, maxRunMs) {
-  if (!maxRunMs) {
-    return undefined;
-  }
-  const remaining = maxRunMs - (Date.now() - startedAt.getTime());
-  return Math.max(1, remaining);
 }
 
 export const DEFAULT_HEAL_RESERVE = 0.25;

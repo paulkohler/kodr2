@@ -18,7 +18,7 @@ inputs:
 outputs:
   chat:
     type: function
-    description: "Send chat completion: (messages, tools, onToken) → { message, usage }"
+    description: "Send chat completion: (messages, tools, onToken, timeoutMs?) → { message, usage }"
   models:
     type: function
     description: "List available models: () → [{ id }]"
@@ -35,6 +35,7 @@ constraints:
   - Explicit model option takes precedence over KODR_MODEL
   - HTTP errors surface as thrown exceptions
   - Timeout applies to the full request lifecycle, even when streaming chunks keep arriving
+  - chat() accepts a per-call timeoutMs that overrides the client's configured default timeout, so a caller tracking a wall-clock budget (e.g. the harness's maxRunMs) can cap each request to the time actually remaining
 
 tests:
   unit:
@@ -47,6 +48,8 @@ tests:
     - HTTP errors from model listing and chat are surfaced
     - stalled requests time out
     - long streaming requests time out even when chunks arrive
+    - a per-call timeoutMs overrides the client default
+    - omitting timeoutMs falls back to the client default
   eval:
     - connects to LM Studio and lists models
     - sends a simple prompt and gets a response

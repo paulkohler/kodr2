@@ -35,6 +35,10 @@ export function createClient(options = {}) {
    * @param {Array} [params.tools] - Tool definitions
    * @param {function} [params.onToken] - Called with each text token
    * @param {function} [params.onToolCall] - Called when a tool call starts
+   * @param {number} [params.timeoutMs] - Per-call timeout override (e.g. the
+   *   run's remaining budget), so a request started near the run deadline
+   *   doesn't get a fresh full-length timeout. Falls back to the client's
+   *   configured timeout when omitted.
    * @returns {Promise<{ message: object, usage: object }>}
    */
   async function chat(params) {
@@ -52,7 +56,8 @@ export function createClient(options = {}) {
       }));
     }
 
-    return streamRequest(`${baseUrl}/chat/completions`, body, timeout, {
+    const callTimeout = params.timeoutMs ?? timeout;
+    return streamRequest(`${baseUrl}/chat/completions`, body, callTimeout, {
       onToken: params.onToken,
       onToolCall: params.onToolCall,
     });

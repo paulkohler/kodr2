@@ -247,6 +247,38 @@ describe('runToolLoop', () => {
     assert.equal(loop.toolTurns, 0);
     assert.equal(client.calls.length, 0);
   });
+
+  it('caps each chat call to the remaining run budget, not the full budget', async () => {
+    const client = scriptedClient([finalTurn('done')]);
+    const startedAt = new Date(Date.now() - 9_000);
+    await runToolLoop({
+      client,
+      modelId: 'm',
+      messages: [],
+      tools: stubTools,
+      quiet: true,
+      startedAt,
+      maxRunMs: 10_000,
+    });
+
+    assert.equal(client.calls.length, 1);
+    // ~1000ms left of the 10s budget, not a fresh 10s timeout.
+    assert.ok(client.calls[0].timeoutMs <= 1000);
+    assert.ok(client.calls[0].timeoutMs > 0);
+  });
+
+  it('passes no timeoutMs when the run has no budget', async () => {
+    const client = scriptedClient([finalTurn('done')]);
+    await runToolLoop({
+      client,
+      modelId: 'm',
+      messages: [],
+      tools: stubTools,
+      quiet: true,
+    });
+
+    assert.equal(client.calls[0].timeoutMs, undefined);
+  });
 });
 
 // Tool calls come straight from the model and are untrusted: argument JSON may
