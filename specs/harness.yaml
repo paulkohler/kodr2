@@ -93,6 +93,7 @@ constraints:
   - CLI exits non-zero when final verification fails
   - CLI accepts -p/--prompt as a compatibility alias for prompt text
   - CLI --json prints a single machine-readable run summary to stdout (implies --quiet) so an external harness/adapter can record outcome and cost; for container runs combine with --no-save / --runs-dir and run without --test
+  - CLI --no-fail (or KODR_NO_FAIL) makes the process always exit 0; for external-verifier runs where the verifier is the judge and a non-zero agent exit would be recorded as a harness error rather than a clean reward 0
 
 tests:
   unit:

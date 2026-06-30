@@ -1,6 +1,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseArgs, shouldFailProcess, summarizeResult } from '../src/cli.mjs';
+import {
+  exitCodeFor,
+  parseArgs,
+  shouldFailProcess,
+  summarizeResult,
+} from '../src/cli.mjs';
 
 describe('parseArgs', () => {
   it('extracts prompt from "run" command', () => {
@@ -122,6 +127,11 @@ describe('parseArgs', () => {
     assert.equal(parseArgs(['run', 'hi']).json, false);
   });
 
+  it('parses --no-fail (default false)', () => {
+    assert.equal(parseArgs(['run', 'hi', '--no-fail']).noFail, true);
+    assert.equal(parseArgs(['run', 'hi']).noFail, false);
+  });
+
   it('defaults env to an empty list', () => {
     const args = parseArgs(['run', 'hi']);
     assert.deepEqual(args.env, []);
@@ -177,6 +187,27 @@ describe('summarizeResult', () => {
     assert.equal(summary.completed, false);
     assert.equal(summary.verified, null);
     assert.equal(summary.error, 'HTTP 500');
+  });
+});
+
+describe('exitCodeFor', () => {
+  it('returns 1 for an incomplete run by default', () => {
+    assert.equal(exitCodeFor({ stoppedReason: 'budget-exceeded' }, {}), 1);
+  });
+
+  it('returns 0 for a completed run', () => {
+    assert.equal(exitCodeFor({ stoppedReason: 'complete' }, {}), 0);
+  });
+
+  it('returns 0 even for failure when --no-fail is set', () => {
+    assert.equal(
+      exitCodeFor({ stoppedReason: 'budget-exceeded' }, { noFail: true }),
+      0,
+    );
+    assert.equal(
+      exitCodeFor({ verification: { passed: false } }, { noFail: true }),
+      0,
+    );
   });
 });
 

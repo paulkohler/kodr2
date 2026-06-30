@@ -96,9 +96,7 @@ export async function main(argv) {
     if (args.json) {
       process.stdout.write(`${JSON.stringify(summarizeResult(result))}\n`);
     }
-    if (shouldFailProcess(result)) {
-      process.exitCode = 1;
-    }
+    process.exitCode = exitCodeFor(result, args);
   } catch (err) {
     if (args.json) {
       process.stdout.write(
@@ -107,8 +105,37 @@ export async function main(argv) {
     } else {
       process.stderr.write(`Error: ${err.message}\n`);
     }
-    process.exitCode = 1;
+    if (!noFailEnabled(args)) {
+      process.exitCode = 1;
+    }
   }
+}
+
+/**
+ * Process exit code for a completed run. With --no-fail (or KODR_NO_FAIL) Kodr
+ * always exits 0 — for external-verifier contexts (Terminal-Bench, arenas)
+ * where the verifier is the judge and a non-zero agent exit is recorded as a
+ * harness error rather than a clean reward 0.
+ * @param {object} result
+ * @param {object} args
+ * @returns {number}
+ */
+export function exitCodeFor(result, args) {
+  if (noFailEnabled(args)) {
+    return 0;
+  }
+  if (shouldFailProcess(result)) {
+    return 1;
+  }
+  return 0;
+}
+
+function noFailEnabled(args) {
+  if (args.noFail) {
+    return true;
+  }
+  const env = process.env.KODR_NO_FAIL;
+  return env === '1' || env === 'true';
 }
 
 /**
@@ -166,6 +193,7 @@ export function parseArgs(argv) {
     runsDir: null,
     noSave: false,
     json: false,
+    noFail: false,
     help: false,
     version: false,
   };
@@ -254,6 +282,11 @@ export function parseArgs(argv) {
       i++;
       continue;
     }
+    if (arg === '--no-fail') {
+      args.noFail = true;
+      i++;
+      continue;
+    }
 
     // Positional: first is command, second is prompt
     if (!args.command) {
@@ -304,6 +337,7 @@ Options:
   --runs-dir <path>               Where to write run transcripts (or KODR_RUNS_DIR)
   --no-save                       Don't write a run transcript (or KODR_NO_SAVE)
   --json                          Print a machine-readable run summary to stdout
+  --no-fail                       Always exit 0 (or KODR_NO_FAIL); for external-verifier runs
   --quiet, -q                     Suppress streaming output
   --help, -h                      Show this help
   --version, -v                   Show version
