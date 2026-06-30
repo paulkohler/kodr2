@@ -32,6 +32,7 @@
     "pretest": "npm run assert:zero-deps",
     "test": "node --test test/*.test.mjs",
     "eval": "node --test eval/*.eval.mjs",
+    "arena": "node eval/arena/run.mjs",
     "check": "node --check bin/*.mjs && node --check src/*.mjs && node --check src/tools/*.mjs",
     "format": "biome format --write bin src test eval specs *.md *.json",
     "format:check": "biome format bin src test eval specs *.md *.json",

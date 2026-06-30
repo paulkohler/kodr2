@@ -1,0 +1,8 @@
+{
+  "name": "todo-rust-lib",
+  "prompt": "Create a Rust library crate for an in-memory TODO store using only the Rust standard library (no external crates). Add a Cargo.toml (package todo_api, edition 2021) and src/lib.rs defining a Todo struct (id: u32, text: String, done: bool) and a TodoStore with new(), add(text) returning the created Todo, and all(). Include #[cfg(test)] unit tests covering add and all.",
+  "setup": "",
+  "verify": "cargo test --quiet",
+  "budgetMs": 300000,
+  "repeats": 3
+}

@@ -1,0 +1,87 @@
+name: harness-arena
+status: proposed
+description: >
+  A benchmark that holds the model fixed and varies the harness, to measure what
+  Kodr's features contribute. The transpose of a model leaderboard: instead of
+  ranking models under a fixed scaffold, it ranks harness configurations under a
+  fixed model. In the spirit of Harness-Bench and Claw-SWE-Bench.
+
+  Reports pass@k AND cost (tool-turns, tokens, heals, aborts), because at a fixed
+  model the harness drives efficiency far more than raw pass-rate. Lives in
+  eval/ (real model, slow, non-deterministic) and is invoked explicitly via
+  `npm run arena`, never as part of `npm test`.
+
+inputs:
+  variants:
+    type: object
+    required: true
+    description: >
+      eval/arena/variants.json — the fixed model, baseUrl, and an ordered list
+      of variants. Each variant: { name, useGate (bool), healTurns (int),
+      env (object of extra env vars) }.
+  tasks:
+    type: array
+    required: true
+    description: >
+      eval/arena/tasks/*.task.json — harness-agnostic tasks:
+      { name, prompt, setup (shell), verify (shell), budgetMs, repeats }.
+
+outputs:
+  jobs:
+    type: array
+    description: One record per task × variant × repeat run
+  report:
+    type: string
+    description: Markdown table, one row per variant
+
+job_record:
+  fields:
+    - task
+    - variant
+    - repeat
+    - passed         # from the task's own verify (ground truth)
+    - toolTurns
+    - promptTokens
+    - completionTokens
+    - healed
+    - stoppedReason
+
+behavior:
+  - For each task × variant × repeat: a fresh temp workspace, run setup, run
+    Kodr headless with the variant's knobs, then run the task's verify.
+  - The task verify is the ground truth and runs regardless of whether the
+    variant used an in-harness Stop gate, so variants are compared fairly.
+  - Variant knobs map to flags/env Kodr already exposes — useGate -> --test,
+    healTurns -> --heal-turns, env -> process env (e.g. KODR_HEAL_RESERVE). No
+    test-only hooks into the harness.
+  - Kodr run records are written via --runs-dir to a jobs subdir, never into the
+    task workspace (depends on the runs-dir override).
+  - Skips cleanly (exit 0) when the model server is unreachable.
+  - Filters: --task, --variant, --repeats, --jobs-dir for quick single cells.
+
+aggregation:
+  - Per variant: pass@k (per task, any repeat passing, averaged over tasks),
+    mean tool-turns, mean tokens, heal count, abort count, run count.
+  - Aggregation is pure and dependency-free (eval/arena/report.mjs) so it is
+    unit-testable without a model.
+
+constraints:
+  - Zero runtime dependencies; config is JSON (no runtime YAML parser).
+  - Not run by `npm test`; invoked via `npm run arena`.
+  - Output (jobs/) is gitignored.
+  - The task schema is harness-agnostic so the same tasks could later feed a
+    cross-harness run (e.g. Terminal-Bench), Kodr vs other harnesses at one model.
+
+future:
+  - Feature-flag ablations that need new Kodr knobs (e.g. tool-call recovery
+    on/off) — add the flag, add the variant.
+  - A CI gate wrapper that fails on a pass@k regression or token-cost blowup
+    for a fixed (task, model) pair.
+  - A Terminal-Bench / Harbor adapter that reuses these tasks for cross-harness
+    comparison (needs a node-in-container or single-executable Kodr build).
+
+tests:
+  unit:
+    - aggregate summarizes per variant with pass@k, cost, heals, and aborts
+    - aggregate groups runs by variant
+    - toMarkdown renders a table row per variant

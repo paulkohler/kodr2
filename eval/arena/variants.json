@@ -1,0 +1,15 @@
+{
+  "model": "mistralai/devstral-small-2-2512",
+  "baseUrl": "http://localhost:1234/v1",
+  "variants": [
+    { "name": "baseline", "useGate": false, "healTurns": 0 },
+    { "name": "gate", "useGate": true, "healTurns": 0 },
+    { "name": "heal", "useGate": true, "healTurns": 3 },
+    {
+      "name": "heal-no-reserve",
+      "useGate": true,
+      "healTurns": 3,
+      "env": { "KODR_HEAL_RESERVE": "0" }
+    }
+  ]
+}
