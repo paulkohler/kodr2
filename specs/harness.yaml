@@ -86,7 +86,7 @@ constraints:
   - Run transcript includes model, prompt, cwd, baseUrl, test command, env passthrough, start time, finish time, and duration
   - Run transcript records package-manager commands without blocking them
   - System prompt assembled fresh each run from workspace state
-  - System prompt file listing skips operator logs and copied kodr artifacts
+  - System prompt file listing skips operator logs, copied kodr artifacts, and common build/dependency dirs (node_modules, target, dist, build, .next, __pycache__, .venv, venv, .gradle) so a build can't flood the prompt; ignored paths are still readable directly
   - System prompt requires tools to be called through the provided tool channel, not text-form pseudo calls
   - Verification runs when a test command is set and the workspace was touched (files written or a command run)
   - Healing only attempted when verification fails

@@ -86,6 +86,21 @@ describe('listWorkspaceFiles', () => {
     assert.ok(!files.some((f) => f.startsWith('node_modules')));
   });
 
+  it('skips build/dependency dirs across ecosystems but keeps source', async () => {
+    await mkdir(join(tmpDir, 'target'));
+    await writeFile(join(tmpDir, 'target/lib.rlib'), '');
+    await mkdir(join(tmpDir, '__pycache__'));
+    await writeFile(join(tmpDir, '__pycache__/m.pyc'), '');
+    await mkdir(join(tmpDir, 'dist'));
+    await writeFile(join(tmpDir, 'dist/bundle.js'), '');
+    await writeFile(join(tmpDir, 'src.rs'), '');
+    const files = await listWorkspaceFiles(tmpDir);
+    assert.ok(files.includes('src.rs'));
+    assert.ok(!files.some((f) => f.startsWith('target')));
+    assert.ok(!files.some((f) => f.startsWith('__pycache__')));
+    assert.ok(!files.some((f) => f.startsWith('dist')));
+  });
+
   it('skips operator logs and copied kodr artifacts', async () => {
     await mkdir(join(tmpDir, 'kodr'));
     await writeFile(join(tmpDir, 'run1.log'), 'log');
