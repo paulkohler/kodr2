@@ -295,7 +295,7 @@ describe('executeNativeToolCalls (untrusted model output)', () => {
     }
   });
 
-  it('tolerates malformed argument JSON by dispatching empty args', async () => {
+  it('intercepts malformed argument JSON with a resend error, not a dispatch', async () => {
     const registry = createToolRegistry(tmpDir);
     const messages = [];
     const executed = await executeNativeToolCalls(
@@ -307,7 +307,7 @@ describe('executeNativeToolCalls (untrusted model output)', () => {
 
     assert.equal(executed, 1);
     const result = JSON.parse(messages[0].content);
-    assert.match(result.error, /path is required/);
+    assert.match(result.error, /not valid JSON/);
   });
 
   it('handles repeated identical tool calls', async () => {
@@ -342,6 +342,32 @@ describe('executeNativeToolCalls (untrusted model output)', () => {
     assert.equal(executed, 1);
     const result = JSON.parse(messages[0].content);
     assert.match(result.error, /unknown tool/i);
+  });
+
+  it('repairs unparseable tool-call arguments instead of poisoning history', async () => {
+    // A mis-escaped/truncated arguments string: don't dispatch it, repair the
+    // stored message to {} so it can't 500 the backend, and feed back a clear
+    // error so the model resends.
+    const tools = recordingTools();
+    const messages = [];
+    const message = nativeToolMessage([
+      {
+        name: 'write_file',
+        arguments: '{"path":"a.rs","content":"let s = \\"x\\r\\n;',
+      },
+    ]);
+    const executed = await executeNativeToolCalls(
+      message,
+      tools,
+      messages,
+      true,
+    );
+
+    assert.equal(executed, 1);
+    assert.equal(tools.dispatched.length, 0); // never dispatched garbage
+    assert.equal(message.tool_calls[0].function.arguments, '{}'); // repaired in place
+    const result = JSON.parse(messages[0].content);
+    assert.match(result.error, /not valid JSON/);
   });
 
   it('recovers a token-polluted native tool name and dispatches the real tool', async () => {

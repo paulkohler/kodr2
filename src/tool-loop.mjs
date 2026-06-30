@@ -12,7 +12,11 @@
 
 import { formatNotice, formatToolCall, formatToolResult } from './format.mjs';
 import { runPostToolHooks, runPreToolHooks } from './hooks.mjs';
-import { recoverToolCalls, recoverToolName } from './tool-recovery.mjs';
+import {
+  isUnparseableArgs,
+  recoverToolCalls,
+  recoverToolName,
+} from './tool-recovery.mjs';
 import {
   COMPACTION_THRESHOLD,
   compactMessages,
@@ -194,10 +198,7 @@ export async function executeNativeToolCalls(
 
   let executed = 0;
   for (const tc of message.tool_calls) {
-    const name = recoverToolName(tc.function.name);
-    const args = parseToolArguments(tc.function.arguments);
-    const result = await dispatchTool({ name, args }, tools, quiet, hookCtx);
-
+    const result = await executeOneNativeCall(tc, tools, quiet, hookCtx);
     messages.push({
       role: 'tool',
       tool_call_id: tc.id,
@@ -207,6 +208,33 @@ export async function executeNativeToolCalls(
   }
 
   return executed;
+}
+
+/**
+ * Execute one native tool call. Untrusted output: a model can emit unparseable
+ * arguments (mis-escaped or truncated). Storing that raw and replaying it can
+ * break the backend chat template (a deterministic 500 that aborts the run), so
+ * repair the stored arguments in place to "{}" and return a clear error telling
+ * the model to resend a valid call, rather than dispatching garbage.
+ * @returns {Promise<object>} The tool result (or a repair error)
+ */
+async function executeOneNativeCall(tc, tools, quiet, hookCtx) {
+  if (isUnparseableArgs(tc.function.arguments)) {
+    tc.function.arguments = '{}';
+    if (!quiet) {
+      process.stderr.write(
+        `${formatNotice(`repaired malformed arguments for tool call ${recoverToolName(tc.function.name)}`)}\n`,
+      );
+    }
+    return {
+      error:
+        'tool-call arguments were not valid JSON; resend the call with the arguments as a single valid JSON object',
+    };
+  }
+
+  const name = recoverToolName(tc.function.name);
+  const args = parseToolArguments(tc.function.arguments);
+  return dispatchTool({ name, args }, tools, quiet, hookCtx);
 }
 
 /**

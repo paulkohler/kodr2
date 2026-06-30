@@ -74,6 +74,34 @@ export function recoverToolName(rawName) {
 }
 
 /**
+ * Whether a native tool_call's `arguments` string is non-empty but not parseable
+ * as JSON — the sign of a model that mis-escaped or truncated its arguments
+ * (common with escaping-heavy content). An empty/whitespace value is a valid
+ * no-argument call, not malformed.
+ *
+ * Storing such a raw message and replaying it can break the backend chat
+ * template (observed: a deterministic HTTP 500 that aborts the run), so callers
+ * repair the stored arguments to "{}" and ask the model to resend.
+ * @param {*} value - tc.function.arguments
+ * @returns {boolean}
+ */
+export function isUnparseableArgs(value) {
+  if (typeof value !== 'string') {
+    return false;
+  }
+  const trimmed = value.trim();
+  if (trimmed === '') {
+    return false;
+  }
+  try {
+    JSON.parse(trimmed);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/**
  * First recovered call, or null. Back-compatible with the original single-call
  * recovery used by the tool loop and its tests.
  * @param {string} content

@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  isUnparseableArgs,
   recoverTextToolCall,
   recoverToolCalls,
   recoverToolName,
@@ -139,5 +140,27 @@ describe('recoverToolName — polluted native tool-call names', () => {
 
   it('leaves an unframed odd name unchanged for dispatch to reject', () => {
     assert.equal(recoverToolName('totally.invalid'), 'totally.invalid');
+  });
+});
+
+describe('isUnparseableArgs', () => {
+  it('is false for valid JSON object arguments', () => {
+    assert.equal(isUnparseableArgs('{"path":"a.txt"}'), false);
+  });
+
+  it('is false for an empty or whitespace value (a no-arg call)', () => {
+    assert.equal(isUnparseableArgs(''), false);
+    assert.equal(isUnparseableArgs('   '), false);
+  });
+
+  it('is false for non-string arguments', () => {
+    assert.equal(isUnparseableArgs({ path: 'a.txt' }), false);
+    assert.equal(isUnparseableArgs(undefined), false);
+  });
+
+  it('is true for mis-escaped / truncated JSON', () => {
+    // The escaping-heavy failure: an unterminated, mis-escaped string.
+    assert.equal(isUnparseableArgs('{"content":"let s = \\"x\\r\\n;'), true);
+    assert.equal(isUnparseableArgs('{"path":"a.txt"'), true);
   });
 });

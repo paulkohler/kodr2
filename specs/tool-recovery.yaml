@@ -62,6 +62,19 @@ native_name_recovery:
   - Arguments on the native call are used as-is (in the observed failure they are
     correct; only the name is polluted).
 
+malformed_args_repair:
+  - isUnparseableArgs flags a native tool_call whose arguments string is
+    non-empty but not valid JSON — a model that mis-escaped or truncated its
+    arguments (common with escaping-heavy content like HTTP/JSON code).
+  - The tool loop repairs such a call in place: the stored assistant message's
+    arguments are replaced with "{}" so replaying the conversation cannot break
+    the backend chat template (observed: a deterministic HTTP 500 that aborted
+    the run). The call is not dispatched; instead the model is fed a clear error
+    telling it to resend the arguments as a single valid JSON object, so the run
+    recovers and the model can retry within the same turn budget.
+  - An empty/whitespace arguments value is a valid no-argument call, not
+    malformed. Non-string arguments are left untouched.
+
 constraints:
   - Text recovery only runs as a fallback when the message has no native
     tool_calls; native-name recovery runs on every native call.
@@ -93,3 +106,7 @@ tests:
     - recoverToolName extracts the real name after a [TOOL_CALLS] token
     - recoverToolName leaves an unframed odd name unchanged
     - a native tool_call with a token-polluted name dispatches to the real tool
+    - isUnparseableArgs is true for mis-escaped/truncated args, false for valid,
+      empty, or non-string args
+    - a native call with unparseable arguments is repaired to {} and not
+      dispatched, returning a resend error
