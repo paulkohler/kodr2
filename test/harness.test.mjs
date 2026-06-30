@@ -169,3 +169,66 @@ describe('run failure artifacts', () => {
     }
   });
 });
+
+async function startFailingModel() {
+  const server = createServer((req, res) => {
+    if (req.url === '/api/v0/models') {
+      res.writeHead(404);
+      res.end('not found');
+      return;
+    }
+    res.writeHead(500);
+    res.end('model failed');
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  return {
+    baseUrl: `http://127.0.0.1:${port}`,
+    close: () => new Promise((resolve) => server.close(resolve)),
+  };
+}
+
+describe('run transcript location', () => {
+  it('writes the transcript to runsDir, not the workspace', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'kodr-runsdir-ws-'));
+    const runsDir = await mkdtemp(join(tmpdir(), 'kodr-runsdir-out-'));
+    const model = await startFailingModel();
+    try {
+      await run('do work', {
+        cwd,
+        runsDir,
+        baseUrl: model.baseUrl,
+        model: 'test',
+        quiet: true,
+      });
+
+      const files = await readdir(runsDir);
+      assert.equal(files.length, 1);
+      // The workspace stays clean — no .kodr created.
+      await assert.rejects(() => readdir(join(cwd, '.kodr', 'runs')));
+    } finally {
+      await model.close();
+      await rm(cwd, { recursive: true, force: true });
+      await rm(runsDir, { recursive: true, force: true });
+    }
+  });
+
+  it('skips the transcript entirely when noSave is set', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'kodr-nosave-'));
+    const model = await startFailingModel();
+    try {
+      await run('do work', {
+        cwd,
+        noSave: true,
+        baseUrl: model.baseUrl,
+        model: 'test',
+        quiet: true,
+      });
+
+      await assert.rejects(() => readdir(join(cwd, '.kodr', 'runs')));
+    } finally {
+      await model.close();
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+});

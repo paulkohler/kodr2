@@ -3,6 +3,7 @@
  * context → model + tools → verify → heal
  */
 
+import { join, resolve } from 'node:path';
 import { buildSystemPrompt } from './context.mjs';
 import { createClient, hasContextHeadroom } from './model.mjs';
 import { createToolRegistry } from './tools/index.mjs';
@@ -47,6 +48,8 @@ export { isRunBudgetExceeded };
  * @param {string[]} [options.envPassthrough] - Extra env var names for commands
  * @param {number} [options.contextWindow] - Max context window in tokens (0 disables compaction)
  * @param {number} [options.healReserve] - Fraction of the run budget held back for heal (0..0.9; default KODR_HEAL_RESERVE or 0.25)
+ * @param {string} [options.runsDir] - Where to write run transcripts (default cwd/.kodr/runs or KODR_RUNS_DIR)
+ * @param {boolean} [options.noSave] - Skip writing the run transcript (also KODR_NO_SAVE)
  * @returns {Promise<object>} Run result
  */
 export async function run(prompt, options) {
@@ -60,6 +63,8 @@ export async function run(prompt, options) {
     priorMessages,
     envPassthrough = [],
   } = options;
+  const runsDir = resolveRunsDir(cwd, options.runsDir);
+  const noSave = isSaveDisabled(options.noSave);
 
   const client = createClient({
     baseUrl: options.baseUrl,
@@ -118,6 +123,8 @@ export async function run(prompt, options) {
       metadata,
       quiet,
       startedAt,
+      runsDir,
+      noSave,
     });
   }
 
@@ -263,8 +270,11 @@ export async function run(prompt, options) {
     }
   }
 
-  // Save run transcript
-  await saveRun(cwd, result, startedAt);
+  // Save run transcript (unless disabled — e.g. running inside a benchmark
+  // container where the workspace must stay clean).
+  if (!noSave) {
+    await saveRun(runsDir, result, startedAt);
+  }
 
   // SessionEnd: cleanup as the session closes. Non-blocking, runs even on
   // error, and is not capped by the run budget (cleanup should still happen).
@@ -418,7 +428,8 @@ export function stopVerifyBudgetMs(startedAt, maxRunMs, reserveFraction) {
  * @returns {Promise<object>} Run result
  */
 async function runManualCompaction(params) {
-  const { client, modelId, cwd, messages, metadata, quiet, startedAt } = params;
+  const { client, modelId, messages, metadata, quiet, startedAt } = params;
+  const { runsDir, noSave } = params;
 
   // messages holds the fresh system prompt plus any continued conversation.
   const hasHistory = messages.some((message) => message.role !== 'system');
@@ -428,7 +439,9 @@ async function runManualCompaction(params) {
       messages,
       'Nothing to compact — no prior conversation. Use --continue to load one.',
     );
-    await saveRun(cwd, result, startedAt);
+    if (!noSave) {
+      await saveRun(runsDir, result, startedAt);
+    }
     if (!quiet) {
       process.stderr.write(`${formatNotice(result.response)}\n`);
     }
@@ -459,7 +472,9 @@ async function runManualCompaction(params) {
     messages,
   };
 
-  await saveRun(cwd, result, startedAt);
+  if (!noSave) {
+    await saveRun(runsDir, result, startedAt);
+  }
   if (!quiet) {
     process.stderr.write(`${formatSummary(result)}\n`);
   }
@@ -530,15 +545,44 @@ function formatStopReason(stoppedReason) {
   return `stopped after ${MAX_TOOL_TURNS} tool turns`;
 }
 
-async function saveRun(cwd, result, startedAt) {
-  const { mkdir, writeFile } = await import('node:fs/promises');
-  const { join } = await import('node:path');
+/**
+ * Where run transcripts are written. Precedence: an explicit option, then
+ * KODR_RUNS_DIR, then the default cwd/.kodr/runs. A relative override resolves
+ * against cwd. Lets a benchmark/container run redirect artifacts out of the
+ * task workspace so they don't pollute it (or break byte-exact verifiers).
+ * @param {string} cwd
+ * @param {string} [option]
+ * @returns {string}
+ */
+export function resolveRunsDir(cwd, option) {
+  const override = option || process.env.KODR_RUNS_DIR;
+  if (override) {
+    return resolve(cwd, override);
+  }
+  return join(cwd, '.kodr', 'runs');
+}
 
-  const runDir = join(cwd, '.kodr', 'runs');
-  await mkdir(runDir, { recursive: true });
+/**
+ * Whether run-transcript saving is disabled, via the noSave option or
+ * KODR_NO_SAVE ("1"/"true").
+ * @param {boolean} [option]
+ * @returns {boolean}
+ */
+export function isSaveDisabled(option) {
+  if (option === true) {
+    return true;
+  }
+  const env = process.env.KODR_NO_SAVE;
+  return env === '1' || env === 'true';
+}
+
+async function saveRun(runsDir, result, startedAt) {
+  const { mkdir, writeFile } = await import('node:fs/promises');
+
+  await mkdir(runsDir, { recursive: true });
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const file = join(runDir, `${timestamp}.json`);
+  const file = join(runsDir, `${timestamp}.json`);
 
   const finishedAt = new Date();
   const data = createRunRecord(result, {

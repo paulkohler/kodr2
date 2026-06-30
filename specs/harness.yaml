@@ -81,7 +81,7 @@ constraints:
     fenced blocks); see the tool-recovery spec. Every recovered call in a
     message is executed.
   - Hitting the tool-turn ceiling sets stoppedReason "tool-limit" and emits a notice
-  - Run transcript saved to .kodr/runs/ after every run
+  - Run transcript saved to .kodr/runs/ after every run; the location is overridable (--runs-dir / KODR_RUNS_DIR) and saving can be disabled (--no-save / KODR_NO_SAVE) so a benchmark/container run keeps the task workspace clean
   - Run transcript saved even when model requests fail after run metadata is available
   - Run transcript includes model, prompt, cwd, baseUrl, test command, env passthrough, start time, finish time, and duration
   - Run transcript records package-manager commands without blocking them

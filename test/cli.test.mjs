@@ -99,6 +99,24 @@ describe('parseArgs', () => {
     assert.deepEqual(args.env, ['API_URL', 'CI']);
   });
 
+  it('parses --runs-dir and --no-save', () => {
+    const args = parseArgs([
+      'run',
+      'hi',
+      '--runs-dir',
+      '/tmp/jobs',
+      '--no-save',
+    ]);
+    assert.equal(args.runsDir, '/tmp/jobs');
+    assert.equal(args.noSave, true);
+  });
+
+  it('defaults runs-dir to null and no-save to false', () => {
+    const args = parseArgs(['run', 'hi']);
+    assert.equal(args.runsDir, null);
+    assert.equal(args.noSave, false);
+  });
+
   it('defaults env to an empty list', () => {
     const args = parseArgs(['run', 'hi']);
     assert.deepEqual(args.env, []);

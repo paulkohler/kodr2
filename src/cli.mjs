@@ -4,7 +4,7 @@
 
 import { resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
-import { run } from './harness.mjs';
+import { resolveRunsDir, run } from './harness.mjs';
 import { createClient } from './model.mjs';
 import { formatModelsList } from './format.mjs';
 import { parseEnvNames } from './env.mjs';
@@ -68,6 +68,8 @@ export async function main(argv) {
     maxRunMs: args.maxRunMs,
     quiet: args.quiet,
     envPassthrough: args.env,
+    runsDir: args.runsDir,
+    noSave: args.noSave,
   };
   if (args.contextWindow !== null) {
     options.contextWindow = args.contextWindow;
@@ -75,7 +77,11 @@ export async function main(argv) {
 
   // Handle continuation
   if (args.continue) {
-    const prior = await loadPriorRun(cwd, args.continue);
+    const prior = await loadPriorRun(
+      cwd,
+      args.continue,
+      resolveRunsDir(cwd, args.runsDir),
+    );
     if (prior) {
       options.priorMessages = prior.messages;
     } else {
@@ -125,6 +131,8 @@ export function parseArgs(argv) {
     quiet: false,
     env: [],
     continue: null,
+    runsDir: null,
+    noSave: false,
     help: false,
     version: false,
   };
@@ -198,6 +206,16 @@ export function parseArgs(argv) {
       i++;
       continue;
     }
+    if (arg === '--runs-dir' && argv[i + 1]) {
+      args.runsDir = argv[++i];
+      i++;
+      continue;
+    }
+    if (arg === '--no-save') {
+      args.noSave = true;
+      i++;
+      continue;
+    }
 
     // Positional: first is command, second is prompt
     if (!args.command) {
@@ -245,6 +263,8 @@ Options:
   --context-window <n>            Max context window in tokens; compact at 80% (default: 8192, 0 disables)
   --env <a,b,c>                   Extra env vars to expose to commands (CSV of names)
   --continue <last|path>          Continue from a prior run
+  --runs-dir <path>               Where to write run transcripts (or KODR_RUNS_DIR)
+  --no-save                       Don't write a run transcript (or KODR_NO_SAVE)
   --quiet, -q                     Suppress streaming output
   --help, -h                      Show this help
   --version, -v                   Show version
@@ -276,12 +296,12 @@ async function printVersion() {
   }
 }
 
-export async function loadPriorRun(cwd, ref) {
+export async function loadPriorRun(cwd, ref, runsDir) {
   const { join } = await import('node:path');
   const { readdir } = await import('node:fs/promises');
 
   if (ref === 'last') {
-    const runDir = join(cwd, '.kodr', 'runs');
+    const runDir = runsDir || join(cwd, '.kodr', 'runs');
     try {
       const files = (await readdir(runDir))
         .filter((f) => f.endsWith('.json'))
