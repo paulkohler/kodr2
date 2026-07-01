@@ -126,6 +126,7 @@ export async function run(prompt, options) {
       metadata,
       quiet,
       startedAt,
+      maxRunMs,
       runsDir,
       noSave,
     });
@@ -426,7 +427,7 @@ export function stopVerifyBudgetMs(startedAt, maxRunMs, reserveFraction) {
  */
 async function runManualCompaction(params) {
   const { client, modelId, messages, metadata, quiet, startedAt } = params;
-  const { runsDir, noSave } = params;
+  const { runsDir, noSave, maxRunMs = 0 } = params;
 
   // messages holds the fresh system prompt plus any continued conversation.
   const hasHistory = messages.some((message) => message.role !== 'system');
@@ -450,6 +451,7 @@ async function runManualCompaction(params) {
     modelId,
     messages,
     quiet,
+    timeoutMs: remainingRunBudgetMs(startedAt, maxRunMs),
   });
 
   if (!compactResult.error) {

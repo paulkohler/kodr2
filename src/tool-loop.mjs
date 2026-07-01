@@ -117,6 +117,7 @@ export async function runToolLoop(params) {
       compactThreshold,
       quiet,
       usage,
+      timeoutMs: remainingRunBudgetMs(startedAt, maxRunMs),
     });
     if (compacted) {
       compactions++;
@@ -135,7 +136,7 @@ export async function runToolLoop(params) {
  */
 async function maybeCompact(params) {
   const { client, modelId, messages, lastPromptTokens, usage, quiet } = params;
-  const { contextWindow, compactThreshold } = params;
+  const { contextWindow, compactThreshold, timeoutMs } = params;
 
   if (!needsCompaction(lastPromptTokens, contextWindow, compactThreshold)) {
     return false;
@@ -148,7 +149,13 @@ async function maybeCompact(params) {
     );
   }
 
-  const result = await compactMessages({ client, modelId, messages, quiet });
+  const result = await compactMessages({
+    client,
+    modelId,
+    messages,
+    quiet,
+    timeoutMs,
+  });
   usage.prompt += result.usage.prompt;
   usage.completion += result.usage.completion;
 

@@ -34,6 +34,9 @@ inputs:
   quiet:
     type: boolean
     description: Suppress streamed summary output (default false)
+  timeoutMs:
+    type: number
+    description: Per-call timeout override forwarded to the summary chat call (e.g. the run's remaining maxRunMs budget)
 
 outputs:
   messages:
@@ -61,6 +64,7 @@ constraints:
   - needsCompaction is true when promptTokens >= contextWindow * threshold,
     and always false when the context window is 0 or unknown
   - The summary model call adds its token usage to the run total
+  - The summary model call is capped to the run's remaining maxRunMs budget, not a fresh full-length timeout, so late compaction can't outlive the run deadline
   - A failed or empty summary leaves the conversation unchanged (best effort);
     the run continues rather than aborting
   - "/compact" compacts the prior conversation on demand; with no prior
@@ -83,7 +87,9 @@ tests:
     - compactMessages keeps the system message and replaces history with a summary
     - compactMessages leaves messages unchanged when summarization fails
     - compactMessages is a no-op when there is no history to compact
+    - compactMessages forwards timeoutMs to the summary chat call
     - tool loop compacts in place when a turn crosses the threshold
+    - tool loop caps the compaction summary call to the remaining run budget
     - tool loop does not compact when below the threshold
     - isCompactCommand recognizes "/compact"
     - configuredContextWindow reads an explicit value and the env var, else null

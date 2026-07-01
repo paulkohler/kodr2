@@ -186,6 +186,24 @@ describe('compactMessages', () => {
     assert.equal(sent[0].content.includes('system prompt'), false);
   });
 
+  it('forwards timeoutMs to the summary chat call', async () => {
+    const client = scriptedClient([finalTurn('SUMMARY OF WORK')]);
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'task' },
+    ];
+
+    await compactMessages({
+      client,
+      modelId: 'm',
+      messages,
+      quiet: true,
+      timeoutMs: 5000,
+    });
+
+    assert.equal(client.calls[0].timeoutMs, 5000);
+  });
+
   it('leaves messages unchanged when summarization fails', async () => {
     const client = {
       async chat() {
@@ -273,6 +291,35 @@ describe('runToolLoop compaction', () => {
       messages.some((m) => m.role === 'tool'),
       false,
     );
+  });
+
+  it('caps the compaction summary call to the remaining run budget', async () => {
+    const client = scriptedClient([
+      toolCallTurn('list_files', {}, 900),
+      finalTurn('COMPACTED SUMMARY', 5),
+      finalTurn('all done', 5),
+    ]);
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'task' },
+    ];
+    const startedAt = new Date(Date.now() - 9_000);
+
+    await runToolLoop({
+      client,
+      modelId: 'm',
+      messages,
+      tools: stubTools,
+      quiet: true,
+      contextWindow: 1000,
+      startedAt,
+      maxRunMs: 10_000,
+    });
+
+    // Call 0 is the turn that triggers compaction, call 1 is the summary
+    // request itself — it must not get a fresh 10s timeout.
+    assert.ok(client.calls[1].timeoutMs <= 1000);
+    assert.ok(client.calls[1].timeoutMs > 0);
   });
 
   it('does not compact when below the threshold', async () => {

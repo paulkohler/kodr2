@@ -108,10 +108,11 @@ export function renderTranscript(messages) {
  * @param {string} params.modelId - Model to summarize with
  * @param {Array} params.messages - Conversation so far
  * @param {boolean} [params.quiet] - Suppress streamed summary output
+ * @param {number} [params.timeoutMs] - Per-call timeout override (e.g. the run's remaining budget)
  * @returns {Promise<{ messages: Array, summary: string, usage: { prompt: number, completion: number }, error?: string }>}
  */
 export async function compactMessages(params) {
-  const { client, modelId, messages, quiet = false } = params;
+  const { client, modelId, messages, quiet = false, timeoutMs } = params;
   const system = messages.find((message) => message.role === 'system') || null;
   const history = messages.filter((message) => message.role !== 'system');
 
@@ -132,6 +133,7 @@ export async function compactMessages(params) {
         },
       ],
       onToken: quiet ? undefined : (token) => process.stdout.write(token),
+      timeoutMs,
     });
   } catch (err) {
     return {
