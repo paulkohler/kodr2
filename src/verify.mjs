@@ -17,6 +17,8 @@ const MAX_OUTPUT = 20_000;
  * @param {number} [options.timeout] - Timeout in ms (default 10 minutes)
  * @param {number} [options.maxOutput] - Max characters of combined output
  * @param {Record<string, string>} [options.env] - Child environment
+ * @param {number} [options.heartbeatMs] - Interval for onHeartbeat (0 disables)
+ * @param {function} [options.onHeartbeat] - Called with elapsed ms on each tick
  * @returns {Promise<{ passed: boolean, command: string, output: string, exitCode: number }>}
  */
 export async function verify(command, cwd, options = {}) {
@@ -25,6 +27,8 @@ export async function verify(command, cwd, options = {}) {
     timeout: options.timeout ?? DEFAULT_TIMEOUT,
     maxOutput,
     env: options.env,
+    heartbeatMs: options.heartbeatMs,
+    onHeartbeat: options.onHeartbeat,
   });
 
   const output = [stdout, stderr]

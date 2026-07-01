@@ -13,6 +13,14 @@ inputs:
     type: string
     required: true
     description: Working directory
+  heartbeatMs:
+    type: number
+    required: false
+    description: Interval in ms for onHeartbeat while the command runs (0 disables); forwarded to the shell runner
+  onHeartbeat:
+    type: function
+    required: false
+    description: Called with elapsed ms on each heartbeat tick
 
 outputs:
   passed:

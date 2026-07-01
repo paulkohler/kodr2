@@ -30,6 +30,11 @@ events:
       caught. When a run budget (maxRunMs) is set, the initial verification is
       capped to hold back a heal reserve (KODR_HEAL_RESERVE, default 0.25) so a
       Stop hook that hangs cannot consume the whole budget and starve repair.
+      While a Stop hook runs, a "still running" heartbeat notice (KODR_HEARTBEAT_MS
+      or --heartbeat-ms, default 30,000ms, 0 disables) is written to stderr on an
+      interval and tagged with the hook's name — a hook can otherwise run silently
+      for its full timeout (10 minutes by default), making a legitimately slow
+      command indistinguishable from a stuck harness from the outside.
   PreToolUse:
     status: implemented
     fires: >
@@ -178,6 +183,9 @@ constraints:
     reserve fraction of the run budget (KODR_HEAL_RESERVE or the healReserve
     option, default 0.25, clamped to [0, 0.9]; 0 disables). This only applies
     when maxRunMs is set. Heal's own re-verifies use the full remaining budget.
+  - Stop hooks report heartbeat notices on an interval (KODR_HEARTBEAT_MS or
+    the heartbeatMs option, default 30,000ms; 0 disables), tagged with the
+    hook's name; not shown when --quiet is set.
   - Output truncated at the verify output limit (overridable).
   - No tri-state flags: runWhenUnchanged is a plain boolean.
   - Errors at the config boundary are returned values, not thrown.
@@ -216,3 +224,5 @@ tests:
     - session hooks parse run, name, and timeout, dropping invalid entries
     - healReserveFraction resolves option over env over default and clamps
     - stopVerifyBudgetMs holds back the reserve and is undefined without a budget
+    - heartbeatIntervalMs resolves option over env over default
+    - runStopHooks reports heartbeats tagged with the running hook's name

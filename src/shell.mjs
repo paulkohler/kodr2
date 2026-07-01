@@ -25,19 +25,36 @@ export const DEFAULT_MAX_OUTPUT = 50_000; // characters per stream
  * @param {number} [options.timeout] - Timeout in ms (default 10 minutes)
  * @param {number} [options.maxOutput] - Max characters kept per stream
  * @param {Record<string, string>} [options.env] - Child environment
+ * @param {number} [options.heartbeatMs] - Interval for onHeartbeat while the
+ *   command runs (0 or omitted disables it). A generous timeout (like the
+ *   10-minute default above) is otherwise silent the whole time it runs, so
+ *   a genuine long wait and a stuck command look identical from the outside.
+ * @param {function} [options.onHeartbeat] - Called with elapsed ms on each tick
  * @returns {Promise<{ stdout: string, stderr: string, exitCode: number }>}
  */
 export function runShell(command, cwd, options = {}) {
   const timeout = options.timeout ?? DEFAULT_TIMEOUT;
   const maxOutput = options.maxOutput ?? DEFAULT_MAX_OUTPUT;
   const env = options.env ?? buildEnv();
+  const heartbeatMs = options.heartbeatMs ?? 0;
 
   return new Promise((resolve) => {
+    const startedAt = Date.now();
+    let heartbeatTimer;
+    if (heartbeatMs > 0 && options.onHeartbeat) {
+      heartbeatTimer = setInterval(() => {
+        options.onHeartbeat(Date.now() - startedAt);
+      }, heartbeatMs);
+    }
+
     execFile(
       '/bin/sh',
       ['-c', command],
       { cwd, timeout, maxBuffer: maxOutput * 2, env },
       (err, stdout, stderr) => {
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+        }
         resolve({
           stdout: truncate(stdout || '', maxOutput),
           stderr: truncate(stderr || '', maxOutput),

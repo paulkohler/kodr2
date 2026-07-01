@@ -51,4 +51,34 @@ describe('runShell', () => {
     );
     assert.notEqual(result.exitCode, 0);
   });
+
+  it('calls onHeartbeat on an interval while a command runs', async () => {
+    const ticks = [];
+    await runShell(
+      `${process.execPath} -e "setTimeout(() => {}, 120)"`,
+      tmpDir,
+      { heartbeatMs: 30, onHeartbeat: (elapsedMs) => ticks.push(elapsedMs) },
+    );
+    assert.ok(ticks.length >= 2, `expected multiple ticks, got ${ticks.length}`);
+  });
+
+  it('does not call onHeartbeat when heartbeatMs is 0', async () => {
+    const ticks = [];
+    await runShell('exit 0', tmpDir, {
+      heartbeatMs: 0,
+      onHeartbeat: (elapsedMs) => ticks.push(elapsedMs),
+    });
+    assert.equal(ticks.length, 0);
+  });
+
+  it('stops calling onHeartbeat once the command finishes', async () => {
+    const ticks = [];
+    await runShell('exit 0', tmpDir, {
+      heartbeatMs: 10,
+      onHeartbeat: (elapsedMs) => ticks.push(elapsedMs),
+    });
+    const countAfterFinish = ticks.length;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(ticks.length, countAfterFinish);
+  });
 });

@@ -4,7 +4,7 @@
 
 import { resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
-import { resolveRunsDir, run } from './harness.mjs';
+import { DEFAULT_HEARTBEAT_MS, resolveRunsDir, run } from './harness.mjs';
 import { MAX_TOOL_TURNS } from './tool-loop.mjs';
 import { createClient } from './model.mjs';
 import { formatModelsList } from './format.mjs';
@@ -55,6 +55,11 @@ export async function main(argv) {
     process.exitCode = 1;
     return;
   }
+  if (!Number.isInteger(args.heartbeatMs) || args.heartbeatMs < 0) {
+    process.stderr.write('--heartbeat-ms must be a non-negative integer.\n');
+    process.exitCode = 1;
+    return;
+  }
   if (
     args.contextWindow !== null &&
     (!Number.isInteger(args.contextWindow) || args.contextWindow < 0)
@@ -73,6 +78,7 @@ export async function main(argv) {
     maxHealTurns: args.healTurns,
     maxRunMs: args.maxRunMs,
     maxToolTurns: args.maxToolTurns,
+    heartbeatMs: args.heartbeatMs,
     quiet: args.quiet || args.json,
     envPassthrough: args.env,
     runsDir: args.runsDir,
@@ -194,6 +200,7 @@ export function parseArgs(argv) {
     healTurns: 3,
     maxRunMs: 0,
     maxToolTurns: MAX_TOOL_TURNS,
+    heartbeatMs: DEFAULT_HEARTBEAT_MS,
     contextWindow: null,
     quiet: false,
     env: [],
@@ -262,6 +269,11 @@ export function parseArgs(argv) {
     }
     if (arg === '--max-tool-turns' && argv[i + 1]) {
       args.maxToolTurns = parseInt(argv[++i], 10);
+      i++;
+      continue;
+    }
+    if (arg === '--heartbeat-ms' && argv[i + 1]) {
+      args.heartbeatMs = parseInt(argv[++i], 10);
       i++;
       continue;
     }
@@ -345,6 +357,7 @@ Options:
   --heal-turns <n>                Max repair turns (default: 3)
   --max-run-ms <n>                Stop between turns after this many ms (default: 0, disabled)
   --max-tool-turns <n>            Tool-turn ceiling per loop (default: 20)
+  --heartbeat-ms <n>              Stop-hook "still running" notice interval (or KODR_HEARTBEAT_MS; default: 30000, 0 disables)
   --context-window <n>            Max context window in tokens; compact at 80% (default: 8192, 0 disables)
   --env <a,b,c>                   Extra env vars to expose to commands (CSV of names)
   --continue <last|path>          Continue from a prior run

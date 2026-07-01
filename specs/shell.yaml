@@ -27,6 +27,18 @@ inputs:
     type: object
     required: false
     description: Child environment (defaults to the curated allowlist)
+  heartbeatMs:
+    type: number
+    required: false
+    description: >
+      Interval in ms for onHeartbeat while the command runs (0 or omitted
+      disables it). A generous timeout is otherwise silent for its whole
+      duration, making a legitimately slow command indistinguishable from a
+      stuck one without inspecting processes from outside.
+  onHeartbeat:
+    type: function
+    required: false
+    description: Called with elapsed ms on each heartbeat tick
 
 outputs:
   stdout:
@@ -45,6 +57,8 @@ constraints:
   - Never throws — non-zero exit, signal, timeout, and buffer overflow all map to a non-zero exitCode
   - A numeric process exit code is preserved; anything else maps to 1
   - Output is truncated per stream and marked with a trailing [truncated]
+  - onHeartbeat fires only while heartbeatMs > 0 and a callback is provided;
+    the interval is cleared as soon as the command finishes
 
 tests:
   unit:
@@ -53,3 +67,6 @@ tests:
     - captures stdout and stderr separately
     - truncates long output and marks it
     - timed out command returns a non-zero exit code
+    - calls onHeartbeat on an interval while a command runs
+    - does not call onHeartbeat when heartbeatMs is 0
+    - stops calling onHeartbeat once the command finishes

@@ -32,6 +32,9 @@ inputs:
   maxToolTurns:
     type: number
     description: Tool-turn ceiling for the loop, applied to both the main run and each heal turn (default 20, CLI --max-tool-turns)
+  heartbeatMs:
+    type: number
+    description: "\"Still running\" notice interval during Stop hooks (default 30,000ms, 0 disables; KODR_HEARTBEAT_MS / CLI --heartbeat-ms)"
   priorMessages:
     type: array
     description: Messages from a prior run for continuation
@@ -79,6 +82,7 @@ constraints:
   - Optional maxRunMs stops between turns, caps tool and verification command timeouts, before healing, and during healing when the budget is exceeded
   - Each model request is capped to the run's *remaining* budget (not a fresh maxRunMs-length timeout every turn), so a request started near the deadline cannot itself outlive it
   - When maxRunMs is set, the initial verification is capped to hold back a heal reserve (KODR_HEAL_RESERVE / healReserve option, default 0.25) so a hanging Stop hook cannot starve the heal pass
+  - While a Stop hook runs, a heartbeat notice is written to stderr on an interval (KODR_HEARTBEAT_MS / --heartbeat-ms, default 30,000ms, 0 disables), tagged with the hook's name, so a legitimately slow command (a big test suite, a cold build) doesn't look indistinguishable from a stuck harness for its whole timeout
   - Native API tool calls are the primary tool-use path
   - Text-form tool calls are recovered as a compatibility fallback across known
     framings (Mistral [TOOL_CALLS] token, name[ARGS]{...}, JSON object/array,
@@ -114,6 +118,7 @@ tests:
     - model client honors a per-call timeoutMs override, falling back to its configured default
     - a custom maxToolTurns overrides the default tool-turn ceiling
     - CLI --max-tool-turns is parsed and validated as a positive integer
+    - CLI --heartbeat-ms is parsed and defaults to 30,000
     - run records include metadata and duration
     - run records include package-manager commands and error metadata
     - failed model requests still save a run record

@@ -72,6 +72,16 @@ describe('parseArgs', () => {
     assert.equal(args.maxToolTurns, 20);
   });
 
+  it('parses --heartbeat-ms flag', () => {
+    const args = parseArgs(['run', 'hi', '--heartbeat-ms', '5000']);
+    assert.equal(args.heartbeatMs, 5000);
+  });
+
+  it('defaults --heartbeat-ms to 30000', () => {
+    const args = parseArgs(['run', 'hi']);
+    assert.equal(args.heartbeatMs, 30000);
+  });
+
   it('parses --context-window flag', () => {
     const args = parseArgs(['run', 'hi', '--context-window', '32768']);
     assert.equal(args.contextWindow, 32768);

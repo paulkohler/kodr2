@@ -100,6 +100,30 @@ describe('runStopHooks', () => {
     assert.equal(result.results.length, 1);
   });
 
+  it('reports heartbeats tagged with the hook name while it runs', async () => {
+    const hooks = stopHooks(
+      {
+        hooks: {
+          Stop: [
+            {
+              run: `${process.execPath} -e "setTimeout(() => {}, 120)"`,
+              name: 'slow',
+            },
+          ],
+        },
+      },
+      null,
+    );
+    const ticks = [];
+    await runStopHooks(hooks, tmpDir, {
+      touchedWorkspace: true,
+      heartbeatMs: 30,
+      onHeartbeat: (name, elapsedMs) => ticks.push({ name, elapsedMs }),
+    });
+    assert.ok(ticks.length >= 2, `expected multiple ticks, got ${ticks.length}`);
+    assert.ok(ticks.every((t) => t.name === 'slow'));
+  });
+
   it('runs hooks in declared order', async () => {
     const hooks = stopHooks(
       {

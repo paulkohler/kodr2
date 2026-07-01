@@ -7,8 +7,10 @@ import { tmpdir } from 'node:os';
 
 import {
   DEFAULT_HEAL_RESERVE,
+  DEFAULT_HEARTBEAT_MS,
   createRunRecord,
   healReserveFraction,
+  heartbeatIntervalMs,
   isRunBudgetExceeded,
   remainingRunBudgetMs,
   run,
@@ -109,6 +111,37 @@ describe('healReserveFraction', () => {
     delete process.env.KODR_HEAL_RESERVE;
     assert.equal(healReserveFraction(-1), 0);
     assert.equal(healReserveFraction(5), 0.9);
+  });
+});
+
+describe('heartbeatIntervalMs', () => {
+  const saved = process.env.KODR_HEARTBEAT_MS;
+  afterEach(() => {
+    if (saved === undefined) {
+      delete process.env.KODR_HEARTBEAT_MS;
+    } else {
+      process.env.KODR_HEARTBEAT_MS = saved;
+    }
+  });
+
+  it('defaults when nothing is configured', () => {
+    delete process.env.KODR_HEARTBEAT_MS;
+    assert.equal(heartbeatIntervalMs(undefined), DEFAULT_HEARTBEAT_MS);
+  });
+
+  it('reads KODR_HEARTBEAT_MS from the environment', () => {
+    process.env.KODR_HEARTBEAT_MS = '5000';
+    assert.equal(heartbeatIntervalMs(undefined), 5000);
+  });
+
+  it('prefers an explicit option over the environment', () => {
+    process.env.KODR_HEARTBEAT_MS = '5000';
+    assert.equal(heartbeatIntervalMs(1000), 1000);
+  });
+
+  it('allows 0 to disable heartbeats', () => {
+    delete process.env.KODR_HEARTBEAT_MS;
+    assert.equal(heartbeatIntervalMs(0), 0);
   });
 });
 

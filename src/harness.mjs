@@ -23,7 +23,12 @@ import {
   remainingRunBudgetMs,
   runToolLoop,
 } from './tool-loop.mjs';
-import { formatNotice, formatVerification, formatSummary } from './format.mjs';
+import {
+  formatHeartbeat,
+  formatNotice,
+  formatVerification,
+  formatSummary,
+} from './format.mjs';
 import {
   DEFAULT_CONTEXT_WINDOW,
   compactMessages,
@@ -49,6 +54,7 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  * @param {string[]} [options.envPassthrough] - Extra env var names for commands
  * @param {number} [options.contextWindow] - Max context window in tokens (0 disables compaction)
  * @param {number} [options.healReserve] - Fraction of the run budget held back for heal (0..0.9; default KODR_HEAL_RESERVE or 0.25)
+ * @param {number} [options.heartbeatMs] - Interval for Stop-hook "still running" notices (0 disables; default KODR_HEARTBEAT_MS or 30000)
  * @param {string} [options.runsDir] - Where to write run transcripts (default cwd/.kodr/runs or KODR_RUNS_DIR)
  * @param {boolean} [options.noSave] - Skip writing the run transcript (also KODR_NO_SAVE)
  * @returns {Promise<object>} Run result
@@ -146,6 +152,7 @@ export async function run(prompt, options) {
   };
   const endHooks = sessionHooks(hooksConfig, 'SessionEnd');
   const reserveFraction = healReserveFraction(options.healReserve);
+  const heartbeatMs = heartbeatIntervalMs(options.heartbeatMs);
 
   // SessionStart: run before the task prompt so its output primes the model.
   await runSessionStart({
@@ -216,6 +223,12 @@ export async function run(prompt, options) {
           env: commandEnv,
           budgetMs,
           touchedWorkspace,
+          heartbeatMs,
+          onHeartbeat: quiet
+            ? undefined
+            : (name, elapsedMs) => {
+                process.stderr.write(`${formatHeartbeat(name, elapsedMs)}\n`);
+              },
         });
 
       const hookResult = await runHooks(
@@ -364,6 +377,28 @@ function createErrorResult(params) {
     compactions: 0,
     messages,
   };
+}
+
+export const DEFAULT_HEARTBEAT_MS = 30_000; // 30 seconds
+
+/**
+ * Interval for Stop-hook heartbeat notices, so a legitimately slow command
+ * (a big test suite, a cold build) doesn't look indistinguishable from a
+ * stuck harness during the wait — see verify's DEFAULT_TIMEOUT (10 minutes),
+ * which is otherwise silent for its whole duration. Resolved from an
+ * explicit option, then KODR_HEARTBEAT_MS, then the default; 0 disables.
+ * @param {number} [option]
+ * @returns {number}
+ */
+export function heartbeatIntervalMs(option) {
+  if (Number.isInteger(option) && option >= 0) {
+    return option;
+  }
+  const fromEnv = Number.parseInt(process.env.KODR_HEARTBEAT_MS, 10);
+  if (Number.isInteger(fromEnv) && fromEnv >= 0) {
+    return fromEnv;
+  }
+  return DEFAULT_HEARTBEAT_MS;
 }
 
 export const DEFAULT_HEAL_RESERVE = 0.25;

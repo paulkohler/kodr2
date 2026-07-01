@@ -6,6 +6,7 @@ import {
   formatToolResult,
   formatVerification,
   formatHealTurn,
+  formatHeartbeat,
   formatNotice,
   formatSummary,
   formatModelsList,
@@ -96,6 +97,14 @@ describe('formatHealTurn', () => {
   it('shows turn number', () => {
     const out = formatHealTurn(2, 3);
     assert.ok(out.includes('2/3'));
+  });
+});
+
+describe('formatHeartbeat', () => {
+  it('includes the hook name and elapsed seconds', () => {
+    const out = plain(formatHeartbeat('test', 65_000));
+    assert.ok(out.includes('test'));
+    assert.ok(out.includes('65s'));
   });
 });
 

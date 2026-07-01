@@ -49,6 +49,19 @@ export function formatNotice(text) {
 }
 
 /**
+ * Format a heartbeat notice for a long-running Stop hook, so a genuine long
+ * wait (a slow test suite) is distinguishable from a stuck harness without
+ * needing to inspect processes from outside.
+ * @param {string} name - Hook name
+ * @param {number} elapsedMs
+ * @returns {string}
+ */
+export function formatHeartbeat(name, elapsedMs) {
+  const seconds = Math.round(elapsedMs / 1000);
+  return `${DIM}… ${name} still running (${seconds}s)${RESET}`;
+}
+
+/**
  * Format verification result.
  * @param {{ passed: boolean, output: string, command: string }} result
  * @returns {string}
