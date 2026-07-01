@@ -32,6 +32,25 @@ describe('formatToolCall', () => {
     const out = formatToolCall('run_command', { command: 'npm test' });
     assert.ok(out.includes('npm test'));
   });
+
+  it('includes path and glob for search, not just the pattern', () => {
+    const out = plain(
+      formatToolCall('search', {
+        pattern: 'rule_syntax',
+        path: 'bottle.py',
+        glob: '.py',
+      }),
+    );
+    assert.ok(out.includes('rule_syntax'));
+    assert.ok(out.includes('bottle.py'));
+    assert.ok(out.includes('.py'));
+  });
+
+  it('shows only the pattern for search when no path or glob given', () => {
+    const out = plain(formatToolCall('search', { pattern: 'target' }));
+    assert.ok(out.includes('target'));
+    assert.ok(!out.includes('('));
+  });
 });
 
 describe('formatToolResult', () => {

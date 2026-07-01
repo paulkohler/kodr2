@@ -407,6 +407,19 @@ describe('search', () => {
     );
     assert.match(result.error, /escape/i);
   });
+
+  it('searches a single file when path points at a file, not a directory', async () => {
+    await writeFile(join(tmpDir, 'code.mjs'), 'function target() {}\n');
+    await writeFile(join(tmpDir, 'other.mjs'), 'target\ntarget\n');
+    const result = await searchTool.execute(
+      { pattern: 'target', path: 'code.mjs' },
+      context,
+    );
+    assert.deepEqual(
+      result.matches.map((match) => match.file),
+      ['code.mjs'],
+    );
+  });
 });
 
 // --- run_command ---

@@ -44,7 +44,7 @@ export default {
     try {
       resolved = await resolveExistingPath(context.cwd, path);
     } catch {
-      return { error: `directory not found: ${path}` };
+      return { error: `path not found: ${path}` };
     }
     if (!resolved) {
       return { error: 'path escapes workspace root' };
@@ -52,7 +52,16 @@ export default {
 
     const matches = [];
     const root = await realpath(context.cwd);
-    await searchDir(resolved, root, pattern, glob, matches);
+
+    // `path` may point at a single file (e.g. one just read) rather than a
+    // directory — search it directly instead of trying to readdir() it,
+    // which would otherwise fail closed with zero matches and no error.
+    const info = await stat(resolved);
+    if (info.isFile()) {
+      await searchFile(resolved, root, pattern, matches);
+    } else {
+      await searchDir(resolved, root, pattern, glob, matches);
+    }
     return { matches };
   },
 };
@@ -97,40 +106,53 @@ async function searchDir(dir, root, pattern, glob, matches) {
       continue;
     }
 
-    try {
-      const info = await stat(safePath);
-      if (info.size > MAX_FILE_SIZE) {
-        continue;
-      }
-    } catch {
-      continue;
+    await searchFile(safePath, root, pattern, matches);
+  }
+}
+
+/**
+ * Search a single file for `pattern`, appending line matches to `matches`.
+ * Skips files over MAX_FILE_SIZE and binary files. Best effort: any read
+ * failure is treated as no matches rather than an error.
+ */
+async function searchFile(safePath, root, pattern, matches) {
+  if (matches.length >= MAX_MATCHES) {
+    return;
+  }
+
+  try {
+    const info = await stat(safePath);
+    if (info.size > MAX_FILE_SIZE) {
+      return;
     }
+  } catch {
+    return;
+  }
 
-    let content;
-    try {
-      content = await readFile(safePath, 'utf8');
-    } catch {
-      continue;
+  let content;
+  try {
+    content = await readFile(safePath, 'utf8');
+  } catch {
+    return;
+  }
+
+  if (content.charCodeAt(0) === 0) {
+    return; // binary
+  }
+
+  const lines = content.split('\n');
+  const rel = relative(root, safePath);
+
+  for (let i = 0; i < lines.length; i++) {
+    if (matches.length >= MAX_MATCHES) {
+      return;
     }
-
-    if (content.charCodeAt(0) === 0) {
-      continue; // binary
-    }
-
-    const lines = content.split('\n');
-    const rel = relative(root, full);
-
-    for (let i = 0; i < lines.length; i++) {
-      if (matches.length >= MAX_MATCHES) {
-        return;
-      }
-      if (lines[i].includes(pattern)) {
-        matches.push({
-          file: rel,
-          line: i + 1,
-          text: lines[i].slice(0, 200),
-        });
-      }
+    if (lines[i].includes(pattern)) {
+      matches.push({
+        file: rel,
+        line: i + 1,
+        text: lines[i].slice(0, 200),
+      });
     }
   }
 }

@@ -177,7 +177,9 @@ function summariseArgs(name, args) {
     return DIM + (args.path || '.') + RESET;
   }
   if (name === 'search') {
-    return DIM + (args.pattern || '') + RESET;
+    const scope = [args.path, args.glob].filter(Boolean).join(' ');
+    const text = scope ? `${args.pattern || ''} (${scope})` : args.pattern || '';
+    return DIM + text + RESET;
   }
   if (name === 'run_command') {
     return DIM + (args.command || '') + RESET;

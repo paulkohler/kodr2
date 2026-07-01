@@ -12,7 +12,7 @@ inputs:
     description: Search string (plain text)
   path:
     type: string
-    description: Directory to search (default workspace root)
+    description: Directory to search, or a single file to search directly (default workspace root)
   glob:
     type: string
     description: File extension filter (e.g. ".mjs")
@@ -34,6 +34,7 @@ constraints:
   - Path must resolve within workspace root
   - Symlinks are resolved before jail check
   - Symlinked files outside the workspace are skipped
+  - When path resolves to a file rather than a directory, that file is searched directly instead of failing closed with zero matches
 
 tests:
   unit:
@@ -44,5 +45,6 @@ tests:
     - truncates long match lines
     - rejects paths escaping workspace
     - skips symlinked files outside workspace
+    - searches a single file when path points at a file, not a directory
   eval:
     - model uses search to find a function definition
