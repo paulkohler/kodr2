@@ -62,6 +62,16 @@ describe('parseArgs', () => {
     assert.equal(args.maxRunMs, 1000);
   });
 
+  it('parses --max-tool-turns flag', () => {
+    const args = parseArgs(['run', 'hi', '--max-tool-turns', '60']);
+    assert.equal(args.maxToolTurns, 60);
+  });
+
+  it('defaults --max-tool-turns to 20', () => {
+    const args = parseArgs(['run', 'hi']);
+    assert.equal(args.maxToolTurns, 20);
+  });
+
   it('parses --context-window flag', () => {
     const args = parseArgs(['run', 'hi', '--context-window', '32768']);
     assert.equal(args.contextWindow, 32768);

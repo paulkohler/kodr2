@@ -5,6 +5,7 @@
 import { resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { resolveRunsDir, run } from './harness.mjs';
+import { MAX_TOOL_TURNS } from './tool-loop.mjs';
 import { createClient } from './model.mjs';
 import { formatModelsList } from './format.mjs';
 import { parseEnvNames } from './env.mjs';
@@ -49,6 +50,11 @@ export async function main(argv) {
     process.exitCode = 1;
     return;
   }
+  if (!Number.isInteger(args.maxToolTurns) || args.maxToolTurns < 1) {
+    process.stderr.write('--max-tool-turns must be a positive integer.\n');
+    process.exitCode = 1;
+    return;
+  }
   if (
     args.contextWindow !== null &&
     (!Number.isInteger(args.contextWindow) || args.contextWindow < 0)
@@ -66,6 +72,7 @@ export async function main(argv) {
     testCommand: args.test,
     maxHealTurns: args.healTurns,
     maxRunMs: args.maxRunMs,
+    maxToolTurns: args.maxToolTurns,
     quiet: args.quiet || args.json,
     envPassthrough: args.env,
     runsDir: args.runsDir,
@@ -186,6 +193,7 @@ export function parseArgs(argv) {
     test: null,
     healTurns: 3,
     maxRunMs: 0,
+    maxToolTurns: MAX_TOOL_TURNS,
     contextWindow: null,
     quiet: false,
     env: [],
@@ -249,6 +257,11 @@ export function parseArgs(argv) {
     }
     if (arg === '--max-run-ms' && argv[i + 1]) {
       args.maxRunMs = parseInt(argv[++i], 10);
+      i++;
+      continue;
+    }
+    if (arg === '--max-tool-turns' && argv[i + 1]) {
+      args.maxToolTurns = parseInt(argv[++i], 10);
       i++;
       continue;
     }
@@ -331,6 +344,7 @@ Options:
   --test <command>                First Stop hook (e.g. "npm test"); see .kodr/hooks.json
   --heal-turns <n>                Max repair turns (default: 3)
   --max-run-ms <n>                Stop between turns after this many ms (default: 0, disabled)
+  --max-tool-turns <n>            Tool-turn ceiling per loop (default: 20)
   --context-window <n>            Max context window in tokens; compact at 80% (default: 8192, 0 disables)
   --env <a,b,c>                   Extra env vars to expose to commands (CSV of names)
   --continue <last|path>          Continue from a prior run

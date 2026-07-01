@@ -36,6 +36,7 @@ export const MAX_TOOL_TURNS = 20;
  * @param {boolean} [params.quiet] - Suppress streamed output
  * @param {Date} [params.startedAt] - Run start, for the budget check
  * @param {number} [params.maxRunMs] - Stop between turns after this many ms (0 disables)
+ * @param {number} [params.maxToolTurns] - Tool-turn ceiling (default MAX_TOOL_TURNS)
  * @param {number} [params.contextWindow] - Max context window in tokens (0 disables compaction)
  * @param {number} [params.compactThreshold] - Fraction of the window that triggers compaction
  * @param {{ PreToolUse: Array, PostToolUse: Array }} [params.toolHooks] - Tool hooks
@@ -45,7 +46,7 @@ export const MAX_TOOL_TURNS = 20;
  */
 export async function runToolLoop(params) {
   const { client, modelId, messages, tools, quiet = false } = params;
-  const { startedAt, maxRunMs = 0 } = params;
+  const { startedAt, maxRunMs = 0, maxToolTurns = MAX_TOOL_TURNS } = params;
   const { contextWindow = 0, compactThreshold = COMPACTION_THRESHOLD } = params;
   const hookCtx = buildHookCtx(params);
 
@@ -56,7 +57,7 @@ export async function runToolLoop(params) {
   let completed = false;
   let stoppedReason = 'tool-limit';
 
-  while (toolTurns < MAX_TOOL_TURNS) {
+  while (toolTurns < maxToolTurns) {
     if (isRunBudgetExceeded(startedAt, maxRunMs)) {
       stoppedReason = 'budget-exceeded';
       break;

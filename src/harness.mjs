@@ -60,6 +60,7 @@ export async function run(prompt, options) {
     testCommand,
     maxHealTurns = 3,
     maxRunMs = 0,
+    maxToolTurns = MAX_TOOL_TURNS,
     quiet = false,
     priorMessages,
     envPassthrough = [],
@@ -88,6 +89,7 @@ export async function run(prompt, options) {
     testCommand: testCommand || null,
     maxHealTurns,
     maxRunMs,
+    maxToolTurns,
     envPassthrough,
     contextWindow,
     startedAt: startedAt.toISOString(),
@@ -168,6 +170,7 @@ export async function run(prompt, options) {
       quiet,
       startedAt,
       maxRunMs,
+      maxToolTurns,
       contextWindow,
       toolHooks: toolHookSets,
       cwd,
@@ -180,7 +183,7 @@ export async function run(prompt, options) {
     // The model never produced a final response — it ran out of turns or budget.
     if (!completed && !quiet) {
       process.stderr.write(
-        `${formatNotice(formatStopReason(stoppedReason))}\n`,
+        `${formatNotice(formatStopReason(stoppedReason, maxToolTurns))}\n`,
       );
     }
 
@@ -243,6 +246,7 @@ export async function run(prompt, options) {
           quiet,
           startedAt,
           maxRunMs,
+          maxToolTurns,
           contextWindow,
           toolHooks: toolHookSets,
           cwd,
@@ -531,11 +535,11 @@ export async function resolveContextWindow(params) {
   return DEFAULT_CONTEXT_WINDOW;
 }
 
-function formatStopReason(stoppedReason) {
+function formatStopReason(stoppedReason, maxToolTurns) {
   if (stoppedReason === 'budget-exceeded') {
     return 'stopped after run budget';
   }
-  return `stopped after ${MAX_TOOL_TURNS} tool turns`;
+  return `stopped after ${maxToolTurns} tool turns`;
 }
 
 /**

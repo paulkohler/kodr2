@@ -230,6 +230,23 @@ describe('runToolLoop', () => {
     assert.equal(client.calls.length, MAX_TOOL_TURNS);
   });
 
+  it('honors a custom maxToolTurns ceiling', async () => {
+    const client = scriptedClient([toolCallTurn('list_files', {})]);
+    const loop = await runToolLoop({
+      client,
+      modelId: 'm',
+      messages: [],
+      tools: stubTools,
+      quiet: true,
+      maxToolTurns: 3,
+    });
+
+    assert.equal(loop.completed, false);
+    assert.equal(loop.stoppedReason, 'tool-limit');
+    assert.equal(loop.toolTurns, 3);
+    assert.equal(client.calls.length, 3);
+  });
+
   it('stops on the run budget before calling the model', async () => {
     const client = scriptedClient([finalTurn('x')]);
     const loop = await runToolLoop({

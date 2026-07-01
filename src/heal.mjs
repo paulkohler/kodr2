@@ -22,6 +22,7 @@ const DEFAULT_MAX_TURNS = 3;
  * @param {boolean} [params.quiet] - Suppress terminal output
  * @param {Date} [params.startedAt] - Run start, for the budget check
  * @param {number} [params.maxRunMs] - Stop between turns after this many ms (0 disables)
+ * @param {number} [params.maxToolTurns] - Tool-turn ceiling per heal turn (default MAX_TOOL_TURNS)
  * @param {number} [params.contextWindow] - Max context window in tokens (0 disables compaction)
  * @param {number} [params.compactThreshold] - Fraction of the window that triggers compaction
  * @param {{ PreToolUse: Array, PostToolUse: Array }} [params.toolHooks] - Tool hooks for the loop
@@ -41,6 +42,7 @@ export async function heal(params) {
     quiet = false,
     startedAt,
     maxRunMs = 0,
+    maxToolTurns,
     contextWindow = 0,
     compactThreshold,
     toolHooks,
@@ -80,6 +82,7 @@ ${lastOutput}
       quiet,
       startedAt,
       maxRunMs,
+      maxToolTurns,
       contextWindow,
       compactThreshold,
       toolHooks,
