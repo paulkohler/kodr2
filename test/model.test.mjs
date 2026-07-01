@@ -247,6 +247,61 @@ describe('model HTTP client', () => {
     await assert.rejects(client.chat({ messages: [] }), /timed out after 20ms/i);
   });
 
+  it('calls onHeartbeat on an interval while a chat request is in flight', async () => {
+    const baseUrl = await startServer((_req, res) => {
+      setTimeout(() => {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        res.end(
+          'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
+        );
+      }, 120);
+    });
+    const client = createClient({ baseUrl, model: 'test' });
+    const ticks = [];
+    await client.chat({
+      messages: [],
+      heartbeatMs: 30,
+      onHeartbeat: (elapsedMs) => ticks.push(elapsedMs),
+    });
+    assert.ok(ticks.length >= 2, `expected multiple ticks, got ${ticks.length}`);
+  });
+
+  it('does not call onHeartbeat when heartbeatMs is 0', async () => {
+    const baseUrl = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end(
+        'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
+      );
+    });
+    const client = createClient({ baseUrl, model: 'test' });
+    const ticks = [];
+    await client.chat({
+      messages: [],
+      heartbeatMs: 0,
+      onHeartbeat: (elapsedMs) => ticks.push(elapsedMs),
+    });
+    assert.equal(ticks.length, 0);
+  });
+
+  it('stops calling onHeartbeat once the chat request finishes', async () => {
+    const baseUrl = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end(
+        'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
+      );
+    });
+    const client = createClient({ baseUrl, model: 'test' });
+    const ticks = [];
+    await client.chat({
+      messages: [],
+      heartbeatMs: 10,
+      onHeartbeat: (elapsedMs) => ticks.push(elapsedMs),
+    });
+    const countAfterFinish = ticks.length;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(ticks.length, countAfterFinish);
+  });
+
   it('probes loaded and max context from /api/v0/models', async () => {
     let probedPath;
     const baseUrl = await startServer((req, res) => {

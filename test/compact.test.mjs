@@ -204,6 +204,27 @@ describe('compactMessages', () => {
     assert.equal(client.calls[0].timeoutMs, 5000);
   });
 
+  it('forwards heartbeatMs and onHeartbeat to the summary chat call', async () => {
+    const client = scriptedClient([finalTurn('SUMMARY OF WORK')]);
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'task' },
+    ];
+    const onHeartbeat = () => {};
+
+    await compactMessages({
+      client,
+      modelId: 'm',
+      messages,
+      quiet: true,
+      heartbeatMs: 5000,
+      onHeartbeat,
+    });
+
+    assert.equal(client.calls[0].heartbeatMs, 5000);
+    assert.equal(client.calls[0].onHeartbeat, onHeartbeat);
+  });
+
   it('leaves messages unchanged when summarization fails', async () => {
     const client = {
       async chat() {
@@ -291,6 +312,34 @@ describe('runToolLoop compaction', () => {
       messages.some((m) => m.role === 'tool'),
       false,
     );
+  });
+
+  it('forwards heartbeatMs and onHeartbeat to the compaction summary call', async () => {
+    const client = scriptedClient([
+      toolCallTurn('list_files', {}, 900),
+      finalTurn('COMPACTED SUMMARY', 5),
+      finalTurn('all done', 5),
+    ]);
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'task' },
+    ];
+    const onHeartbeat = () => {};
+
+    await runToolLoop({
+      client,
+      modelId: 'm',
+      messages,
+      tools: stubTools,
+      quiet: true,
+      contextWindow: 1000,
+      heartbeatMs: 5000,
+      onHeartbeat,
+    });
+
+    // Call index 1 is the compaction summary request.
+    assert.equal(client.calls[1].heartbeatMs, 5000);
+    assert.equal(client.calls[1].onHeartbeat, onHeartbeat);
   });
 
   it('caps the compaction summary call to the remaining run budget', async () => {

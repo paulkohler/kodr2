@@ -29,7 +29,7 @@ inputs:
 outputs:
   chat:
     type: function
-    description: "Send chat completion: (messages, tools, onToken, timeoutMs?) → { message, usage }"
+    description: "Send chat completion: (messages, tools, onToken, timeoutMs?, heartbeatMs?, onHeartbeat?) → { message, usage }"
   models:
     type: function
     description: "List available models: () → [{ id }]"
@@ -49,6 +49,7 @@ constraints:
   - chat() accepts a per-call timeoutMs that overrides the client's configured default timeout, so a caller tracking a wall-clock budget (e.g. the harness's maxRunMs) can cap each request to the time actually remaining
   - chat() retries a 5xx response up to maxRetries times (default 1) before surfacing the error; a 4xx or a timeout is never retried
   - Each retry reuses the same request body and timeout; a run's remaining budget is not recomputed per attempt, so callers with a tight maxRunMs and a high maxRetries could in the worst case spend roughly (maxRetries + 1) x timeout on one chat() call -- the default of 1 keeps that bounded to 2x
+  - chat() accepts optional heartbeatMs/onHeartbeat: while a request is in flight, onHeartbeat(elapsedMs) fires on that interval until the request settles (0 or omitted disables it). A large prompt can spend minutes in prefill before the first streamed token, which is otherwise indistinguishable from a hung request to anything watching for output; each retry attempt restarts its own heartbeat timer from zero
 
 tests:
   unit:
@@ -72,6 +73,9 @@ tests:
     - maxRetries 0 disables retrying
     - CLI --model-retries is parsed and defaults to 1
     - modelMaxRetries resolves option over env over default
+    - calls onHeartbeat on an interval while a chat request is in flight
+    - does not call onHeartbeat when heartbeatMs is 0
+    - stops calling onHeartbeat once the chat request finishes
   eval:
     - connects to LM Studio and lists models
     - sends a simple prompt and gets a response

@@ -109,10 +109,13 @@ export function renderTranscript(messages) {
  * @param {Array} params.messages - Conversation so far
  * @param {boolean} [params.quiet] - Suppress streamed summary output
  * @param {number} [params.timeoutMs] - Per-call timeout override (e.g. the run's remaining budget)
+ * @param {number} [params.heartbeatMs] - Interval for onHeartbeat "still waiting" notices (0 disables)
+ * @param {function} [params.onHeartbeat] - Called with elapsed ms on each heartbeat tick
  * @returns {Promise<{ messages: Array, summary: string, usage: { prompt: number, completion: number }, error?: string }>}
  */
 export async function compactMessages(params) {
   const { client, modelId, messages, quiet = false, timeoutMs } = params;
+  const { heartbeatMs, onHeartbeat } = params;
   const system = messages.find((message) => message.role === 'system') || null;
   const history = messages.filter((message) => message.role !== 'system');
 
@@ -134,6 +137,8 @@ export async function compactMessages(params) {
       ],
       onToken: quiet ? undefined : (token) => process.stdout.write(token),
       timeoutMs,
+      heartbeatMs,
+      onHeartbeat,
     });
   } catch (err) {
     return {

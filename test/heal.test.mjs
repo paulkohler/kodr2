@@ -45,4 +45,32 @@ describe('healing', () => {
     assert.equal(result.turns, 0);
     assert.equal(result.healed, false);
   });
+
+  it('forwards heartbeatMs and onHeartbeat to the model client', async () => {
+    const calls = [];
+    const client = {
+      async chat(params) {
+        calls.push(params);
+        return { message: { role: 'assistant', content: 'fixed' }, usage: { prompt: 1, completion: 1 } };
+      },
+    };
+    const verification = { passed: false, output: 'failure' };
+    const onHeartbeat = () => {};
+    await heal({
+      client,
+      modelId: 'unused',
+      messages: [],
+      tools: { definitions: () => [] },
+      verifyFn: async () => ({ passed: true, output: '' }),
+      failure: verification,
+      maxTurns: 1,
+      quiet: true,
+      heartbeatMs: 5000,
+      onHeartbeat,
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].heartbeatMs, 5000);
+    assert.equal(calls[0].onHeartbeat, onHeartbeat);
+  });
 });

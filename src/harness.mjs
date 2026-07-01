@@ -127,6 +127,13 @@ export async function run(prompt, options) {
     }
   }
 
+  const heartbeatMs = heartbeatIntervalMs(options.heartbeatMs);
+  const onModelHeartbeat = quiet
+    ? undefined
+    : (elapsedMs) => {
+        process.stderr.write(`${formatHeartbeat('model response', elapsedMs)}\n`);
+      };
+
   // On-demand compaction: "/compact" compresses the prior conversation
   // instead of running a new task.
   if (isCompactCommand(prompt)) {
@@ -141,6 +148,8 @@ export async function run(prompt, options) {
       maxRunMs,
       runsDir,
       noSave,
+      heartbeatMs,
+      onHeartbeat: onModelHeartbeat,
     });
   }
 
@@ -158,7 +167,6 @@ export async function run(prompt, options) {
   };
   const endHooks = sessionHooks(hooksConfig, 'SessionEnd');
   const reserveFraction = healReserveFraction(options.healReserve);
-  const heartbeatMs = heartbeatIntervalMs(options.heartbeatMs);
 
   // SessionStart: run before the task prompt so its output primes the model.
   await runSessionStart({
@@ -189,6 +197,8 @@ export async function run(prompt, options) {
       toolHooks: toolHookSets,
       cwd,
       commandEnv,
+      heartbeatMs,
+      onHeartbeat: onModelHeartbeat,
     });
     const totalUsage = loop.usage;
     const { completed, stoppedReason, toolTurns } = loop;
@@ -271,6 +281,8 @@ export async function run(prompt, options) {
           toolHooks: toolHookSets,
           cwd,
           commandEnv,
+          heartbeatMs,
+          onHeartbeat: onModelHeartbeat,
         });
 
         result.healed = healResult.healed;
@@ -487,7 +499,7 @@ export function stopVerifyBudgetMs(startedAt, maxRunMs, reserveFraction) {
  */
 async function runManualCompaction(params) {
   const { client, modelId, messages, metadata, quiet, startedAt } = params;
-  const { runsDir, noSave, maxRunMs = 0 } = params;
+  const { runsDir, noSave, maxRunMs = 0, heartbeatMs, onHeartbeat } = params;
 
   // messages holds the fresh system prompt plus any continued conversation.
   const hasHistory = messages.some((message) => message.role !== 'system');
@@ -512,6 +524,8 @@ async function runManualCompaction(params) {
     messages,
     quiet,
     timeoutMs: remainingRunBudgetMs(startedAt, maxRunMs),
+    heartbeatMs,
+    onHeartbeat,
   });
 
   if (!compactResult.error) {

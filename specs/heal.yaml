@@ -38,6 +38,12 @@ inputs:
   maxRunMs:
     type: number
     description: Stop repairing between turns after this many ms (0 disables)
+  heartbeatMs:
+    type: number
+    description: "\"Still waiting on a model response\" notice interval, forwarded to the tool loop's chat calls (0 disables)"
+  onHeartbeat:
+    type: function
+    description: Called with elapsed ms on each heartbeat tick, forwarded to the tool loop's chat calls
 
 outputs:
   healed:
@@ -66,5 +72,6 @@ tests:
   unit:
     - stops on no-progress (identical failure output)
     - respects turn limit
+    - forwards heartbeatMs and onHeartbeat to the model client
   eval:
     - heals a simple test failure by fixing the code

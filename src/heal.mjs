@@ -28,6 +28,8 @@ const DEFAULT_MAX_TURNS = 3;
  * @param {{ PreToolUse: Array, PostToolUse: Array }} [params.toolHooks] - Tool hooks for the loop
  * @param {string} [params.cwd] - Workspace root (for tool hooks)
  * @param {Record<string, string>} [params.commandEnv] - Curated env (for tool hooks)
+ * @param {number} [params.heartbeatMs] - Interval for "still waiting on a model response" notices (0 disables)
+ * @param {function} [params.onHeartbeat] - Called with elapsed ms on each heartbeat tick
  * @returns {Promise<{ healed: boolean, turns: number, verification: object, compactions: number, usage: { prompt: number, completion: number } }>}
  */
 export async function heal(params) {
@@ -48,6 +50,8 @@ export async function heal(params) {
     toolHooks,
     cwd,
     commandEnv,
+    heartbeatMs,
+    onHeartbeat,
   } = params;
 
   let lastOutput = failure.output;
@@ -88,6 +92,8 @@ ${lastOutput}
       toolHooks,
       cwd,
       commandEnv,
+      heartbeatMs,
+      onHeartbeat,
     });
     totalUsage.prompt += loop.usage.prompt;
     totalUsage.completion += loop.usage.completion;

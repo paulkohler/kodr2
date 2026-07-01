@@ -42,12 +42,18 @@ export const MAX_TOOL_TURNS = 20;
  * @param {{ PreToolUse: Array, PostToolUse: Array }} [params.toolHooks] - Tool hooks
  * @param {string} [params.cwd] - Workspace root (for tool hooks)
  * @param {Record<string, string>} [params.commandEnv] - Curated env (for tool hooks)
+ * @param {number} [params.heartbeatMs] - Interval for "still waiting on a
+ *   model response" notices while a chat request is in flight (0 disables) --
+ *   a large prompt can spend minutes in prefill before the first token
+ *   streams, which is otherwise silent
+ * @param {function} [params.onHeartbeat] - Called with elapsed ms on each heartbeat tick
  * @returns {Promise<{ finalText: string, completed: boolean, stoppedReason: string, toolTurns: number, compactions: number, usage: { prompt: number, completion: number } }>}
  */
 export async function runToolLoop(params) {
   const { client, modelId, messages, tools, quiet = false } = params;
   const { startedAt, maxRunMs = 0, maxToolTurns = MAX_TOOL_TURNS } = params;
   const { contextWindow = 0, compactThreshold = COMPACTION_THRESHOLD } = params;
+  const { heartbeatMs = 0, onHeartbeat } = params;
   const hookCtx = buildHookCtx(params);
 
   const usage = { prompt: 0, completion: 0 };
@@ -69,6 +75,8 @@ export async function runToolLoop(params) {
       tools: tools.definitions(),
       onToken: quiet ? undefined : (t) => process.stdout.write(t),
       timeoutMs: remainingRunBudgetMs(startedAt, maxRunMs),
+      heartbeatMs,
+      onHeartbeat,
     });
 
     usage.prompt += turnUsage.prompt;
@@ -118,6 +126,8 @@ export async function runToolLoop(params) {
       quiet,
       usage,
       timeoutMs: remainingRunBudgetMs(startedAt, maxRunMs),
+      heartbeatMs,
+      onHeartbeat,
     });
     if (compacted) {
       compactions++;
@@ -137,6 +147,7 @@ export async function runToolLoop(params) {
 async function maybeCompact(params) {
   const { client, modelId, messages, lastPromptTokens, usage, quiet } = params;
   const { contextWindow, compactThreshold, timeoutMs } = params;
+  const { heartbeatMs, onHeartbeat } = params;
 
   if (!needsCompaction(lastPromptTokens, contextWindow, compactThreshold)) {
     return false;
@@ -155,6 +166,8 @@ async function maybeCompact(params) {
     messages,
     quiet,
     timeoutMs,
+    heartbeatMs,
+    onHeartbeat,
   });
   usage.prompt += result.usage.prompt;
   usage.completion += result.usage.completion;

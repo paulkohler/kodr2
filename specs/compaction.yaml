@@ -37,6 +37,12 @@ inputs:
   timeoutMs:
     type: number
     description: Per-call timeout override forwarded to the summary chat call (e.g. the run's remaining maxRunMs budget)
+  heartbeatMs:
+    type: number
+    description: "\"Still waiting on a model response\" notice interval, forwarded to the summary chat call (0 disables)"
+  onHeartbeat:
+    type: function
+    description: Called with elapsed ms on each heartbeat tick, forwarded to the summary chat call
 
 outputs:
   messages:
@@ -88,8 +94,10 @@ tests:
     - compactMessages leaves messages unchanged when summarization fails
     - compactMessages is a no-op when there is no history to compact
     - compactMessages forwards timeoutMs to the summary chat call
+    - compactMessages forwards heartbeatMs and onHeartbeat to the summary chat call
     - tool loop compacts in place when a turn crosses the threshold
     - tool loop caps the compaction summary call to the remaining run budget
+    - tool loop forwards heartbeatMs and onHeartbeat to the compaction summary call
     - tool loop does not compact when below the threshold
     - isCompactCommand recognizes "/compact"
     - configuredContextWindow reads an explicit value and the env var, else null

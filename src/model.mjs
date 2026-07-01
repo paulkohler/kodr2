@@ -45,6 +45,12 @@ export function createClient(options = {}) {
    *   run's remaining budget), so a request started near the run deadline
    *   doesn't get a fresh full-length timeout. Falls back to the client's
    *   configured timeout when omitted.
+   * @param {number} [params.heartbeatMs] - Interval for onHeartbeat "still
+   *   waiting" notices while a request is in flight (0 or omitted disables).
+   *   A large prompt can spend minutes in prefill before the first token
+   *   streams, which looks identical to a stuck request from the outside.
+   * @param {function} [params.onHeartbeat] - Called with elapsed ms on each
+   *   heartbeat tick
    * @returns {Promise<{ message: object, usage: object }>}
    */
   async function chat(params) {
@@ -67,7 +73,12 @@ export function createClient(options = {}) {
       `${baseUrl}/chat/completions`,
       body,
       callTimeout,
-      { onToken: params.onToken, onToolCall: params.onToolCall },
+      {
+        onToken: params.onToken,
+        onToolCall: params.onToolCall,
+        heartbeatMs: params.heartbeatMs,
+        onHeartbeat: params.onHeartbeat,
+      },
       maxRetries,
     );
   }
@@ -335,6 +346,13 @@ function streamRequest(url, body, timeout, callbacks) {
     const assembler = createAssembler(callbacks.onToken, callbacks.onToolCall);
     let settled = false;
     let req;
+    const requestStartedAt = Date.now();
+    let heartbeatTimer;
+    if (callbacks.heartbeatMs > 0 && callbacks.onHeartbeat) {
+      heartbeatTimer = setInterval(() => {
+        callbacks.onHeartbeat(Date.now() - requestStartedAt);
+      }, callbacks.heartbeatMs);
+    }
     const hardTimer = setTimeout(() => {
       if (settled) return;
       settled = true;
@@ -348,6 +366,9 @@ function streamRequest(url, body, timeout, callbacks) {
       if (settled) return;
       settled = true;
       clearTimeout(hardTimer);
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+      }
       fn(value);
     }
 

@@ -296,6 +296,23 @@ describe('runToolLoop', () => {
 
     assert.equal(client.calls[0].timeoutMs, undefined);
   });
+
+  it('forwards heartbeatMs and onHeartbeat to the model client', async () => {
+    const client = scriptedClient([finalTurn('done')]);
+    const onHeartbeat = () => {};
+    await runToolLoop({
+      client,
+      modelId: 'm',
+      messages: [],
+      tools: stubTools,
+      quiet: true,
+      heartbeatMs: 5000,
+      onHeartbeat,
+    });
+
+    assert.equal(client.calls[0].heartbeatMs, 5000);
+    assert.equal(client.calls[0].onHeartbeat, onHeartbeat);
+  });
 });
 
 // Tool calls come straight from the model and are untrusted: argument JSON may
