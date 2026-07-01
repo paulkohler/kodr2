@@ -9,6 +9,7 @@ import { request as httpsRequest } from 'node:https';
 
 const DEFAULT_BASE_URL = 'http://localhost:1234/v1';
 const DEFAULT_TIMEOUT = 600_000; // 10 minutes
+export const DEFAULT_MAX_RETRIES = 1;
 
 /**
  * Create a model client bound to an LM Studio instance.
@@ -16,12 +17,17 @@ const DEFAULT_TIMEOUT = 600_000; // 10 minutes
  * @param {string} [options.baseUrl] - LM Studio API base URL
  * @param {string} [options.model] - Model identifier
  * @param {number} [options.timeout] - Request timeout in ms
+ * @param {number} [options.maxRetries] - Retries for a 5xx chat response
+ *   (transient local-backend crashes), default 1. 4xx and timeouts are
+ *   never retried -- a 4xx would fail identically again, and a timeout
+ *   already means the model took the full budget.
  * @returns {object} Client with `chat` and `models` methods
  */
 export function createClient(options = {}) {
   const baseUrl = options.baseUrl || DEFAULT_BASE_URL;
   const model = resolveConfiguredModel(options.model);
   const timeout = options.timeout || DEFAULT_TIMEOUT;
+  const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
 
   return { chat, models, resolveModel, contextInfo, richModels };
 
@@ -57,10 +63,13 @@ export function createClient(options = {}) {
     }
 
     const callTimeout = params.timeoutMs ?? timeout;
-    return streamRequest(`${baseUrl}/chat/completions`, body, callTimeout, {
-      onToken: params.onToken,
-      onToolCall: params.onToolCall,
-    });
+    return streamRequestWithRetry(
+      `${baseUrl}/chat/completions`,
+      body,
+      callTimeout,
+      { onToken: params.onToken, onToolCall: params.onToolCall },
+      maxRetries,
+    );
   }
 
   /**
@@ -282,6 +291,41 @@ function parseSseLine(line) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Retry a chat completion on a 5xx response -- local backends (LM Studio)
+ * occasionally crash mid-request on an otherwise-valid conversation (e.g. an
+ * internal JSON re-parse failure), and a bare retry of the same request often
+ * just works. 4xx and timeout errors are never retried: a 4xx would fail
+ * identically again, and a timeout already means the model used the full
+ * budget on that attempt.
+ * @param {number} maxRetries - Extra attempts after the first (0 disables)
+ */
+async function streamRequestWithRetry(url, body, timeout, callbacks, maxRetries) {
+  let lastErr;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await streamRequest(url, body, timeout, callbacks);
+    } catch (err) {
+      if (attempt === maxRetries || !isRetryableServerError(err)) {
+        throw err;
+      }
+      lastErr = err;
+    }
+  }
+  throw lastErr;
+}
+
+/**
+ * Whether an error from streamRequest is a 5xx HTTP status -- the class of
+ * failure a local backend crash produces, as opposed to a 4xx (a bad request
+ * that would fail the same way again) or a timeout.
+ * @param {Error} err
+ * @returns {boolean}
+ */
+export function isRetryableServerError(err) {
+  return /^HTTP 5\d\d:/.test(err.message);
 }
 
 function streamRequest(url, body, timeout, callbacks) {

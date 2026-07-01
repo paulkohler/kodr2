@@ -82,6 +82,16 @@ describe('parseArgs', () => {
     assert.equal(args.heartbeatMs, 30000);
   });
 
+  it('parses --model-retries flag', () => {
+    const args = parseArgs(['run', 'hi', '--model-retries', '3']);
+    assert.equal(args.modelRetries, 3);
+  });
+
+  it('defaults --model-retries to 1', () => {
+    const args = parseArgs(['run', 'hi']);
+    assert.equal(args.modelRetries, 1);
+  });
+
   it('parses --context-window flag', () => {
     const args = parseArgs(['run', 'hi', '--context-window', '32768']);
     assert.equal(args.contextWindow, 32768);

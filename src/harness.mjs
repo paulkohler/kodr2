@@ -5,7 +5,11 @@
 
 import { join, resolve } from 'node:path';
 import { buildSystemPrompt } from './context.mjs';
-import { createClient, hasContextHeadroom } from './model.mjs';
+import {
+  DEFAULT_MAX_RETRIES,
+  createClient,
+  hasContextHeadroom,
+} from './model.mjs';
 import { createToolRegistry } from './tools/index.mjs';
 import { buildEnv } from './env.mjs';
 import {
@@ -55,6 +59,7 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  * @param {number} [options.contextWindow] - Max context window in tokens (0 disables compaction)
  * @param {number} [options.healReserve] - Fraction of the run budget held back for heal (0..0.9; default KODR_HEAL_RESERVE or 0.25)
  * @param {number} [options.heartbeatMs] - Interval for Stop-hook "still running" notices (0 disables; default KODR_HEARTBEAT_MS or 30000)
+ * @param {number} [options.maxRetries] - Retries for a 5xx chat response (0 disables; default KODR_MODEL_RETRIES or 1)
  * @param {string} [options.runsDir] - Where to write run transcripts (default cwd/.kodr/runs or KODR_RUNS_DIR)
  * @param {boolean} [options.noSave] - Skip writing the run transcript (also KODR_NO_SAVE)
  * @returns {Promise<object>} Run result
@@ -78,6 +83,7 @@ export async function run(prompt, options) {
     baseUrl: options.baseUrl,
     model: options.model,
     timeout: maxRunMs || undefined,
+    maxRetries: modelMaxRetries(options.maxRetries),
   });
 
   const modelId = await client.resolveModel();
@@ -399,6 +405,25 @@ export function heartbeatIntervalMs(option) {
     return fromEnv;
   }
   return DEFAULT_HEARTBEAT_MS;
+}
+
+/**
+ * Retries for a 5xx chat response, so a one-off local-backend crash (see
+ * model.mjs's isRetryableServerError) doesn't fail the whole run. Resolved
+ * from an explicit option, then KODR_MODEL_RETRIES, then model.mjs's
+ * default; 0 disables.
+ * @param {number} [option]
+ * @returns {number}
+ */
+export function modelMaxRetries(option) {
+  if (Number.isInteger(option) && option >= 0) {
+    return option;
+  }
+  const fromEnv = Number.parseInt(process.env.KODR_MODEL_RETRIES, 10);
+  if (Number.isInteger(fromEnv) && fromEnv >= 0) {
+    return fromEnv;
+  }
+  return DEFAULT_MAX_RETRIES;
 }
 
 export const DEFAULT_HEAL_RESERVE = 0.25;

@@ -14,6 +14,17 @@ inputs:
   timeout:
     type: number
     description: Request timeout in ms (default 600000)
+  maxRetries:
+    type: number
+    description: >
+      Retries for a 5xx chat response (default 1, 0 disables; CLI
+      --model-retries / KODR_MODEL_RETRIES). Local backends (LM Studio)
+      occasionally crash mid-request on an otherwise-valid conversation --
+      observed cause: an internal JSON re-parse failure on the growing chat
+      history, surfaced to the client as a bare HTTP 500 -- and a plain
+      retry of the same request often just succeeds. 4xx errors and timeouts
+      are never retried: a 4xx would fail identically again, and a timeout
+      already means the model spent the full budget on that attempt.
 
 outputs:
   chat:
@@ -36,6 +47,8 @@ constraints:
   - HTTP errors surface as thrown exceptions
   - Timeout applies to the full request lifecycle, even when streaming chunks keep arriving
   - chat() accepts a per-call timeoutMs that overrides the client's configured default timeout, so a caller tracking a wall-clock budget (e.g. the harness's maxRunMs) can cap each request to the time actually remaining
+  - chat() retries a 5xx response up to maxRetries times (default 1) before surfacing the error; a 4xx or a timeout is never retried
+  - Each retry reuses the same request body and timeout; a run's remaining budget is not recomputed per attempt, so callers with a tight maxRunMs and a high maxRetries could in the worst case spend roughly (maxRetries + 1) x timeout on one chat() call -- the default of 1 keeps that bounded to 2x
 
 tests:
   unit:
@@ -50,6 +63,15 @@ tests:
     - long streaming requests time out even when chunks arrive
     - a per-call timeoutMs overrides the client default
     - omitting timeoutMs falls back to the client default
+    - isRetryableServerError is true for a 5xx error
+    - isRetryableServerError is false for a 4xx error
+    - isRetryableServerError is false for a non-HTTP error (e.g. a timeout)
+    - a chat request retries once after a 5xx, then succeeds
+    - a 4xx from chat is never retried
+    - chat gives up after maxRetries and throws the last 5xx error
+    - maxRetries 0 disables retrying
+    - CLI --model-retries is parsed and defaults to 1
+    - modelMaxRetries resolves option over env over default
   eval:
     - connects to LM Studio and lists models
     - sends a simple prompt and gets a response

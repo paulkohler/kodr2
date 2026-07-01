@@ -5,6 +5,7 @@ import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
+import { DEFAULT_MAX_RETRIES } from '../src/model.mjs';
 import {
   DEFAULT_HEAL_RESERVE,
   DEFAULT_HEARTBEAT_MS,
@@ -12,6 +13,7 @@ import {
   healReserveFraction,
   heartbeatIntervalMs,
   isRunBudgetExceeded,
+  modelMaxRetries,
   remainingRunBudgetMs,
   run,
   stopVerifyBudgetMs,
@@ -142,6 +144,32 @@ describe('heartbeatIntervalMs', () => {
   it('allows 0 to disable heartbeats', () => {
     delete process.env.KODR_HEARTBEAT_MS;
     assert.equal(heartbeatIntervalMs(0), 0);
+  });
+});
+
+describe('modelMaxRetries', () => {
+  const saved = process.env.KODR_MODEL_RETRIES;
+  afterEach(() => {
+    if (saved === undefined) {
+      delete process.env.KODR_MODEL_RETRIES;
+    } else {
+      process.env.KODR_MODEL_RETRIES = saved;
+    }
+  });
+
+  it('defaults when nothing is configured', () => {
+    delete process.env.KODR_MODEL_RETRIES;
+    assert.equal(modelMaxRetries(undefined), DEFAULT_MAX_RETRIES);
+  });
+
+  it('reads KODR_MODEL_RETRIES from the environment', () => {
+    process.env.KODR_MODEL_RETRIES = '3';
+    assert.equal(modelMaxRetries(undefined), 3);
+  });
+
+  it('prefers an explicit option over the environment', () => {
+    process.env.KODR_MODEL_RETRIES = '3';
+    assert.equal(modelMaxRetries(0), 0);
   });
 });
 

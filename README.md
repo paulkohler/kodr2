@@ -89,6 +89,7 @@ The model has these tools available:
 --heal-turns <n>       Max repair turns (default: 3)
 --max-tool-turns <n>   Tool-turn ceiling per loop (default: 20)
 --heartbeat-ms <n>     Stop-hook "still running" notice interval (or KODR_HEARTBEAT_MS; default: 30000, 0 disables)
+--model-retries <n>    Retries for a 5xx chat response, e.g. a local backend crash (or KODR_MODEL_RETRIES; default: 1, 0 disables)
 --context-window <n>   Max context tokens; compact at 80% (auto-detected; 0 disables)
 --env <a,b,c>          Extra env vars to expose to commands (CSV of names)
 --continue <last|path> Continue from a prior run

@@ -6,6 +6,7 @@ import {
   assembleResponse,
   createClient,
   hasContextHeadroom,
+  isRetryableServerError,
   pickContextInfo,
 } from '../src/model.mjs';
 
@@ -156,6 +157,62 @@ describe('model HTTP client', () => {
     await assert.rejects(client.chat({ messages: [] }), /HTTP 400/);
   });
 
+  it('retries a chat request once after a 5xx, then succeeds', async () => {
+    let calls = 0;
+    const baseUrl = await startServer((_req, res) => {
+      calls++;
+      if (calls === 1) {
+        res.writeHead(500);
+        res.end('internal error');
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end(
+        'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
+      );
+    });
+    const client = createClient({ baseUrl, model: 'test' });
+    const result = await client.chat({ messages: [] });
+    assert.equal(calls, 2);
+    assert.equal(result.message.content, 'ok');
+  });
+
+  it('does not retry a 4xx from chat', async () => {
+    let calls = 0;
+    const baseUrl = await startServer((_req, res) => {
+      calls++;
+      res.writeHead(400);
+      res.end('bad request');
+    });
+    const client = createClient({ baseUrl, model: 'test' });
+    await assert.rejects(client.chat({ messages: [] }), /HTTP 400/);
+    assert.equal(calls, 1);
+  });
+
+  it('gives up after maxRetries and throws the last 5xx error', async () => {
+    let calls = 0;
+    const baseUrl = await startServer((_req, res) => {
+      calls++;
+      res.writeHead(502);
+      res.end('bad gateway');
+    });
+    const client = createClient({ baseUrl, model: 'test', maxRetries: 2 });
+    await assert.rejects(client.chat({ messages: [] }), /HTTP 502/);
+    assert.equal(calls, 3);
+  });
+
+  it('maxRetries: 0 disables retrying', async () => {
+    let calls = 0;
+    const baseUrl = await startServer((_req, res) => {
+      calls++;
+      res.writeHead(500);
+      res.end('internal error');
+    });
+    const client = createClient({ baseUrl, model: 'test', maxRetries: 0 });
+    await assert.rejects(client.chat({ messages: [] }), /HTTP 500/);
+    assert.equal(calls, 1);
+  });
+
   it('times out stalled requests', async () => {
     const baseUrl = await startServer(() => {});
     const client = createClient({ baseUrl, timeout: 20 });
@@ -241,6 +298,21 @@ describe('model HTTP client', () => {
     });
     const client = createClient({ baseUrl, model: 'test' });
     assert.deepEqual(await client.richModels(), []);
+  });
+});
+
+describe('isRetryableServerError', () => {
+  it('is true for a 5xx error', () => {
+    assert.equal(isRetryableServerError(new Error('HTTP 500: boom')), true);
+    assert.equal(isRetryableServerError(new Error('HTTP 503: boom')), true);
+  });
+
+  it('is false for a 4xx error', () => {
+    assert.equal(isRetryableServerError(new Error('HTTP 400: boom')), false);
+  });
+
+  it('is false for a non-HTTP error', () => {
+    assert.equal(isRetryableServerError(new Error('timed out after 20ms')), false);
   });
 });
 
