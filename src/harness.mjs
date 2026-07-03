@@ -131,7 +131,9 @@ export async function run(prompt, options) {
   const onModelHeartbeat = quiet
     ? undefined
     : (elapsedMs) => {
-        process.stderr.write(`${formatHeartbeat('model response', elapsedMs)}\n`);
+        process.stderr.write(
+          `${formatHeartbeat('model response', elapsedMs)}\n`,
+        );
       };
 
   // On-demand compaction: "/compact" compresses the prior conversation

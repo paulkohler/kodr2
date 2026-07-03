@@ -244,7 +244,10 @@ describe('model HTTP client', () => {
   it('falls back to the client default timeout when timeoutMs is omitted', async () => {
     const baseUrl = await startServer(() => {});
     const client = createClient({ baseUrl, model: 'test', timeout: 20 });
-    await assert.rejects(client.chat({ messages: [] }), /timed out after 20ms/i);
+    await assert.rejects(
+      client.chat({ messages: [] }),
+      /timed out after 20ms/i,
+    );
   });
 
   it('calls onHeartbeat on an interval while a chat request is in flight', async () => {
@@ -263,7 +266,10 @@ describe('model HTTP client', () => {
       heartbeatMs: 30,
       onHeartbeat: (elapsedMs) => ticks.push(elapsedMs),
     });
-    assert.ok(ticks.length >= 2, `expected multiple ticks, got ${ticks.length}`);
+    assert.ok(
+      ticks.length >= 2,
+      `expected multiple ticks, got ${ticks.length}`,
+    );
   });
 
   it('does not call onHeartbeat when heartbeatMs is 0', async () => {
@@ -367,7 +373,10 @@ describe('isRetryableServerError', () => {
   });
 
   it('is false for a non-HTTP error', () => {
-    assert.equal(isRetryableServerError(new Error('timed out after 20ms')), false);
+    assert.equal(
+      isRetryableServerError(new Error('timed out after 20ms')),
+      false,
+    );
   });
 });
 

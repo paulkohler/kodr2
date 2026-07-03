@@ -313,7 +313,13 @@ function parseSseLine(line) {
  * budget on that attempt.
  * @param {number} maxRetries - Extra attempts after the first (0 disables)
  */
-async function streamRequestWithRetry(url, body, timeout, callbacks, maxRetries) {
+async function streamRequestWithRetry(
+  url,
+  body,
+  timeout,
+  callbacks,
+  maxRetries,
+) {
   let lastErr;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {

@@ -120,7 +120,10 @@ describe('runStopHooks', () => {
       heartbeatMs: 30,
       onHeartbeat: (name, elapsedMs) => ticks.push({ name, elapsedMs }),
     });
-    assert.ok(ticks.length >= 2, `expected multiple ticks, got ${ticks.length}`);
+    assert.ok(
+      ticks.length >= 2,
+      `expected multiple ticks, got ${ticks.length}`,
+    );
     assert.ok(ticks.every((t) => t.name === 'slow'));
   });
 

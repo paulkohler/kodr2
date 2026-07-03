@@ -191,7 +191,9 @@ function summariseArgs(name, args) {
   }
   if (name === 'search') {
     const scope = [args.path, args.glob].filter(Boolean).join(' ');
-    const text = scope ? `${args.pattern || ''} (${scope})` : args.pattern || '';
+    const text = scope
+      ? `${args.pattern || ''} (${scope})`
+      : args.pattern || '';
     return DIM + text + RESET;
   }
   if (name === 'run_command') {

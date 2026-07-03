@@ -51,7 +51,10 @@ describe('healing', () => {
     const client = {
       async chat(params) {
         calls.push(params);
-        return { message: { role: 'assistant', content: 'fixed' }, usage: { prompt: 1, completion: 1 } };
+        return {
+          message: { role: 'assistant', content: 'fixed' },
+          usage: { prompt: 1, completion: 1 },
+        };
       },
     };
     const verification = { passed: false, output: 'failure' };

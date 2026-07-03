@@ -59,7 +59,10 @@ describe('runShell', () => {
       tmpDir,
       { heartbeatMs: 30, onHeartbeat: (elapsedMs) => ticks.push(elapsedMs) },
     );
-    assert.ok(ticks.length >= 2, `expected multiple ticks, got ${ticks.length}`);
+    assert.ok(
+      ticks.length >= 2,
+      `expected multiple ticks, got ${ticks.length}`,
+    );
   });
 
   it('does not call onHeartbeat when heartbeatMs is 0', async () => {
