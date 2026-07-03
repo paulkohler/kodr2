@@ -1,0 +1,106 @@
+name: memory
+status: proposed
+description: >
+  End-of-run retrospective. After the tool loop reaches an outcome, distill
+  the conversation and ask the model to propose lessons for future runs in
+  this workspace: wrong assumptions, dead ends, workspace conventions it
+  learned the hard way. This is genuinely new ground for Kodr — the "harness
+  engineering" framing (martinfowler.com/articles/harness-engineering.html)
+  treats improvement as something a human steers by iterating on the
+  harness, not something an agent does to itself across runs. That framing
+  is the reason this spec never lets a retrospective write silently: it
+  always produces a *proposal*, and a human decides whether it becomes part
+  of the workspace's memory. An unreviewed proposal from one bad run could
+  otherwise quietly bias every run after it, with nothing catching it the
+  way a human catches a bad edit to a hand-written KODR.md.
+
+inputs:
+  client:
+    type: object
+    required: true
+    description: Model client
+  modelId:
+    type: string
+    required: true
+    description: Model to generate the retrospective with
+  messages:
+    type: array
+    required: true
+    description: Full conversation from the run just finished
+  cwd:
+    type: string
+    required: true
+    description: Workspace root — where MEMORY.md lives
+  stoppedReason:
+    type: string
+    required: true
+    description: How the run ended ("complete", "tool-limit", "budget-exceeded"); informs whether a retrospective is worth running at all
+  startedAt:
+    type: object
+    description: Run start time, for the deadline-aware timeoutMs
+  maxRunMs:
+    type: number
+    description: Run budget in ms (0 disables); the retrospective call is capped to whatever remains
+  memoryReserve:
+    type: number
+    description: Fraction of maxRunMs to refuse to spend on the retrospective, mirroring healReserveFraction/KODR_HEAL_RESERVE (default 0.1)
+  attended:
+    type: boolean
+    description: Whether to prompt inline for confirmation — true when stdout is a TTY and neither --quiet nor --json is set
+  autoApply:
+    type: boolean
+    description: Skip the confirmation prompt and apply directly (--memory-auto-apply); for pipelines that have already decided to trust it. Default false.
+
+outputs:
+  proposed:
+    type: boolean
+    description: Whether a retrospective was generated (false if skipped — see constraints)
+  notes:
+    type: string
+    description: The proposed addition to MEMORY.md, or empty if none
+  applied:
+    type: boolean
+    description: Whether the notes were merged into MEMORY.md
+  proposalPath:
+    type: string
+    description: Where the proposal was written when not applied inline (unattended runs), null otherwise
+  usage:
+    type: object
+    description: "{ prompt, completion } tokens spent generating the retrospective"
+
+constraints:
+  - Off by default; opt in with --memory (or KODR_MEMORY). The drift risk below is real enough that this shouldn't be silently on until it's been used and trusted.
+  - Runs once, after the tool loop's final outcome — never mid-loop, and never as part of the turn/budget the task itself was working against
+  - Skipped entirely (proposed: false) when the run's remaining budget after the reserve is exhausted, mirroring how healReserveFraction protects the heal pass — a retrospective is best-effort, not owed
+  - The retrospective model call is deadline-aware: timeoutMs is the remaining run budget, exactly like the compaction summary call (src/compact.mjs) — a request started late cannot itself outlive the run
+  - Distillation reuses compact.mjs's renderTranscript rather than a second bespoke transcript renderer
+  - Never writes to MEMORY.md without a human decision in the loop:
+    - Attended (TTY stdout, no --quiet/--json) — print the proposed notes and prompt "Keep these notes for future runs? [y/N]"; apply on yes, discard on no or no response
+    - Unattended (CI, --json, --quiet, or no TTY) — write the proposal to .kodr/runs/<timestamp>/memory-proposal.md, peer to the run transcript, and print one notice line pointing at it; MEMORY.md is left untouched
+    - --memory-auto-apply bypasses the prompt and applies directly; opt-in only, for a pipeline that has already decided to trust the loop (e.g. a scheduled dogfood run) — never the default
+  - MEMORY.md lives at the workspace root, alongside KODR.md/AGENTS.md — human-editable, git-trackable, reviewable in a diff
+  - Applying a proposal appends; it never rewrites or drops existing MEMORY.md content, so a human's own edits survive
+  - MEMORY.md is loaded into the system prompt as its own section, separate from <workspace-instructions> (context.mjs), since one is human-authored and the other is human-approved-but-agent-written — the model (and any human reading a transcript) should be able to tell them apart
+  - MEMORY.md has a size cap (default matches the existing context.mjs file-listing style: a fixed line/token ceiling); going over it produces a notice rather than silent truncation, so a human notices and prunes instead of memory quietly losing content
+  - A run with no meaningful tool activity (e.g. the model answered with no tool call at all) skips the retrospective — nothing to learn from
+
+open_questions:
+  - What triggers "worth a retrospective"? Every run, or only non-trivial ones (tool calls above some floor, or stoppedReason != complete)? Running it unconditionally is the simplest default but spends tokens on runs that taught nothing.
+  - Should MEMORY.md be scoped per-workspace only, or is there ever a case for a user-level memory shared across projects? Starting workspace-only avoids cross-project bleed; revisit if that turns out to be too narrow.
+  - Retrospective prompt design (what specifically to ask the model to reflect on) needs its own iteration once this is implemented — not something to lock down before seeing real proposals.
+
+tests:
+  unit:
+    - retrospective is skipped when --memory is not set
+    - retrospective is skipped when remaining budget (after memoryReserve) is exhausted
+    - retrospective is skipped when the run made no tool calls
+    - retrospective call receives timeoutMs capped to the remaining run budget
+    - attended session prints the proposal and applies on a "y" response
+    - attended session discards on "n" or no response
+    - unattended session writes the proposal file and leaves MEMORY.md untouched
+    - --memory-auto-apply applies without prompting, even when unattended
+    - applying a proposal appends to existing MEMORY.md content rather than replacing it
+    - MEMORY.md is injected into the system prompt as a section distinct from workspace-instructions
+    - MEMORY.md over the size cap produces a notice instead of silent truncation
+  eval:
+    - two sequential runs in the same workspace, second run's approach visibly reflects an applied lesson from the first
