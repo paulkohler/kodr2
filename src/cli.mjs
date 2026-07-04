@@ -55,6 +55,11 @@ export async function main(argv) {
     return;
   }
 
+  if (args.command === 'replay') {
+    await runReplay(args);
+    return;
+  }
+
   if (!args.prompt) {
     process.stderr.write('Usage: kodr run "your prompt here"\n');
     process.stderr.write('Run `kodr --help` for more options.\n');
@@ -503,6 +508,10 @@ export function parseArgs(argv) {
     // standalone subcommand — preflight checks, takes no prompt
   } else if (args.command === 'stats') {
     // standalone subcommand — aggregates run records, takes no prompt
+  } else if (args.command === 'replay') {
+    // `kodr replay <last|path>` — the ref lands in args.prompt via the
+    // generic "second positional" capture above; replay reads it as a ref,
+    // not a task prompt, and re-runs the referenced record's own prompt.
   } else if (args.command && !args.prompt) {
     // Treat the command as the prompt (shorthand)
     args.prompt = args.command;
@@ -522,6 +531,7 @@ Usage:
   kodr models                     List LM Studio models and their context windows
   kodr doctor                     Preflight checks: LM Studio, a loaded model, git, Node.js version
   kodr stats                      Aggregate rates (heal, retry, compaction, verify) across saved runs
+  kodr replay <last|path>         Re-run a saved run's original prompt fresh, to check reproducibility
 
 Options:
   --cwd <path>                    Workspace directory (default: .)
@@ -578,6 +588,7 @@ Examples:
   kodr "fix the failing test" --test "node --test"   # --test is a Stop hook
   kodr "add error handling" --continue last
   kodr "/compact" --continue last
+  kodr replay last                                    # rerun the last run's own prompt fresh
 `;
   process.stdout.write(`${help.trim()}\n`);
 }
@@ -605,6 +616,66 @@ async function printStats(args) {
   const records = await loadRunRecords(runsDir);
   const stats = computeStats(records);
   process.stdout.write(`${formatStats(stats)}\n`);
+}
+
+/**
+ * `kodr replay <last|path>` -- re-run a saved run record's original prompt
+ * fresh (no prior conversation), against the same cwd/model/test command,
+ * to check whether a failure reproduces. See specs/replay.yaml.
+ */
+export async function runReplay(args) {
+  const ref = args.prompt;
+  if (!ref) {
+    process.stderr.write('Usage: kodr replay <last|path>\n');
+    process.exitCode = 1;
+    return;
+  }
+
+  const cwd = resolve(args.cwd || '.');
+  const runsDir = resolveRunsDir(cwd, args.runsDir);
+  const prior = await loadPriorRun(cwd, ref, runsDir);
+  if (!prior?.metadata?.prompt) {
+    process.stderr.write(
+      'No prior run found to replay, or it has no recorded prompt.\n',
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const options = {
+    cwd: prior.metadata.cwd || cwd,
+    baseUrl: args.baseUrl || prior.metadata.baseUrl,
+    model: args.model || prior.metadata.model,
+    testCommand: prior.metadata.testCommand || undefined,
+    maxHealTurns: prior.metadata.maxHealTurns,
+    maxRunMs: prior.metadata.maxRunMs,
+    maxToolTurns: prior.metadata.maxToolTurns,
+    envPassthrough: prior.metadata.envPassthrough,
+    contextWindow: prior.metadata.contextWindow,
+    quiet: args.quiet || args.json,
+    runsDir: args.runsDir,
+    noSave: args.noSave,
+    debug: args.debug,
+  };
+
+  try {
+    const result = await run(prior.metadata.prompt, options);
+    if (args.json) {
+      process.stdout.write(`${JSON.stringify(summarizeResult(result))}\n`);
+    }
+    process.exitCode = exitCodeFor(result, args);
+  } catch (err) {
+    if (args.json) {
+      process.stdout.write(
+        `${JSON.stringify({ stoppedReason: 'error', error: err.message })}\n`,
+      );
+    } else {
+      process.stderr.write(`Error: ${err.message}\n`);
+    }
+    if (!noFailEnabled(args)) {
+      process.exitCode = 1;
+    }
+  }
 }
 
 async function printVersion() {

@@ -120,6 +120,12 @@ describe('parseArgs', () => {
     assert.equal(args.prompt, null);
   });
 
+  it('parses the "replay" subcommand, capturing the ref as a positional', () => {
+    const args = parseArgs(['replay', 'last']);
+    assert.equal(args.command, 'replay');
+    assert.equal(args.prompt, 'last');
+  });
+
   it('treats "/compact" as the prompt', () => {
     const args = parseArgs(['/compact']);
     assert.equal(args.prompt, '/compact');

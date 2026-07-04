@@ -111,6 +111,16 @@ kodr stats 12 runs
   total tokens: 48213 in / 6104 out
 ```
 
+`kodr replay <last|path>` re-runs a saved run's original prompt fresh (no
+prior conversation), against the same cwd/model/test command it originally
+used, to check whether a failure reproduces or was a one-off model/backend
+hiccup. Unlike `--continue` (which extends a prior conversation with a new
+instruction), replay starts over with the *same original prompt*:
+
+```
+$ kodr replay last
+```
+
 ## Tools
 
 The model has these tools available:
