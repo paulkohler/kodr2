@@ -6,6 +6,7 @@ import {
   assembleResponse,
   createClient,
   hasContextHeadroom,
+  isRetryableConnectionError,
   isRetryableServerError,
   pickContextInfo,
 } from '../src/model.mjs';
@@ -187,6 +188,39 @@ describe('model HTTP client', () => {
     const client = createClient({ baseUrl, model: 'test' });
     await assert.rejects(client.chat({ messages: [] }), /HTTP 400/);
     assert.equal(calls, 1);
+  });
+
+  it('retries a chat request once after a connection reset, then succeeds', async () => {
+    let calls = 0;
+    const baseUrl = await startServer((req, res) => {
+      calls++;
+      if (calls === 1) {
+        req.socket.destroy();
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end(
+        'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
+      );
+    });
+    const client = createClient({ baseUrl, model: 'test' });
+    const result = await client.chat({ messages: [] });
+    assert.equal(calls, 2);
+    assert.equal(result.message.content, 'ok');
+  });
+
+  it('does not retry an ECONNREFUSED from chat', async () => {
+    // Nothing listens on this port -- the connection is refused every time,
+    // so a retry would be pointless (and would just slow down surfacing a
+    // real "LM Studio isn't running" error).
+    const client = createClient({
+      baseUrl: 'http://127.0.0.1:1/v1',
+      model: 'test',
+    });
+    await assert.rejects(client.chat({ messages: [] }), (err) => {
+      assert.equal(err.code, 'ECONNREFUSED');
+      return true;
+    });
   });
 
   it('gives up after maxRetries and throws the last 5xx error', async () => {
@@ -375,6 +409,43 @@ describe('isRetryableServerError', () => {
   it('is false for a non-HTTP error', () => {
     assert.equal(
       isRetryableServerError(new Error('timed out after 20ms')),
+      false,
+    );
+  });
+});
+
+describe('isRetryableConnectionError', () => {
+  it('is true for ECONNRESET and EPIPE', () => {
+    assert.equal(
+      isRetryableConnectionError(
+        Object.assign(new Error('socket hang up'), {
+          code: 'ECONNRESET',
+        }),
+      ),
+      true,
+    );
+    assert.equal(
+      isRetryableConnectionError(
+        Object.assign(new Error('broken pipe'), { code: 'EPIPE' }),
+      ),
+      true,
+    );
+  });
+
+  it('is false for ECONNREFUSED', () => {
+    assert.equal(
+      isRetryableConnectionError(
+        Object.assign(new Error('connect ECONNREFUSED'), {
+          code: 'ECONNREFUSED',
+        }),
+      ),
+      false,
+    );
+  });
+
+  it('is false for a non-connection error', () => {
+    assert.equal(
+      isRetryableConnectionError(new Error('HTTP 500: boom')),
       false,
     );
   });

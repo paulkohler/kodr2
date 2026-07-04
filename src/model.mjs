@@ -305,11 +305,14 @@ function parseSseLine(line) {
 }
 
 /**
- * Retry a chat completion on a 5xx response -- local backends (LM Studio)
- * occasionally crash mid-request on an otherwise-valid conversation (e.g. an
- * internal JSON re-parse failure), and a bare retry of the same request often
- * just works. 4xx and timeout errors are never retried: a 4xx would fail
- * identically again, and a timeout already means the model used the full
+ * Retry a chat completion on a 5xx response or a connection reset/broken
+ * pipe -- local backends (LM Studio) occasionally crash mid-request on an
+ * otherwise-valid conversation (e.g. an internal JSON re-parse failure), and
+ * a bare retry of the same request often just works, whether the crash
+ * surfaced as an HTTP 500 or a dropped socket. 4xx, ECONNREFUSED, and
+ * timeout errors are never retried: a 4xx would fail identically again,
+ * ECONNREFUSED means nothing is listening at all (a persistent problem, not
+ * a transient crash), and a timeout already means the model used the full
  * budget on that attempt.
  * @param {number} maxRetries - Extra attempts after the first (0 disables)
  */
@@ -325,13 +328,17 @@ async function streamRequestWithRetry(
     try {
       return await streamRequest(url, body, timeout, callbacks);
     } catch (err) {
-      if (attempt === maxRetries || !isRetryableServerError(err)) {
+      if (attempt === maxRetries || !isRetryableError(err)) {
         throw err;
       }
       lastErr = err;
     }
   }
   throw lastErr;
+}
+
+function isRetryableError(err) {
+  return isRetryableServerError(err) || isRetryableConnectionError(err);
 }
 
 /**
@@ -343,6 +350,21 @@ async function streamRequestWithRetry(
  */
 export function isRetryableServerError(err) {
   return /^HTTP 5\d\d:/.test(err.message);
+}
+
+const RETRYABLE_CONNECTION_ERROR_CODES = new Set(['ECONNRESET', 'EPIPE']);
+
+/**
+ * Whether an error from streamRequest is a connection reset or broken pipe --
+ * the socket-level equivalent of a 5xx: the backend accepted the connection
+ * and then dropped it mid-request (a crash, or a restart), as opposed to
+ * ECONNREFUSED (nothing listening at all -- a persistent problem no retry
+ * fixes) or a timeout (already used the full budget on that attempt).
+ * @param {Error} err
+ * @returns {boolean}
+ */
+export function isRetryableConnectionError(err) {
+  return RETRYABLE_CONNECTION_ERROR_CODES.has(err.code);
 }
 
 function streamRequest(url, body, timeout, callbacks) {
