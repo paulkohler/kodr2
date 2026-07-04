@@ -4,14 +4,21 @@
  */
 
 import { join, resolve } from 'node:path';
-import { buildSystemPrompt } from './context.mjs';
 import {
-  DEFAULT_MAX_RETRIES,
-  createClient,
-  hasContextHeadroom,
-} from './model.mjs';
-import { createToolRegistry } from './tools/index.mjs';
+  compactMessages,
+  configuredContextWindow,
+  DEFAULT_CONTEXT_WINDOW,
+  isCompactCommand,
+} from './compact.mjs';
+import { buildSystemPrompt } from './context.mjs';
 import { buildEnv } from './env.mjs';
+import {
+  formatHeartbeat,
+  formatNotice,
+  formatSummary,
+  formatVerification,
+} from './format.mjs';
+import { heal } from './heal.mjs';
 import {
   loadHooks,
   runSessionHooks,
@@ -20,25 +27,23 @@ import {
   stopHooks,
   toolHooks,
 } from './hooks.mjs';
-import { heal } from './heal.mjs';
 import {
-  MAX_TOOL_TURNS,
+  incidentHeartbeatIntervalMs,
+  installIncidentHandlers,
+  sweepOrphanedHeartbeats,
+} from './incident.mjs';
+import {
+  createClient,
+  DEFAULT_MAX_RETRIES,
+  hasContextHeadroom,
+} from './model.mjs';
+import {
   isRunBudgetExceeded,
+  MAX_TOOL_TURNS,
   remainingRunBudgetMs,
   runToolLoop,
 } from './tool-loop.mjs';
-import {
-  formatHeartbeat,
-  formatNotice,
-  formatVerification,
-  formatSummary,
-} from './format.mjs';
-import {
-  DEFAULT_CONTEXT_WINDOW,
-  compactMessages,
-  configuredContextWindow,
-  isCompactCommand,
-} from './compact.mjs';
+import { createToolRegistry } from './tools/index.mjs';
 
 // Re-exported for callers (and tests) that imported them from the harness.
 export { isRunBudgetExceeded, remainingRunBudgetMs };
@@ -62,6 +67,9 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  * @param {number} [options.maxRetries] - Retries for a 5xx chat response (0 disables; default KODR_MODEL_RETRIES or 1)
  * @param {string} [options.runsDir] - Where to write run transcripts (default cwd/.kodr/runs or KODR_RUNS_DIR)
  * @param {boolean} [options.noSave] - Skip writing the run transcript (also KODR_NO_SAVE)
+ * @param {number} [options.incidentHeartbeatMs] - Interval for the on-disk heartbeat used
+ *   to detect a run that never exited cleanly (0 disables; default KODR_INCIDENT_HEARTBEAT_MS
+ *   or 30000). No effect when noSave is set.
  * @returns {Promise<object>} Run result
  */
 export async function run(prompt, options) {
@@ -78,6 +86,19 @@ export async function run(prompt, options) {
   } = options;
   const runsDir = resolveRunsDir(cwd, options.runsDir);
   const noSave = isSaveDisabled(options.noSave);
+
+  // A previous run's leftover heartbeat is the only evidence of a true
+  // SIGKILL or host crash, since nothing runs in-process at the moment
+  // that happens -- sweep for one before this run writes its own.
+  let disposeIncidentTracking = async () => {};
+  if (!noSave) {
+    await sweepOrphanedHeartbeats(runsDir).catch(() => {});
+    disposeIncidentTracking = await installIncidentHandlers({
+      runsDir,
+      startedAt,
+      heartbeatMs: incidentHeartbeatIntervalMs(options.incidentHeartbeatMs),
+    });
+  }
 
   const client = createClient({
     baseUrl: options.baseUrl,
@@ -139,7 +160,7 @@ export async function run(prompt, options) {
   // On-demand compaction: "/compact" compresses the prior conversation
   // instead of running a new task.
   if (isCompactCommand(prompt)) {
-    return await runManualCompaction({
+    const compactionResult = await runManualCompaction({
       client,
       modelId,
       cwd,
@@ -153,6 +174,8 @@ export async function run(prompt, options) {
       heartbeatMs,
       onHeartbeat: onModelHeartbeat,
     });
+    await disposeIncidentTracking();
+    return compactionResult;
   }
 
   // Hooks are loaded once: SessionStart primes the conversation, Stop hooks
@@ -323,6 +346,7 @@ export async function run(prompt, options) {
     process.stderr.write(`${formatSummary(result)}\n`);
   }
 
+  await disposeIncidentTracking();
   return result;
 }
 

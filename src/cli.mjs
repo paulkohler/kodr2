@@ -2,14 +2,14 @@
  * CLI argument parsing and dispatch.
  */
 
-import { resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
-import { DEFAULT_HEARTBEAT_MS, resolveRunsDir, run } from './harness.mjs';
-import { DEFAULT_MAX_RETRIES } from './model.mjs';
-import { MAX_TOOL_TURNS } from './tool-loop.mjs';
-import { createClient } from './model.mjs';
-import { formatModelsList } from './format.mjs';
+import { resolve } from 'node:path';
 import { parseEnvNames } from './env.mjs';
+import { formatModelsList } from './format.mjs';
+import { DEFAULT_HEARTBEAT_MS, resolveRunsDir, run } from './harness.mjs';
+import { DEFAULT_INCIDENT_HEARTBEAT_MS } from './incident.mjs';
+import { createClient, DEFAULT_MAX_RETRIES } from './model.mjs';
+import { MAX_TOOL_TURNS } from './tool-loop.mjs';
 
 /**
  * Parse CLI arguments and run.
@@ -61,6 +61,16 @@ export async function main(argv) {
     process.exitCode = 1;
     return;
   }
+  if (
+    !Number.isInteger(args.incidentHeartbeatMs) ||
+    args.incidentHeartbeatMs < 0
+  ) {
+    process.stderr.write(
+      '--incident-heartbeat-ms must be a non-negative integer.\n',
+    );
+    process.exitCode = 1;
+    return;
+  }
   if (!Number.isInteger(args.modelRetries) || args.modelRetries < 0) {
     process.stderr.write('--model-retries must be a non-negative integer.\n');
     process.exitCode = 1;
@@ -85,6 +95,7 @@ export async function main(argv) {
     maxRunMs: args.maxRunMs,
     maxToolTurns: args.maxToolTurns,
     heartbeatMs: args.heartbeatMs,
+    incidentHeartbeatMs: args.incidentHeartbeatMs,
     maxRetries: args.modelRetries,
     quiet: args.quiet || args.json,
     envPassthrough: args.env,
@@ -208,6 +219,7 @@ export function parseArgs(argv) {
     maxRunMs: 0,
     maxToolTurns: MAX_TOOL_TURNS,
     heartbeatMs: DEFAULT_HEARTBEAT_MS,
+    incidentHeartbeatMs: DEFAULT_INCIDENT_HEARTBEAT_MS,
     modelRetries: DEFAULT_MAX_RETRIES,
     contextWindow: null,
     quiet: false,
@@ -282,6 +294,11 @@ export function parseArgs(argv) {
     }
     if (arg === '--heartbeat-ms' && argv[i + 1]) {
       args.heartbeatMs = parseInt(argv[++i], 10);
+      i++;
+      continue;
+    }
+    if (arg === '--incident-heartbeat-ms' && argv[i + 1]) {
+      args.incidentHeartbeatMs = parseInt(argv[++i], 10);
       i++;
       continue;
     }
@@ -371,6 +388,9 @@ Options:
   --max-run-ms <n>                Stop between turns after this many ms (default: 0, disabled)
   --max-tool-turns <n>            Tool-turn ceiling per loop (default: 20)
   --heartbeat-ms <n>              Stop-hook "still running" notice interval (or KODR_HEARTBEAT_MS; default: 30000, 0 disables)
+  --incident-heartbeat-ms <n>     On-disk heartbeat interval for detecting a run that
+                                  never exited cleanly (or KODR_INCIDENT_HEARTBEAT_MS;
+                                  default: 30000, 0 disables)
   --model-retries <n>             Retries for a 5xx chat response, e.g. a local backend crash (or KODR_MODEL_RETRIES; default: 1, 0 disables)
   --context-window <n>            Max context window in tokens; compact at 80% (default: 8192, 0 disables)
   --env <a,b,c>                   Extra env vars to expose to commands (CSV of names)

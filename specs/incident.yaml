@@ -1,0 +1,128 @@
+name: incident telemetry
+status: implemented
+description: >
+  Structured telemetry for a run that terminates unexpectedly, written
+  alongside the run transcript in the runs directory. Catchable
+  terminations (SIGINT, SIGTERM, an uncaught exception or unhandled
+  rejection that escapes the harness's own try/catch) get a normal
+  incident record before the process exits. A true SIGKILL, an OOM kill,
+  or a full host freeze can't run any code at the moment it happens — the
+  only way to notice those after the fact is a heartbeat file that the
+  *next* run finds still sitting there with no matching clean exit, which
+  is itself the evidence.
+
+  This doesn't prevent anything or change run behavior in the common
+  case; it turns "empty log, shrug, move on" into a growing structured
+  dataset that might reveal a pattern (memory pressure, a specific
+  request shape, time-of-day) that one-off manual forensics never found.
+
+inputs:
+  runsDir:
+    type: string
+    required: true
+    description: Same runs directory the run transcript is written to
+  startedAt:
+    type: Date
+    required: true
+    description: When the run began, for elapsed-time reporting
+  heartbeatMs:
+    type: number
+    required: false
+    description: >
+      Interval in ms for updating the on-disk heartbeat used to detect an
+      orphaned run at the start of the next one (default 30,000 —
+      KODR_INCIDENT_HEARTBEAT_MS or --incident-heartbeat-ms; 0 disables
+      the heartbeat and therefore orphan detection, but signal/exception
+      handling still runs)
+  exit:
+    type: function
+    required: false
+    description: >
+      Overridable for tests; defaults to process.exit. Never called
+      before the incident record (and, for a caught signal, the
+      heartbeat file) has finished writing.
+
+outputs:
+  dispose:
+    type: function
+    description: >
+      Call on normal run completion. Clears the heartbeat interval,
+      removes the signal/exception listeners, and deletes this run's
+      heartbeat file — a clean exit needs no orphan record. Safe to call
+      more than once.
+
+constraints:
+  - >
+    Incident telemetry is skipped entirely when run() is called with
+    noSave (or KODR_NO_SAVE) — a benchmark/container run that wants a
+    clean workspace shouldn't get extra files it didn't ask for.
+  - >
+    A previous run's leftover heartbeat file (found via
+    sweepOrphanedHeartbeats) is swept into an incident record with
+    reason "orphaned-heartbeat" at the very start of every new run, before
+    that run writes its own heartbeat. This is the only way a genuine
+    SIGKILL or host crash is ever recorded, since nothing runs in-process
+    at the moment it happens.
+  - >
+    A heartbeat whose pid is still alive (checked via process.kill(pid, 0))
+    is left alone entirely — neither reported nor deleted. Two `kodr` runs
+    can legitimately share a runsDir (two terminal tabs, a script looping
+    over tasks); without this check, one run's sweep would delete the
+    other's live heartbeat and falsely report it as an orphan.
+  - >
+    writeIncident's filename includes a random suffix, not just a
+    millisecond-resolution timestamp — multiple incidents can be written
+    within the same process in quick succession (a double signal, sweeping
+    several stale heartbeats in one pass), and a timestamp alone collides
+    and silently overwrites in that case.
+  - >
+    SIGINT and SIGTERM are recorded with reason "signal" and the signal
+    name — distinguishing an operator's intentional Ctrl-C from a crash,
+    rather than requiring that distinction to be guessed after the fact.
+    The process still exits with the conventional 128+signal code.
+  - >
+    uncaughtException and unhandledRejection are recorded with reason
+    "uncaughtException"/"unhandledRejection" and the error's message and
+    stack, then the process exits 1 — this is a defensive backstop, since
+    the harness's own try/catch around the tool loop already converts most
+    in-run errors into a normal stoppedReason: 'error' result rather than
+    letting them escape this far. Node's own default behavior for both
+    events is already to crash the whole process (unhandledRejection has
+    crashed by default since Node 15) — installing this handler doesn't
+    make anything newly fatal, it just records what would otherwise exit
+    with no trace. This does mean a stray rejection anywhere in the
+    process (a hook helper, a forgotten .catch()) still tears down
+    whatever run() was doing, same as it would without this feature.
+  - >
+    Every incident record includes a cheap system snapshot
+    (process.memoryUsage(), process.uptime()) — no external tooling (e.g.
+    an LM Studio CLI) is shelled out to, since none exists in this
+    codebase; model state isn't captured today.
+  - >
+    The descendant-tree kill in shell.mjs (see specs/shell.yaml) handles
+    runaway *subprocesses* a command spawns. This spec is the harness's
+    own process-level lifecycle — a different layer, same broad goal of
+    not leaving a hang or a kill unexplained.
+  - >
+    dispose() is idempotent and always awaited before the process exits,
+    so the heartbeat file is reliably gone before an intentionally-caught
+    termination could also be mistaken for an orphan on the next run's
+    sweep.
+
+tests:
+  unit:
+    - writeIncident writes a JSON file into runsDir and returns its path
+    - writeIncident writes a distinct file for every concurrent call, even in the same millisecond
+    - sweepOrphanedHeartbeats turns a leftover heartbeat into an incident record
+    - sweepOrphanedHeartbeats removes the heartbeat file after sweeping it
+    - sweepOrphanedHeartbeats returns an empty array when runsDir has no heartbeats
+    - sweepOrphanedHeartbeats tolerates a corrupt heartbeat file without throwing
+    - sweepOrphanedHeartbeats writes a distinct incident for every dead heartbeat swept in one call
+    - sweepOrphanedHeartbeats leaves a heartbeat whose pid is still alive untouched, not reported as an orphan
+    - installIncidentHandlers writes an initial heartbeat file when heartbeatMs > 0
+    - installIncidentHandlers writes no heartbeat file when heartbeatMs is 0
+    - dispose() removes the heartbeat file
+    - dispose() is safe to call more than once
+    - a SIGINT reaching the installed handler writes a signal incident and calls exit with 130
+    - an uncaughtException reaching the installed handler writes an incident and calls exit with 1
+    - incidentHeartbeatIntervalMs resolves option, then KODR_INCIDENT_HEARTBEAT_MS, then the default
