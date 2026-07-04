@@ -266,7 +266,7 @@ function isNoFindings(notes) {
  *   directly to MEMORY.md (autoApply, or an attended "yes") has nothing to do with
  *   runsDir hygiene and must keep working under noSave
  * @param {function} [params.promptYesNoFn] - Overridable for tests; defaults to this module's promptYesNo
- * @returns {Promise<{ proposed: boolean, notes?: string, applied?: boolean, proposalPath?: string|null, usage?: object, error?: string }>}
+ * @returns {Promise<{ proposed: boolean, notes?: string, applied?: boolean, proposalPath?: string|null, usage?: object, retries?: number, error?: string }>}
  */
 export async function runMemoryRetrospective(params) {
   const {
@@ -311,11 +311,12 @@ export async function runMemoryRetrospective(params) {
       timeoutMs: budgetMs,
     });
   } catch (err) {
-    return { proposed: false, error: err.message };
+    return { proposed: false, error: err.message, retries: err.retries ?? 0 };
   }
 
   const notes = (response.message.content || '').trim();
   const usage = response.usage || { prompt: 0, completion: 0 };
+  const retries = response.retries || 0;
 
   if (!notes || isNoFindings(notes)) {
     return {
@@ -324,12 +325,20 @@ export async function runMemoryRetrospective(params) {
       applied: false,
       proposalPath: null,
       usage,
+      retries,
     };
   }
 
   if (autoApply) {
     await appendMemoryNotes(cwd, notes);
-    return { proposed: true, notes, applied: true, proposalPath: null, usage };
+    return {
+      proposed: true,
+      notes,
+      applied: true,
+      proposalPath: null,
+      usage,
+      retries,
+    };
   }
 
   if (attended) {
@@ -344,6 +353,7 @@ export async function runMemoryRetrospective(params) {
         applied: true,
         proposalPath: null,
         usage,
+        retries,
       };
     }
     if (confirmed === null) {
@@ -358,9 +368,17 @@ export async function runMemoryRetrospective(params) {
         applied: false,
         proposalPath: await persistProposal(runsDir, notes, noSave),
         usage,
+        retries,
       };
     }
-    return { proposed: true, notes, applied: false, proposalPath: null, usage };
+    return {
+      proposed: true,
+      notes,
+      applied: false,
+      proposalPath: null,
+      usage,
+      retries,
+    };
   }
 
   return {
@@ -369,6 +387,7 @@ export async function runMemoryRetrospective(params) {
     applied: false,
     proposalPath: await persistProposal(runsDir, notes, noSave),
     usage,
+    retries,
   };
 }
 

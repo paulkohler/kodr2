@@ -111,7 +111,7 @@ export function renderTranscript(messages) {
  * @param {number} [params.timeoutMs] - Per-call timeout override (e.g. the run's remaining budget)
  * @param {number} [params.heartbeatMs] - Interval for onHeartbeat "still waiting" notices (0 disables)
  * @param {function} [params.onHeartbeat] - Called with elapsed ms on each heartbeat tick
- * @returns {Promise<{ messages: Array, summary: string, usage: { prompt: number, completion: number }, error?: string }>}
+ * @returns {Promise<{ messages: Array, summary: string, usage: { prompt: number, completion: number }, retries: number, error?: string }>}
  */
 export async function compactMessages(params) {
   const { client, modelId, messages, quiet = false, timeoutMs } = params;
@@ -120,7 +120,12 @@ export async function compactMessages(params) {
   const history = messages.filter((message) => message.role !== 'system');
 
   if (history.length === 0) {
-    return { messages: messages.slice(), summary: '', usage: zeroUsage() };
+    return {
+      messages: messages.slice(),
+      summary: '',
+      usage: zeroUsage(),
+      retries: 0,
+    };
   }
 
   const transcript = renderTranscript(history);
@@ -145,6 +150,7 @@ export async function compactMessages(params) {
       messages: messages.slice(),
       summary: '',
       usage: zeroUsage(),
+      retries: err.retries ?? 0,
       error: err.message,
     };
   }
@@ -155,6 +161,7 @@ export async function compactMessages(params) {
       messages: messages.slice(),
       summary: '',
       usage: response.usage || zeroUsage(),
+      retries: response.retries || 0,
       error: 'empty summary',
     };
   }
@@ -163,6 +170,7 @@ export async function compactMessages(params) {
     messages: buildCompacted(system, summary),
     summary,
     usage: response.usage || zeroUsage(),
+    retries: response.retries || 0,
   };
 }
 

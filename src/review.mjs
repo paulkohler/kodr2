@@ -125,6 +125,7 @@ async function runReviewAttempt(params) {
     findings: loop.finalText,
     toolTurns: loop.toolTurns,
     usage: loop.usage,
+    retries: loop.retries || 0,
   };
 }
 
@@ -147,7 +148,7 @@ async function runReviewAttempt(params) {
  * @param {number} [params.minToolCalls] - Tool-call floor before a review counts as grounded
  * @param {number} [params.maxToolTurns] - Tool-turn ceiling per attempt
  * @param {number} [params.diffTimeoutMs] - Timeout for the git diff call (default 30 seconds — KODR_REVIEW_DIFF_TIMEOUT_MS)
- * @returns {Promise<{ skipped: boolean, findings?: string, grounded?: boolean, toolTurns?: number, usage?: object }>}
+ * @returns {Promise<{ skipped: boolean, findings?: string, grounded?: boolean, toolTurns?: number, usage?: object, retries?: number }>}
  */
 export async function runReview(params) {
   const {
@@ -194,6 +195,7 @@ export async function runReview(params) {
     messages: buildReviewMessages(filesChanged, diff),
   });
   const totalUsage = { ...attempt.usage };
+  let totalRetries = attempt.retries || 0;
 
   if (attempt.toolTurns < minToolCalls) {
     const nudge =
@@ -206,6 +208,7 @@ export async function runReview(params) {
     });
     totalUsage.prompt += attempt.usage.prompt;
     totalUsage.completion += attempt.usage.completion;
+    totalRetries += attempt.retries || 0;
   }
 
   return {
@@ -214,5 +217,6 @@ export async function runReview(params) {
     grounded: attempt.toolTurns >= minToolCalls,
     toolTurns: attempt.toolTurns,
     usage: totalUsage,
+    retries: totalRetries,
   };
 }

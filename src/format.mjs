@@ -110,6 +110,10 @@ export function formatSummary(result) {
     lines.push(`${DIM}healed:${RESET} ${result.healed}`);
   }
 
+  if (result.retries) {
+    lines.push(`${DIM}retries:${RESET} ${result.retries}`);
+  }
+
   if (result.commits) {
     lines.push(...formatCommitLines(result.commits));
   }

@@ -214,6 +214,39 @@ describe('runToolLoop', () => {
     assert.ok(messages.some((m) => m.role === 'tool'));
   });
 
+  it('accumulates retries across turns', async () => {
+    const client = scriptedClient([
+      { ...toolCallTurn('list_files', {}), retries: 1 },
+      { ...finalTurn('fixed'), retries: 2 },
+    ]);
+    const tools = {
+      definitions: () => [],
+      dispatch: async () => ({ ok: true }),
+    };
+    const loop = await runToolLoop({
+      client,
+      modelId: 'm',
+      messages: [],
+      tools,
+      quiet: true,
+    });
+
+    assert.equal(loop.retries, 3);
+  });
+
+  it('defaults retries to 0 when the model client never reports any', async () => {
+    const client = scriptedClient([finalTurn('done')]);
+    const loop = await runToolLoop({
+      client,
+      modelId: 'm',
+      messages: [],
+      tools: stubTools,
+      quiet: true,
+    });
+
+    assert.equal(loop.retries, 0);
+  });
+
   it('stops at the tool-turn ceiling when the model never finishes', async () => {
     const client = scriptedClient([toolCallTurn('list_files', {})]);
     const loop = await runToolLoop({

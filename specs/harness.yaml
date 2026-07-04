@@ -55,6 +55,16 @@ outputs:
   verification:
     type: object
     description: "{ passed, command, output, exitCode }"
+  retries:
+    type: number
+    description: >
+      Total retried model requests across the whole run -- the main tool
+      loop, compaction summaries, heal turns, the review pass, and the
+      memory retrospective. Not itself a failure signal (a retry that
+      succeeds is the system working as designed), but a run with a high
+      count is a visible sign of a flaky local backend that would
+      otherwise only show up in live stderr, one line at a time, never
+      aggregated anywhere.
   noOpCompletion:
     type: boolean
     description: >
@@ -91,6 +101,7 @@ constraints:
   - The main run and the heal pass share one tool loop, limited to maxToolTurns (default 20, --max-tool-turns) to prevent runaway
   - Optional maxRunMs stops between turns, caps tool and verification command timeouts, before healing, and during healing when the budget is exceeded
   - Each model request is capped to the run's *remaining* budget (not a fresh maxRunMs-length timeout every turn), so a request started near the deadline cannot itself outlive it
+  - Retries used by every model request in the run (main loop, compaction, heal, review, memory) are summed into a single retries count on the result, the --json summary, and the saved run record
   - When maxRunMs is set, the initial verification is capped to hold back a heal reserve (KODR_HEAL_RESERVE / healReserve option, default 0.25) so a hanging Stop hook cannot starve the heal pass
   - While a Stop hook runs, a heartbeat notice is written to stderr on an interval (KODR_HEARTBEAT_MS / --heartbeat-ms, default 30,000ms, 0 disables), tagged with the hook's name, so a legitimately slow command (a big test suite, a cold build) doesn't look indistinguishable from a stuck harness for its whole timeout
   - The same heartbeat interval also applies to every chat request (the main tool loop, heal turns, and compaction summaries) -- a large prompt can spend minutes in prefill before the first token streams, which is otherwise silent for the whole request timeout, indistinguishable from a stuck process to any external supervisor watching for output
@@ -125,6 +136,8 @@ tests:
     - summarizeResult produces a compact machine-readable run summary
     - summarizeResult surfaces a no-op completion
     - a run that completes without touching the workspace sets noOpCompletion and emits a notice
+    - retries from the main tool loop, heal, review, and memory are summed into the run's total retries count
+    - a run record with zero retries reports retries: 0, not undefined
     - CLI process fails when run stopped before completion
     - maxRunMs budget detection works
     - remaining run budget can be used as a command timeout

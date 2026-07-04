@@ -51,7 +51,7 @@ export function createClient(options = {}) {
    *   streams, which looks identical to a stuck request from the outside.
    * @param {function} [params.onHeartbeat] - Called with elapsed ms on each
    *   heartbeat tick
-   * @returns {Promise<{ message: object, usage: object }>}
+   * @returns {Promise<{ message: object, usage: object, retries: number }>}
    */
   async function chat(params) {
     const body = {
@@ -315,6 +315,11 @@ function parseSseLine(line) {
  * a transient crash), and a timeout already means the model used the full
  * budget on that attempt.
  * @param {number} maxRetries - Extra attempts after the first (0 disables)
+ * @returns {Promise<{ message: object, usage: object, retries: number }>} The
+ *   `retries` field reports how many retries were actually used (0 when the
+ *   first attempt succeeded), so a flaky-backend pattern is visible in the
+ *   run record rather than only in live stderr. When every attempt fails,
+ *   the thrown Error carries the same count as its own `retries` field.
  */
 async function streamRequestWithRetry(
   url,
@@ -326,14 +331,17 @@ async function streamRequestWithRetry(
   let lastErr;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      return await streamRequest(url, body, timeout, callbacks);
+      const result = await streamRequest(url, body, timeout, callbacks);
+      return { ...result, retries: attempt };
     } catch (err) {
       if (attempt === maxRetries || !isRetryableError(err)) {
+        err.retries = attempt;
         throw err;
       }
       lastErr = err;
     }
   }
+  lastErr.retries = maxRetries;
   throw lastErr;
 }
 

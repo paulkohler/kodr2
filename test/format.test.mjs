@@ -127,6 +127,17 @@ describe('formatSummary', () => {
     assert.ok(out.includes('100'));
     assert.ok(out.includes('50'));
   });
+
+  it('includes retries when at least one happened', () => {
+    const out = formatSummary({ retries: 2 });
+    assert.ok(out.includes('retries'));
+    assert.ok(out.includes('2'));
+  });
+
+  it('omits the retries line when there were none', () => {
+    const out = formatSummary({ retries: 0 });
+    assert.ok(!out.includes('retries'));
+  });
 });
 
 describe('formatModelsList', () => {

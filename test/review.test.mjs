@@ -226,6 +226,26 @@ describe('runReview', () => {
     assert.equal(result.usage.completion, 3 + 5);
   });
 
+  it('combines chat-call retries across both attempts when a nudge retry happens', async () => {
+    await writeFile(join(tmpDir, 'a.mjs'), 'x');
+    const client = scriptedClient([
+      { ...finalTurn('Ungrounded.'), retries: 1 },
+      { ...toolCallTurn('read_file', { path: 'a.mjs' }), retries: 1 },
+      toolCallTurn('read_file', { path: 'a.mjs' }),
+      finalTurn('Grounded.'),
+    ]);
+
+    const result = await runReview({
+      client,
+      modelId: 'reviewer',
+      cwd: tmpDir,
+      filesChanged: ['a.mjs'],
+      minToolCalls: 2,
+    });
+
+    assert.equal(result.retries, 2);
+  });
+
   it('includes a git diff of the changed files in the prompt when one is available', async () => {
     execFileSync('git', ['init'], { cwd: tmpDir });
     execFileSync('git', ['config', 'user.email', 'test@test.com'], {

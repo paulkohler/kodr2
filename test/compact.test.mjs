@@ -247,6 +247,48 @@ describe('compactMessages', () => {
     assert.deepEqual(result.messages, messages);
   });
 
+  it('reports retries used by the summary chat call', async () => {
+    const client = scriptedClient([
+      { ...finalTurn('SUMMARY OF WORK'), retries: 1 },
+    ]);
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'task' },
+    ];
+
+    const result = await compactMessages({
+      client,
+      modelId: 'm',
+      messages,
+      quiet: true,
+    });
+
+    assert.equal(result.retries, 1);
+  });
+
+  it('reports retries from the error when summarization ultimately fails', async () => {
+    const client = {
+      async chat() {
+        const err = new Error('model offline');
+        err.retries = 1;
+        throw err;
+      },
+    };
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'task' },
+    ];
+
+    const result = await compactMessages({
+      client,
+      modelId: 'm',
+      messages,
+      quiet: true,
+    });
+
+    assert.equal(result.retries, 1);
+  });
+
   it('reports an empty summary as an error and keeps messages', async () => {
     const client = scriptedClient([finalTurn('   ')]);
     const messages = [
@@ -312,6 +354,30 @@ describe('runToolLoop compaction', () => {
       messages.some((m) => m.role === 'tool'),
       false,
     );
+  });
+
+  it("adds the compaction summary call's retries to the run total", async () => {
+    const client = scriptedClient([
+      toolCallTurn('list_files', {}, 900),
+      { ...finalTurn('COMPACTED SUMMARY', 5), retries: 2 },
+      finalTurn('all done', 5),
+    ]);
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'task' },
+    ];
+
+    const loop = await runToolLoop({
+      client,
+      modelId: 'm',
+      messages,
+      tools: stubTools,
+      quiet: true,
+      contextWindow: 1000,
+    });
+
+    assert.equal(loop.compactions, 1);
+    assert.equal(loop.retries, 2);
   });
 
   it('forwards heartbeatMs and onHeartbeat to the compaction summary call', async () => {

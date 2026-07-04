@@ -235,6 +235,49 @@ describe('model HTTP client', () => {
     assert.equal(calls, 3);
   });
 
+  it('reports retries: 0 on a chat result when the first attempt succeeds', async () => {
+    const baseUrl = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end(
+        'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
+      );
+    });
+    const client = createClient({ baseUrl, model: 'test' });
+    const result = await client.chat({ messages: [] });
+    assert.equal(result.retries, 0);
+  });
+
+  it('reports the number of retries used after a retried 5xx', async () => {
+    let calls = 0;
+    const baseUrl = await startServer((_req, res) => {
+      calls++;
+      if (calls === 1) {
+        res.writeHead(500);
+        res.end('internal error');
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end(
+        'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
+      );
+    });
+    const client = createClient({ baseUrl, model: 'test' });
+    const result = await client.chat({ messages: [] });
+    assert.equal(result.retries, 1);
+  });
+
+  it('attaches a retries count to the error thrown after exhausting maxRetries', async () => {
+    const baseUrl = await startServer((_req, res) => {
+      res.writeHead(502);
+      res.end('bad gateway');
+    });
+    const client = createClient({ baseUrl, model: 'test', maxRetries: 2 });
+    await assert.rejects(client.chat({ messages: [] }), (err) => {
+      assert.equal(err.retries, 2);
+      return true;
+    });
+  });
+
   it('maxRetries: 0 disables retrying', async () => {
     let calls = 0;
     const baseUrl = await startServer((_req, res) => {

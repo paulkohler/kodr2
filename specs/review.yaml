@@ -94,6 +94,9 @@ outputs:
   usage:
     type: object
     description: Combined prompt/completion token usage across both attempts
+  retries:
+    type: number
+    description: Combined retries used by both attempts' chat calls
 
 constraints:
   - >
@@ -146,6 +149,7 @@ tests:
     - marks grounded: false when the retry is still under minToolCalls, but still returns its findings
     - does not retry when minToolCalls is 0
     - combines usage across both attempts when a retry happens
+    - combines chat-call retries across both attempts when a nudge retry happens
     - includes a git diff of the changed files in the prompt when one is available
     - falls back to no diff without erroring when git is unavailable or the workspace isn't a repo
     - minReviewToolCalls resolves option, then KODR_REVIEW_MIN_TOOL_CALLS, then the default

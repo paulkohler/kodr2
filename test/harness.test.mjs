@@ -42,6 +42,7 @@ describe('createRunRecord', () => {
         healed: false,
         healTurns: 1,
         noOpCompletion: false,
+        retries: 2,
         messages: [],
       },
       {
@@ -60,6 +61,15 @@ describe('createRunRecord', () => {
     assert.equal(record.verified, true);
     assert.equal(record.healTurns, 1);
     assert.equal(record.noOpCompletion, false);
+    assert.equal(record.retries, 2);
+  });
+
+  it('defaults retries to 0 rather than undefined', () => {
+    const record = createRunRecord(
+      { metadata: {}, filesChanged: [], toolTurns: 0, usage: {}, messages: [] },
+      {},
+    );
+    assert.equal(record.retries, 0);
   });
 });
 
@@ -262,6 +272,53 @@ describe('no-op completion', () => {
       assert.equal(result.stoppedReason, 'complete');
       assert.equal(result.noOpCompletion, true);
       assert.deepEqual(result.filesChanged, []);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('retries telemetry', () => {
+  it("sums a retried model request into the run's total retries", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'kodr-retries-'));
+    let calls = 0;
+    const server = createServer((req, res) => {
+      if (req.url === '/api/v0/models') {
+        res.writeHead(404);
+        res.end('not found');
+        return;
+      }
+      calls++;
+      if (calls === 1) {
+        res.writeHead(500);
+        res.end('internal error');
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end(
+        'data: {"choices":[{"delta":{"role":"assistant","content":"done"}}]}\n\n' +
+          'data: [DONE]\n\n',
+      );
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address();
+
+    try {
+      const result = await run('do work', {
+        cwd,
+        baseUrl: `http://127.0.0.1:${port}`,
+        model: 'test',
+        quiet: true,
+      });
+
+      assert.equal(result.stoppedReason, 'complete');
+      assert.equal(result.retries, 1);
+
+      const runDir = join(cwd, '.kodr', 'runs');
+      const files = await readdir(runDir);
+      const record = JSON.parse(await readFile(join(runDir, files[0]), 'utf8'));
+      assert.equal(record.retries, 1);
     } finally {
       await new Promise((resolve) => server.close(resolve));
       await rm(cwd, { recursive: true, force: true });

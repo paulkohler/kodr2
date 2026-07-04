@@ -67,6 +67,9 @@ outputs:
   usage:
     type: object
     description: "{ prompt, completion } tokens spent generating the retrospective"
+  retries:
+    type: number
+    description: Retries the retrospective chat call used (0 if it succeeded on the first attempt, or was never attempted)
 
 constraints:
   - Off by default; opt in with --memory (or KODR_MEMORY). The drift risk below is real enough that this shouldn't be silently on until it's been used and trusted.
@@ -163,5 +166,6 @@ tests:
     - promptYesNo resolves to null, not a hang, when no answer is ever obtained
     - an attended prompt timeout falls back to a persisted proposal rather than discarding the notes
     - concurrent appendMemoryNotes calls never lose an entry
+    - the retrospective result reports retries used by its chat call
   eval:
     - two sequential runs in the same workspace, second run's approach visibly reflects an applied lesson from the first

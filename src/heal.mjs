@@ -30,7 +30,7 @@ const DEFAULT_MAX_TURNS = 3;
  * @param {Record<string, string>} [params.commandEnv] - Curated env (for tool hooks)
  * @param {number} [params.heartbeatMs] - Interval for "still waiting on a model response" notices (0 disables)
  * @param {function} [params.onHeartbeat] - Called with elapsed ms on each heartbeat tick
- * @returns {Promise<{ healed: boolean, turns: number, verification: object, compactions: number, usage: { prompt: number, completion: number } }>}
+ * @returns {Promise<{ healed: boolean, turns: number, verification: object, compactions: number, usage: { prompt: number, completion: number }, retries: number }>}
  */
 export async function heal(params) {
   const {
@@ -56,6 +56,7 @@ export async function heal(params) {
 
   let lastOutput = failure.output;
   let compactions = 0;
+  let totalRetries = 0;
   const totalUsage = { prompt: 0, completion: 0 };
 
   for (let turn = 1; turn <= maxTurns; turn++) {
@@ -98,6 +99,7 @@ ${lastOutput}
     totalUsage.prompt += loop.usage.prompt;
     totalUsage.completion += loop.usage.completion;
     compactions += loop.compactions || 0;
+    totalRetries += loop.retries || 0;
 
     // Re-verify
     const result = await verifyFn();
@@ -108,6 +110,7 @@ ${lastOutput}
         verification: result,
         compactions,
         usage: totalUsage,
+        retries: totalRetries,
       };
     }
 
@@ -119,6 +122,7 @@ ${lastOutput}
         verification: result,
         compactions,
         usage: totalUsage,
+        retries: totalRetries,
       };
     }
 
@@ -130,6 +134,7 @@ ${lastOutput}
         verification: result,
         compactions,
         usage: totalUsage,
+        retries: totalRetries,
       };
     }
 
@@ -144,6 +149,7 @@ ${lastOutput}
     verification: finalResult,
     compactions,
     usage: totalUsage,
+    retries: totalRetries,
   };
 }
 

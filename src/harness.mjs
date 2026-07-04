@@ -308,6 +308,7 @@ export async function run(prompt, options) {
     const totalUsage = loop.usage;
     const { completed, stoppedReason, toolTurns } = loop;
     let compactions = loop.compactions;
+    let totalRetries = loop.retries || 0;
 
     // The model never produced a final response — it ran out of turns or budget.
     if (!completed && !quiet) {
@@ -326,6 +327,7 @@ export async function run(prompt, options) {
       stoppedReason,
       usage: totalUsage,
       compactions,
+      retries: totalRetries,
       messages,
     };
 
@@ -442,6 +444,8 @@ export async function run(prompt, options) {
         result.packageCommands = tools.packageCommands();
         totalUsage.prompt += healResult.usage.prompt;
         totalUsage.completion += healResult.usage.completion;
+        totalRetries += healResult.retries || 0;
+        result.retries = totalRetries;
 
         // Fix commit: reuses the same file list as the raw commit, not a
         // computed delta -- the raw commit already captured that state,
@@ -517,6 +521,9 @@ export async function run(prompt, options) {
         result.usage.prompt += result.review.usage.prompt;
         result.usage.completion += result.review.usage.completion;
       }
+      if (result.review.retries) {
+        result.retries = (result.retries || 0) + result.review.retries;
+      }
     }
 
     // End-of-run retrospective: never writes to MEMORY.md without a human
@@ -565,6 +572,9 @@ export async function run(prompt, options) {
       if (result.memory.usage) {
         result.usage.prompt += result.memory.usage.prompt;
         result.usage.completion += result.memory.usage.completion;
+      }
+      if (result.memory.retries) {
+        result.retries = (result.retries || 0) + result.memory.retries;
       }
     }
   } catch (err) {
@@ -662,6 +672,7 @@ function createErrorResult(params) {
     stoppedReason: 'error',
     usage: { prompt: 0, completion: 0 },
     compactions: 0,
+    retries: err.retries ?? 0,
     messages,
   };
 }
@@ -1043,6 +1054,7 @@ export function createRunRecord(result, finish = {}) {
     stoppedReason: result.stoppedReason,
     usage: result.usage,
     compactions: result.compactions ?? null,
+    retries: result.retries ?? 0,
     error: result.error ?? null,
     verified: result.verification?.passed ?? null,
     noOpCompletion: result.noOpCompletion ?? false,

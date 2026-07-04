@@ -247,6 +247,7 @@ export function summarizeResult(result) {
     toolTurns: result.toolTurns ?? 0,
     usage: result.usage ?? { prompt: 0, completion: 0 },
     compactions: result.compactions ?? 0,
+    retries: result.retries ?? 0,
     healed: result.healed ?? null,
     healTurns: result.healTurns ?? null,
     verified: result.verification?.passed ?? null,

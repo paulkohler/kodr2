@@ -47,7 +47,7 @@ export const MAX_TOOL_TURNS = 20;
  *   a large prompt can spend minutes in prefill before the first token
  *   streams, which is otherwise silent
  * @param {function} [params.onHeartbeat] - Called with elapsed ms on each heartbeat tick
- * @returns {Promise<{ finalText: string, completed: boolean, stoppedReason: string, toolTurns: number, compactions: number, usage: { prompt: number, completion: number } }>}
+ * @returns {Promise<{ finalText: string, completed: boolean, stoppedReason: string, toolTurns: number, compactions: number, usage: { prompt: number, completion: number }, retries: number }>}
  */
 export async function runToolLoop(params) {
   const { client, modelId, messages, tools, quiet = false } = params;
@@ -59,6 +59,7 @@ export async function runToolLoop(params) {
   const usage = { prompt: 0, completion: 0 };
   let toolTurns = 0;
   let compactions = 0;
+  let retries = 0;
   let finalText = '';
   let completed = false;
   let stoppedReason = 'tool-limit';
@@ -69,7 +70,11 @@ export async function runToolLoop(params) {
       break;
     }
 
-    const { message, usage: turnUsage } = await client.chat({
+    const {
+      message,
+      usage: turnUsage,
+      retries: turnRetries,
+    } = await client.chat({
       model: modelId,
       messages,
       tools: tools.definitions(),
@@ -81,6 +86,7 @@ export async function runToolLoop(params) {
 
     usage.prompt += turnUsage.prompt;
     usage.completion += turnUsage.completion;
+    retries += turnRetries || 0;
     const lastPromptTokens = turnUsage.prompt;
     messages.push(message);
 
@@ -129,12 +135,21 @@ export async function runToolLoop(params) {
       heartbeatMs,
       onHeartbeat,
     });
-    if (compacted) {
+    if (compacted.compacted) {
       compactions++;
     }
+    retries += compacted.retries || 0;
   }
 
-  return { finalText, completed, stoppedReason, toolTurns, compactions, usage };
+  return {
+    finalText,
+    completed,
+    stoppedReason,
+    toolTurns,
+    compactions,
+    usage,
+    retries,
+  };
 }
 
 /**
@@ -142,7 +157,8 @@ export async function runToolLoop(params) {
  * threshold. Best effort: a failed summary leaves the conversation untouched
  * and the loop continues.
  * @param {object} params
- * @returns {Promise<boolean>} Whether the conversation was compacted
+ * @returns {Promise<{ compacted: boolean, retries: number }>} Whether the
+ *   conversation was compacted, and retries the summary chat call used
  */
 async function maybeCompact(params) {
   const { client, modelId, messages, lastPromptTokens, usage, quiet } = params;
@@ -150,7 +166,7 @@ async function maybeCompact(params) {
   const { heartbeatMs, onHeartbeat } = params;
 
   if (!needsCompaction(lastPromptTokens, contextWindow, compactThreshold)) {
-    return false;
+    return { compacted: false, retries: 0 };
   }
 
   if (!quiet) {
@@ -171,6 +187,7 @@ async function maybeCompact(params) {
   });
   usage.prompt += result.usage.prompt;
   usage.completion += result.usage.completion;
+  const retries = result.retries || 0;
 
   if (result.error) {
     if (!quiet) {
@@ -178,11 +195,11 @@ async function maybeCompact(params) {
         `${formatNotice(`compaction skipped: ${result.error}`)}\n`,
       );
     }
-    return false;
+    return { compacted: false, retries };
   }
 
   messages.splice(0, messages.length, ...result.messages);
-  return true;
+  return { compacted: true, retries };
 }
 
 /**

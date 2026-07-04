@@ -189,6 +189,42 @@ describe('runMemoryRetrospective', () => {
     assert.equal(await readMemory(tmpDir), null);
   });
 
+  it('reports retries used by its chat call', async () => {
+    const client = scriptedClient([{ ...finalTurn('some note'), retries: 1 }]);
+    const result = await runMemoryRetrospective({
+      client,
+      modelId: 'test',
+      messages: baseMessages(),
+      cwd: tmpDir,
+      toolTurns: 2,
+      runsDir: tmpDir,
+      attended: false,
+    });
+
+    assert.equal(result.retries, 1);
+  });
+
+  it('reports retries from the error when the retrospective call ultimately fails', async () => {
+    const client = {
+      async chat() {
+        const err = new Error('model offline');
+        err.retries = 1;
+        throw err;
+      },
+    };
+    const result = await runMemoryRetrospective({
+      client,
+      modelId: 'test',
+      messages: baseMessages(),
+      cwd: tmpDir,
+      toolTurns: 2,
+      runsDir: tmpDir,
+      attended: false,
+    });
+
+    assert.equal(result.retries, 1);
+  });
+
   it('--memory-auto-apply applies without prompting, even when unattended', async () => {
     const client = scriptedClient([finalTurn('auto-applied note')]);
     const result = await runMemoryRetrospective({

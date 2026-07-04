@@ -76,4 +76,29 @@ describe('healing', () => {
     assert.equal(calls[0].heartbeatMs, 5000);
     assert.equal(calls[0].onHeartbeat, onHeartbeat);
   });
+
+  it("sums the tool loop's retries into the heal result", async () => {
+    const client = {
+      async chat() {
+        return {
+          message: { role: 'assistant', content: 'fixed' },
+          usage: { prompt: 1, completion: 1 },
+          retries: 2,
+        };
+      },
+    };
+    const verification = { passed: false, output: 'failure' };
+    const result = await heal({
+      client,
+      modelId: 'unused',
+      messages: [],
+      tools: { definitions: () => [] },
+      verifyFn: async () => ({ passed: true, output: '' }),
+      failure: verification,
+      maxTurns: 1,
+      quiet: true,
+    });
+
+    assert.equal(result.retries, 2);
+  });
 });

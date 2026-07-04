@@ -208,6 +208,7 @@ describe('summarizeResult', () => {
     assert.deepEqual(summary.filesChanged, ['server.js']);
     assert.equal(summary.error, null);
     assert.equal(summary.noOpCompletion, false);
+    assert.equal(summary.retries, 0);
   });
 
   it('marks incomplete runs and surfaces errors', () => {
@@ -227,6 +228,11 @@ describe('summarizeResult', () => {
       filesChanged: [],
     });
     assert.equal(summary.noOpCompletion, true);
+  });
+
+  it('surfaces the total retries count', () => {
+    const summary = summarizeResult({ stoppedReason: 'complete', retries: 3 });
+    assert.equal(summary.retries, 3);
   });
 });
 

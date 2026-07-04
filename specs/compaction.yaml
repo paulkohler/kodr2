@@ -54,6 +54,9 @@ outputs:
   usage:
     type: object
     description: "{ prompt, completion } tokens spent generating the summary"
+  retries:
+    type: number
+    description: Retries the summary chat call used (0 if it succeeded on the first attempt)
   error:
     type: string
     description: Present when summarization failed; messages are returned unchanged
@@ -69,7 +72,7 @@ constraints:
     are appended, using the most recent request's prompt-token count
   - needsCompaction is true when promptTokens >= contextWindow * threshold,
     and always false when the context window is 0 or unknown
-  - The summary model call adds its token usage to the run total
+  - The summary model call adds its token usage, and any retries it used, to the run total
   - The summary model call is capped to the run's remaining maxRunMs budget, not a fresh full-length timeout, so late compaction can't outlive the run deadline
   - A failed or empty summary leaves the conversation unchanged (best effort);
     the run continues rather than aborting
@@ -97,6 +100,7 @@ tests:
     - compactMessages forwards heartbeatMs and onHeartbeat to the summary chat call
     - tool loop compacts in place when a turn crosses the threshold
     - tool loop caps the compaction summary call to the remaining run budget
+    - tool loop adds the compaction summary call's retries to the run total
     - tool loop forwards heartbeatMs and onHeartbeat to the compaction summary call
     - tool loop does not compact when below the threshold
     - isCompactCommand recognizes "/compact"
