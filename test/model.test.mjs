@@ -278,6 +278,71 @@ describe('model HTTP client', () => {
     });
   });
 
+  it('calls onDebug once with the request body and raw response text on success', async () => {
+    const baseUrl = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end(
+        'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
+      );
+    });
+    const client = createClient({ baseUrl, model: 'test' });
+    const debugCalls = [];
+    await client.chat({
+      messages: [{ role: 'user', content: 'hi' }],
+      onDebug: (record) => debugCalls.push(record),
+    });
+
+    assert.equal(debugCalls.length, 1);
+    assert.equal(debugCalls[0].url, `${baseUrl}/chat/completions`);
+    assert.equal(debugCalls[0].requestBody.messages[0].content, 'hi');
+    assert.match(debugCalls[0].rawResponse, /"content":"ok"/);
+    assert.equal(debugCalls[0].error, undefined);
+  });
+
+  it('calls onDebug once per attempt when a retry happens', async () => {
+    let calls = 0;
+    const baseUrl = await startServer((_req, res) => {
+      calls++;
+      if (calls === 1) {
+        res.writeHead(500);
+        res.end('internal error');
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end(
+        'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
+      );
+    });
+    const client = createClient({ baseUrl, model: 'test' });
+    const debugCalls = [];
+    await client.chat({
+      messages: [],
+      onDebug: (record) => debugCalls.push(record),
+    });
+
+    assert.equal(debugCalls.length, 2);
+    assert.match(debugCalls[0].rawResponse, /internal error/);
+    assert.match(debugCalls[1].rawResponse, /"content":"ok"/);
+  });
+
+  it('calls onDebug with an error and no response text on a connection failure', async () => {
+    const client = createClient({
+      baseUrl: 'http://127.0.0.1:1/v1',
+      model: 'test',
+    });
+    const debugCalls = [];
+    await assert.rejects(
+      client.chat({
+        messages: [],
+        onDebug: (record) => debugCalls.push(record),
+      }),
+    );
+
+    assert.equal(debugCalls.length, 1);
+    assert.equal(debugCalls[0].rawResponse, '');
+    assert.match(debugCalls[0].error, /ECONNREFUSED|connect/);
+  });
+
   it('maxRetries: 0 disables retrying', async () => {
     let calls = 0;
     const baseUrl = await startServer((_req, res) => {

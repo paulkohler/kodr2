@@ -12,6 +12,7 @@ import {
   isCompactCommand,
 } from './compact.mjs';
 import { buildSystemPrompt } from './context.mjs';
+import { createDebugLogger, debugLogEnabled } from './debug-log.mjs';
 import { buildEnv } from './env.mjs';
 import {
   formatHeartbeat,
@@ -113,6 +114,9 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  *   directly (--memory-auto-apply); opt-in only, never the default
  * @param {number} [options.memorySizeCap] - Size cap for MEMORY.md in characters, past
  *   which a notice (not truncation) is printed (default 8000 — KODR_MEMORY_SIZE_CAP)
+ * @param {boolean} [options.debug] - Write every model request's raw request/response
+ *   to a JSONL sidecar next to the run transcript (also KODR_DEBUG). Off by default;
+ *   see specs/debug-log.yaml.
  * @returns {Promise<object>} Run result
  */
 export async function run(prompt, options) {
@@ -236,6 +240,12 @@ export async function run(prompt, options) {
           `${formatHeartbeat('model response', elapsedMs)}\n`,
         );
       };
+  // --debug (or KODR_DEBUG) writes every model request's raw request/response
+  // to a JSONL sidecar next to the run transcript -- not gated by noSave,
+  // since --debug is itself an explicit request for on-disk output.
+  const onModelDebug = debugLogEnabled(options.debug)
+    ? createDebugLogger(runsDir, startedAt)
+    : undefined;
 
   // On-demand compaction: "/compact" compresses the prior conversation
   // instead of running a new task.
@@ -253,6 +263,7 @@ export async function run(prompt, options) {
       noSave,
       heartbeatMs,
       onHeartbeat: onModelHeartbeat,
+      onDebug: onModelDebug,
     });
     await disposeIncidentTracking();
     return compactionResult;
@@ -304,6 +315,7 @@ export async function run(prompt, options) {
       commandEnv,
       heartbeatMs,
       onHeartbeat: onModelHeartbeat,
+      onDebug: onModelDebug,
     });
     const totalUsage = loop.usage;
     const { completed, stoppedReason, toolTurns } = loop;
@@ -434,6 +446,7 @@ export async function run(prompt, options) {
           commandEnv,
           heartbeatMs,
           onHeartbeat: onModelHeartbeat,
+          onDebug: onModelDebug,
         });
 
         result.healed = healResult.healed;
@@ -512,6 +525,7 @@ export async function run(prompt, options) {
         maxRunMs,
         heartbeatMs,
         onHeartbeat: onModelHeartbeat,
+        onDebug: onModelDebug,
         envPassthrough,
         minToolCalls: options.reviewMinToolCalls,
         maxToolTurns: options.reviewMaxToolTurns,
@@ -780,6 +794,7 @@ export function stopVerifyBudgetMs(startedAt, maxRunMs, reserveFraction) {
 async function runManualCompaction(params) {
   const { client, modelId, messages, metadata, quiet, startedAt } = params;
   const { runsDir, noSave, maxRunMs = 0, heartbeatMs, onHeartbeat } = params;
+  const { onDebug } = params;
 
   // messages holds the fresh system prompt plus any continued conversation.
   const hasHistory = messages.some((message) => message.role !== 'system');
@@ -806,6 +821,7 @@ async function runManualCompaction(params) {
     timeoutMs: remainingRunBudgetMs(startedAt, maxRunMs),
     heartbeatMs,
     onHeartbeat,
+    onDebug,
   });
 
   if (!compactResult.error) {
@@ -870,6 +886,7 @@ export async function runReviewPass(params) {
     maxRunMs,
     heartbeatMs,
     onHeartbeat,
+    onDebug,
     envPassthrough,
     minToolCalls,
     maxToolTurns,
@@ -908,6 +925,7 @@ export async function runReviewPass(params) {
       contextWindow,
       heartbeatMs,
       onHeartbeat,
+      onDebug,
       envPassthrough,
       minToolCalls: minReviewToolCalls(minToolCalls),
       maxToolTurns: reviewMaxToolTurns(maxToolTurns),

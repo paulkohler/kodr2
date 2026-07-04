@@ -84,6 +84,13 @@ kodr doctor
 ok
 ```
 
+`--debug` (or `KODR_DEBUG`) writes every model request's raw request and raw,
+unparsed response text to a `<timestamp>-debug.jsonl` sidecar next to the run
+transcript in `.kodr/runs/` -- one line per HTTP attempt (a retried request
+produces more than one). Off by default; for diagnosing a malformed model
+response after the fact, when the assembled message and token counts alone
+don't explain what went wrong.
+
 ## Tools
 
 The model has these tools available:

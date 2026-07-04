@@ -1,0 +1,76 @@
+name: debug-log
+status: implemented
+description: >
+  Optional raw request/response capture for every model chat call, written
+  as a JSONL sidecar file next to the run transcript. Off by default. When a
+  model emits a malformed streaming chunk that trips the SSE parser, or a
+  request fails in a way the run record doesn't fully explain, there is
+  otherwise nothing left to inspect after the fact -- only the assembled
+  message and token counts survive, never the raw bytes that produced them.
+
+  Deliberately scoped to the model client's HTTP layer (src/model.mjs), not
+  a general application log: this captures exactly the request body sent
+  and the raw response text received for each attempt, before any SSE
+  parsing or message assembly, since that's the layer where a malformed
+  chunk actually goes wrong.
+
+inputs:
+  option:
+    type: boolean
+    description: Explicit --debug flag
+  runsDir:
+    type: string
+    required: true
+    description: Same directory the run transcript is written to
+  startedAt:
+    type: Date
+    required: true
+    description: Run start time, used to name the sidecar file alongside the eventual run transcript
+
+outputs:
+  onDebug:
+    type: function
+    description: >
+      Callback passed as chat()'s onDebug option: (record) => void, where
+      record is { url, requestBody, rawResponse, error? }. Appends one JSON
+      line per model request (including once per retry attempt).
+
+constraints:
+  - Enabled by --debug or KODR_DEBUG (env wins only when the option is not explicitly set)
+  - Off by default -- the raw request body is the full conversation history verbatim, and
+    capturing it unconditionally would silently duplicate sensitive workspace content on disk
+  - The sidecar file is named "<startedAt-as-filename-timestamp>-debug.jsonl", parallel to the
+    run transcript's own "<finishedAt-as-filename-timestamp>.json" naming, so the two are
+    associated by proximity even though one timestamp is start and the other is finish
+  - Every model.mjs chat() attempt appends one line, whether it succeeds, gets a 4xx/5xx, or
+    fails at the connection level -- a retried request produces multiple lines, one per attempt
+  - Each line captures the exact request body sent and the raw, unparsed response text received
+    up to whatever point the request settled -- not the assembled { message, usage } result,
+    which is already in the run transcript
+  - A write failure (disk full, permission denied) is swallowed, never surfaced to the model
+    loop or the run's outcome -- debug capture is a diagnostic aid, not something a run should
+    fail over
+  - Threaded through the same call sites as heartbeatMs/onHeartbeat: the main tool loop,
+    compaction summaries, heal turns, and the review pass. Not threaded through the memory
+    retrospective (src/memory.mjs), which doesn't yet forward heartbeatMs/onHeartbeat either --
+    adding one new plumbing pattern there is out of scope for this feature
+  - noSave (KODR_NO_SAVE / --no-save) does not disable debug capture on its own -- --debug is
+    itself an explicit request for on-disk output, unlike the incident/memory features that key
+    off noSave for their own unattended-write behavior
+
+tests:
+  unit:
+    - debugLogEnabled is off by default
+    - debugLogEnabled is on when the option is true
+    - debugLogEnabled is on via KODR_DEBUG
+    - the option takes precedence over KODR_DEBUG when explicitly set to false
+    - createDebugLogger appends one JSON line per call with the given record fields
+    - createDebugLogger appends a distinct line for each of several calls, preserving order
+    - createDebugLogger creates the runs directory if it does not already exist
+    - a write failure in createDebugLogger's appender does not throw or reject
+    - model.mjs chat() invokes onDebug once per attempt, including once per retry
+    - model.mjs chat() passes the raw unparsed response text to onDebug, not the assembled message
+    - model.mjs chat() invokes onDebug with an error field on a connection failure, with no response text
+    - the tool loop forwards onDebug to its chat call and to the compaction summary call
+    - heal forwards onDebug to the tool loop
+    - the review pass forwards onDebug to its tool loop attempts

@@ -144,6 +144,7 @@ async function runReviewAttempt(params) {
  * @param {number} [params.contextWindow]
  * @param {number} [params.heartbeatMs]
  * @param {function} [params.onHeartbeat]
+ * @param {function} [params.onDebug] - Forwarded to each attempt's tool loop (see specs/debug-log.yaml)
  * @param {string[]} [params.envPassthrough]
  * @param {number} [params.minToolCalls] - Tool-call floor before a review counts as grounded
  * @param {number} [params.maxToolTurns] - Tool-turn ceiling per attempt
@@ -161,6 +162,7 @@ export async function runReview(params) {
     contextWindow = 0,
     heartbeatMs,
     onHeartbeat,
+    onDebug,
     envPassthrough = [],
   } = params;
 
@@ -187,6 +189,7 @@ export async function runReview(params) {
     contextWindow,
     heartbeatMs,
     onHeartbeat,
+    onDebug,
     maxToolTurns,
   };
 

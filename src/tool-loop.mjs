@@ -47,13 +47,15 @@ export const MAX_TOOL_TURNS = 20;
  *   a large prompt can spend minutes in prefill before the first token
  *   streams, which is otherwise silent
  * @param {function} [params.onHeartbeat] - Called with elapsed ms on each heartbeat tick
+ * @param {function} [params.onDebug] - Called once per HTTP attempt with the raw
+ *   request/response (see specs/debug-log.yaml); forwarded to every chat call
  * @returns {Promise<{ finalText: string, completed: boolean, stoppedReason: string, toolTurns: number, compactions: number, usage: { prompt: number, completion: number }, retries: number }>}
  */
 export async function runToolLoop(params) {
   const { client, modelId, messages, tools, quiet = false } = params;
   const { startedAt, maxRunMs = 0, maxToolTurns = MAX_TOOL_TURNS } = params;
   const { contextWindow = 0, compactThreshold = COMPACTION_THRESHOLD } = params;
-  const { heartbeatMs = 0, onHeartbeat } = params;
+  const { heartbeatMs = 0, onHeartbeat, onDebug } = params;
   const hookCtx = buildHookCtx(params);
 
   const usage = { prompt: 0, completion: 0 };
@@ -82,6 +84,7 @@ export async function runToolLoop(params) {
       timeoutMs: remainingRunBudgetMs(startedAt, maxRunMs),
       heartbeatMs,
       onHeartbeat,
+      onDebug,
     });
 
     usage.prompt += turnUsage.prompt;
@@ -134,6 +137,7 @@ export async function runToolLoop(params) {
       timeoutMs: remainingRunBudgetMs(startedAt, maxRunMs),
       heartbeatMs,
       onHeartbeat,
+      onDebug,
     });
     if (compacted.compacted) {
       compactions++;
@@ -163,7 +167,7 @@ export async function runToolLoop(params) {
 async function maybeCompact(params) {
   const { client, modelId, messages, lastPromptTokens, usage, quiet } = params;
   const { contextWindow, compactThreshold, timeoutMs } = params;
-  const { heartbeatMs, onHeartbeat } = params;
+  const { heartbeatMs, onHeartbeat, onDebug } = params;
 
   if (!needsCompaction(lastPromptTokens, contextWindow, compactThreshold)) {
     return { compacted: false, retries: 0 };
@@ -184,6 +188,7 @@ async function maybeCompact(params) {
     timeoutMs,
     heartbeatMs,
     onHeartbeat,
+    onDebug,
   });
   usage.prompt += result.usage.prompt;
   usage.completion += result.usage.completion;

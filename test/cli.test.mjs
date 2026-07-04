@@ -168,6 +168,11 @@ describe('parseArgs', () => {
     assert.equal(parseArgs(['run', 'hi']).noFail, false);
   });
 
+  it('parses --debug (default false)', () => {
+    assert.equal(parseArgs(['run', 'hi', '--debug']).debug, true);
+    assert.equal(parseArgs(['run', 'hi']).debug, false);
+  });
+
   it('defaults env to an empty list', () => {
     const args = parseArgs(['run', 'hi']);
     assert.deepEqual(args.env, []);

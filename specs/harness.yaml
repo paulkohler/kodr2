@@ -125,6 +125,7 @@ constraints:
   - CLI accepts -p/--prompt as a compatibility alias for prompt text
   - CLI --json prints a single machine-readable run summary to stdout (implies --quiet) so an external harness/adapter can record outcome and cost; for container runs combine with --no-save / --runs-dir and run without --test
   - CLI --no-fail (or KODR_NO_FAIL) makes the process always exit 0; for external-verifier runs where the verifier is the judge and a non-zero agent exit would be recorded as a harness error rather than a clean reward 0
+  - CLI --debug (or KODR_DEBUG) writes a JSONL sidecar of every model request's raw request/response next to the run transcript (see specs/debug-log.yaml); off by default, unaffected by --no-save since it's itself an explicit request for on-disk output
 
 tests:
   unit:
@@ -137,6 +138,8 @@ tests:
     - summarizeResult surfaces a no-op completion
     - a run that completes without touching the workspace sets noOpCompletion and emits a notice
     - retries from the main tool loop, heal, review, and memory are summed into the run's total retries count
+    - run() wires a debug logger into the tool loop when --debug is set, writing a sidecar file next to the run transcript
+    - run() wires no debug logger when --debug is not set
     - a run record with zero retries reports retries: 0, not undefined
     - CLI process fails when run stopped before completion
     - maxRunMs budget detection works

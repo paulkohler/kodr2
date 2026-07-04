@@ -51,6 +51,10 @@ export function createClient(options = {}) {
    *   streams, which looks identical to a stuck request from the outside.
    * @param {function} [params.onHeartbeat] - Called with elapsed ms on each
    *   heartbeat tick
+   * @param {function} [params.onDebug] - Called once per HTTP attempt with
+   *   { url, requestBody, rawResponse, error? } -- the exact request sent and
+   *   the raw, unparsed response text, for diagnosing a malformed response
+   *   after the fact. A retried request calls this once per attempt.
    * @returns {Promise<{ message: object, usage: object, retries: number }>}
    */
   async function chat(params) {
@@ -78,6 +82,7 @@ export function createClient(options = {}) {
         onToolCall: params.onToolCall,
         heartbeatMs: params.heartbeatMs,
         onHeartbeat: params.onHeartbeat,
+        onDebug: params.onDebug,
       },
       maxRetries,
     );
@@ -382,6 +387,7 @@ function streamRequest(url, body, timeout, callbacks) {
     const assembler = createAssembler(callbacks.onToken, callbacks.onToolCall);
     let settled = false;
     let req;
+    let rawResponse = '';
     const requestStartedAt = Date.now();
     let heartbeatTimer;
     if (callbacks.heartbeatMs > 0 && callbacks.onHeartbeat) {
@@ -389,14 +395,6 @@ function streamRequest(url, body, timeout, callbacks) {
         callbacks.onHeartbeat(Date.now() - requestStartedAt);
       }, callbacks.heartbeatMs);
     }
-    const hardTimer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      if (req) {
-        req.destroy();
-      }
-      reject(new Error(`Request timed out after ${timeout}ms`));
-    }, timeout);
 
     function finish(fn, value) {
       if (settled) return;
@@ -405,8 +403,23 @@ function streamRequest(url, body, timeout, callbacks) {
       if (heartbeatTimer) {
         clearInterval(heartbeatTimer);
       }
+      if (callbacks.onDebug) {
+        callbacks.onDebug({
+          url,
+          requestBody: body,
+          rawResponse,
+          error: fn === reject ? value.message : undefined,
+        });
+      }
       fn(value);
     }
+
+    const hardTimer = setTimeout(() => {
+      if (req) {
+        req.destroy();
+      }
+      finish(reject, new Error(`Request timed out after ${timeout}ms`));
+    }, timeout);
 
     req = transportFor(parsed)(
       {
@@ -422,10 +435,11 @@ function streamRequest(url, body, timeout, callbacks) {
       },
       (res) => {
         if (res.statusCode >= 400) {
-          let data = '';
-          res.on('data', (c) => (data += c));
+          res.on('data', (c) => {
+            rawResponse += c;
+          });
           res.on('end', () =>
-            finish(reject, new Error(`HTTP ${res.statusCode}: ${data}`)),
+            finish(reject, new Error(`HTTP ${res.statusCode}: ${rawResponse}`)),
           );
           return;
         }
@@ -434,6 +448,7 @@ function streamRequest(url, body, timeout, callbacks) {
 
         res.setEncoding('utf8');
         res.on('data', (text) => {
+          rawResponse += text;
           buffer += text;
           const lines = buffer.split('\n');
           buffer = lines.pop() || '';
@@ -464,7 +479,6 @@ function streamRequest(url, body, timeout, callbacks) {
     });
 
     req.on('error', (err) => {
-      if (settled) return;
       finish(reject, err);
     });
     req.write(payload);

@@ -326,6 +326,82 @@ describe('retries telemetry', () => {
   });
 });
 
+describe('debug logging wiring', () => {
+  it('writes a debug sidecar file when --debug is set', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'kodr-debug-on-'));
+    const model = await startTextOnlyModel();
+
+    try {
+      await run('do work', {
+        cwd,
+        baseUrl: model.baseUrl,
+        model: 'test',
+        quiet: true,
+        debug: true,
+      });
+      // The write is fire-and-forget from within the run -- give the fs a
+      // moment before checking (mirrors test/debug-log.test.mjs's own flush).
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const runDir = join(cwd, '.kodr', 'runs');
+      const files = await readdir(runDir);
+      const debugFiles = files.filter((f) => f.endsWith('-debug.jsonl'));
+      assert.equal(debugFiles.length, 1);
+      const content = await readFile(join(runDir, debugFiles[0]), 'utf8');
+      const record = JSON.parse(content.trim().split('\n')[0]);
+      assert.match(record.rawResponse, /"content":"done"/);
+    } finally {
+      await model.close();
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('writes no debug sidecar file when --debug is not set', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'kodr-debug-off-'));
+    const model = await startTextOnlyModel();
+
+    try {
+      await run('do work', {
+        cwd,
+        baseUrl: model.baseUrl,
+        model: 'test',
+        quiet: true,
+      });
+
+      const runDir = join(cwd, '.kodr', 'runs');
+      const files = await readdir(runDir);
+      assert.equal(
+        files.some((f) => f.endsWith('-debug.jsonl')),
+        false,
+      );
+    } finally {
+      await model.close();
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+async function startTextOnlyModel() {
+  const server = createServer((req, res) => {
+    if (req.url === '/api/v0/models') {
+      res.writeHead(404);
+      res.end('not found');
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.end(
+      'data: {"choices":[{"delta":{"role":"assistant","content":"done"}}]}\n\n' +
+        'data: [DONE]\n\n',
+    );
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  return {
+    baseUrl: `http://127.0.0.1:${port}`,
+    close: () => new Promise((resolve) => server.close(resolve)),
+  };
+}
+
 async function startFailingModel() {
   const server = createServer((req, res) => {
     if (req.url === '/api/v0/models') {

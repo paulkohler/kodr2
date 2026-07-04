@@ -34,7 +34,7 @@ inputs:
 outputs:
   chat:
     type: function
-    description: "Send chat completion: (messages, tools, onToken, timeoutMs?, heartbeatMs?, onHeartbeat?) → { message, usage, retries }"
+    description: "Send chat completion: (messages, tools, onToken, timeoutMs?, heartbeatMs?, onHeartbeat?, onDebug?) → { message, usage, retries }"
   models:
     type: function
     description: "List available models: () → [{ id }]"
@@ -57,6 +57,7 @@ constraints:
   - chat() accepts optional heartbeatMs/onHeartbeat: while a request is in flight, onHeartbeat(elapsedMs) fires on that interval until the request settles (0 or omitted disables it). A large prompt can spend minutes in prefill before the first streamed token, which is otherwise indistinguishable from a hung request to anything watching for output; each retry attempt restarts its own heartbeat timer from zero
   - chat() reports how many retries it used as a `retries` field on the resolved result (0 when the first attempt succeeded), so a flaky-backend pattern is visible in the run record instead of only in live stderr
   - When chat() ultimately throws (retryable attempts exhausted, or a non-retryable error), the thrown Error also carries a `retries` field with the number of retries actually attempted, so callers recording telemetry on failure don't lose that count
+  - chat() accepts an optional onDebug callback (see specs/debug-log.yaml): fires once per HTTP attempt with { url, requestBody, rawResponse, error? } -- the exact request sent and the raw, unparsed response text, before SSE parsing or message assembly. A retried request fires onDebug once per attempt
 
 tests:
   unit:
@@ -91,6 +92,9 @@ tests:
     - calls onHeartbeat on an interval while a chat request is in flight
     - does not call onHeartbeat when heartbeatMs is 0
     - stops calling onHeartbeat once the chat request finishes
+    - calls onDebug once with the request body and raw response text on a successful chat call
+    - calls onDebug once per attempt when a retry happens
+    - calls onDebug with an error and no response text on a connection failure
   eval:
     - connects to LM Studio and lists models
     - sends a simple prompt and gets a response

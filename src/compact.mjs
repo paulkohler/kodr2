@@ -111,11 +111,12 @@ export function renderTranscript(messages) {
  * @param {number} [params.timeoutMs] - Per-call timeout override (e.g. the run's remaining budget)
  * @param {number} [params.heartbeatMs] - Interval for onHeartbeat "still waiting" notices (0 disables)
  * @param {function} [params.onHeartbeat] - Called with elapsed ms on each heartbeat tick
+ * @param {function} [params.onDebug] - Forwarded to the summary chat call (see specs/debug-log.yaml)
  * @returns {Promise<{ messages: Array, summary: string, usage: { prompt: number, completion: number }, retries: number, error?: string }>}
  */
 export async function compactMessages(params) {
   const { client, modelId, messages, quiet = false, timeoutMs } = params;
-  const { heartbeatMs, onHeartbeat } = params;
+  const { heartbeatMs, onHeartbeat, onDebug } = params;
   const system = messages.find((message) => message.role === 'system') || null;
   const history = messages.filter((message) => message.role !== 'system');
 
@@ -144,6 +145,7 @@ export async function compactMessages(params) {
       timeoutMs,
       heartbeatMs,
       onHeartbeat,
+      onDebug,
     });
   } catch (err) {
     return {

@@ -157,6 +157,7 @@ export async function main(argv) {
     commitTimeoutMs: args.commitTimeoutMs,
     memory: args.memory,
     memoryAutoApply: args.memoryAutoApply,
+    debug: args.debug,
     // Attended: an interactive terminal where output isn't being scraped
     // (--quiet) or consumed as machine-readable (--json) -- only then does
     // prompting for a y/N confirmation make sense. Both ends of the
@@ -308,6 +309,7 @@ export function parseArgs(argv) {
     rawThenFixCommits: false,
     memory: false,
     memoryAutoApply: false,
+    debug: false,
     commitTimeoutMs: DEFAULT_COMMIT_TIMEOUT_MS,
     json: false,
     noFail: false,
@@ -464,6 +466,11 @@ export function parseArgs(argv) {
       i++;
       continue;
     }
+    if (arg === '--debug') {
+      args.debug = true;
+      i++;
+      continue;
+    }
 
     // Positional: first is command, second is prompt
     if (!args.command) {
@@ -545,6 +552,9 @@ Options:
                                   decided to trust the loop.
   --json                          Print a machine-readable run summary to stdout
   --no-fail                       Always exit 0 (or KODR_NO_FAIL); for external-verifier runs
+  --debug                         Write every model request's raw request/response to a
+                                  JSONL sidecar next to the run transcript (or KODR_DEBUG).
+                                  Off by default; for diagnosing a malformed model response.
   --quiet, -q                     Suppress streaming output
   --help, -h                      Show this help
   --version, -v                   Show version
