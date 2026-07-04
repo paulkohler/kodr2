@@ -5,8 +5,12 @@ Rules for AI agents working in this repo.
 ## Stack
 
 - Node.js 22+, ESM, zero runtime dependencies.
-- LM Studio only (OpenAI-compatible API at localhost:1234).
-- Biome for formatting as an external developer tool. Prefer a globally or environment-provided `biome` binary; do not add Biome to `dependencies` or `devDependencies`.
+- LM Studio only (OpenAI-compatible API at localhost:1234). The standard
+  `/v1/models` endpoint doesn't report context-window state; LM Studio's own
+  `/api/v0/models` extension does (`state`, `loaded_context_length`,
+  `max_context_length`) and is what `contextInfo`/`richModels` in
+  `src/model.mjs` rely on.
+- Biome for formatting as an external developer tool. Prefer a globally or environment-provided `biome` binary; do not add Biome to `dependencies` or `devDependencies`. CI has no lockfile (by design) and doesn't get Biome preinstalled either — CI must install it itself; never assume it's on the runner.
 - `node:test` for all tests.
 
 ## Code style
@@ -34,7 +38,9 @@ Rules for AI agents working in this repo.
 ## Specs
 
 - Every feature has a YAML spec in `specs/`.
-- Write the spec before the implementation.
+- Write the spec before the implementation — including a feature that emerges
+  organically mid-conversation, not only one explicitly requested as "add
+  this to specs."
 - Spec status: proposed → accepted → implemented → deprecated.
 - Tests listed in the spec are the contract.
 
@@ -46,6 +52,17 @@ Rules for AI agents working in this repo.
 4. Run `npm test` — all must pass.
 5. Run `node --check` on changed files.
 6. Commit with a descriptive message.
+7. Split unrelated changes into separate, well-commented commits, even when made in one session.
+
+## Gotchas
+
+- Read a file before Edit/Write in the *same turn*, even if you edited it
+  earlier in the session — and re-Read it after running an external
+  formatter (`biome format --write` / `lint --write`) against it, since that
+  changes the file on disk out from under a stale read.
+- Don't chain `sleep N && <check output>` to poll a long-running or
+  backgrounded command. Use the harness/tooling's own background-run and
+  notification support instead.
 
 ## Model output is untrusted
 
