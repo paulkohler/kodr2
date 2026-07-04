@@ -1,5 +1,5 @@
 name: tool-recovery
-status: proposed
+status: implemented
 description: >
   Recover tool calls that a model emitted as assistant text instead of through
   the native tool channel. Native API tool calls are always the primary path;

@@ -1,5 +1,5 @@
 name: skills
-status: accepted
+status: implemented
 description: >
   Basic skill loading. A skill is a SKILL.md file with YAML frontmatter
   (name, description) and a markdown body of instructions. Skills are
