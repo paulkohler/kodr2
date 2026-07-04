@@ -11,6 +11,7 @@ import {
   formatSummary,
   formatModelsList,
   formatDoctorReport,
+  formatStats,
 } from '../src/format.mjs';
 
 // Strip ANSI escapes so assertions read against plain text.
@@ -219,5 +220,63 @@ describe('formatDoctorReport', () => {
     );
     assert.match(out, /\bok\b/);
     assert.doesNotMatch(out, /failed/);
+  });
+});
+
+describe('formatStats', () => {
+  it('renders totals, stopped reasons, and every rate', () => {
+    const out = plain(
+      formatStats({
+        total: 4,
+        stoppedReasonCounts: { complete: 3, error: 1 },
+        noOpRate: 0.25,
+        healAttemptedRate: 0.5,
+        healSuccessRate: 1,
+        compactionRate: 0.25,
+        avgCompactions: 0.5,
+        retryRate: 0.5,
+        avgRetries: 0.75,
+        verifyAttemptedRate: 0.5,
+        verifyPassRate: 1,
+        avgToolTurns: 3.5,
+        avgDurationMs: 1234,
+        totalUsage: { prompt: 100, completion: 40 },
+      }),
+    );
+
+    assert.match(out, /4 runs/);
+    assert.match(out, /complete: 3, error: 1/);
+    assert.match(out, /25%/);
+    assert.match(out, /1234ms/);
+    assert.match(out, /100 in \/ 40 out/);
+  });
+
+  it('renders "n/a" for a null rate rather than an empty or NaN value', () => {
+    const out = plain(
+      formatStats({
+        total: 2,
+        stoppedReasonCounts: { complete: 2 },
+        noOpRate: 0,
+        healAttemptedRate: 0,
+        healSuccessRate: null,
+        compactionRate: 0,
+        avgCompactions: 0,
+        retryRate: 0,
+        avgRetries: 0,
+        verifyAttemptedRate: 0,
+        verifyPassRate: null,
+        avgToolTurns: 1,
+        avgDurationMs: null,
+        totalUsage: { prompt: 0, completion: 0 },
+      }),
+    );
+
+    assert.doesNotMatch(out, /NaN/);
+    assert.match(out, /n\/a/);
+  });
+
+  it('reports no run records found for an empty set', () => {
+    const out = plain(formatStats({ total: 0 }));
+    assert.match(out, /No run records found/);
   });
 });

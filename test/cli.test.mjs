@@ -114,6 +114,12 @@ describe('parseArgs', () => {
     assert.equal(args.prompt, null);
   });
 
+  it('parses the "stats" subcommand without a prompt', () => {
+    const args = parseArgs(['stats']);
+    assert.equal(args.command, 'stats');
+    assert.equal(args.prompt, null);
+  });
+
   it('treats "/compact" as the prompt', () => {
     const args = parseArgs(['/compact']);
     assert.equal(args.prompt, '/compact');

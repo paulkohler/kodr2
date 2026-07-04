@@ -7,7 +7,11 @@ import { resolve } from 'node:path';
 import { DEFAULT_COMMIT_TIMEOUT_MS } from './commit.mjs';
 import { runDoctorChecks } from './doctor.mjs';
 import { parseEnvNames } from './env.mjs';
-import { formatDoctorReport, formatModelsList } from './format.mjs';
+import {
+  formatDoctorReport,
+  formatModelsList,
+  formatStats,
+} from './format.mjs';
 import { DEFAULT_HEARTBEAT_MS, resolveRunsDir, run } from './harness.mjs';
 import { DEFAULT_INCIDENT_HEARTBEAT_MS } from './incident.mjs';
 import { createClient, DEFAULT_MAX_RETRIES } from './model.mjs';
@@ -15,6 +19,7 @@ import {
   DEFAULT_MIN_REVIEW_TOOL_CALLS,
   DEFAULT_REVIEW_MAX_TOOL_TURNS,
 } from './review.mjs';
+import { computeStats, loadRunRecords } from './stats.mjs';
 import { MAX_TOOL_TURNS } from './tool-loop.mjs';
 
 /**
@@ -42,6 +47,11 @@ export async function main(argv) {
 
   if (args.command === 'doctor') {
     await printDoctor(args);
+    return;
+  }
+
+  if (args.command === 'stats') {
+    await printStats(args);
     return;
   }
 
@@ -491,6 +501,8 @@ export function parseArgs(argv) {
     // standalone subcommand — lists models, takes no prompt
   } else if (args.command === 'doctor') {
     // standalone subcommand — preflight checks, takes no prompt
+  } else if (args.command === 'stats') {
+    // standalone subcommand — aggregates run records, takes no prompt
   } else if (args.command && !args.prompt) {
     // Treat the command as the prompt (shorthand)
     args.prompt = args.command;
@@ -509,6 +521,7 @@ Usage:
   kodr "your prompt"              Shorthand for 'kodr run'
   kodr models                     List LM Studio models and their context windows
   kodr doctor                     Preflight checks: LM Studio, a loaded model, git, Node.js version
+  kodr stats                      Aggregate rates (heal, retry, compaction, verify) across saved runs
 
 Options:
   --cwd <path>                    Workspace directory (default: .)
@@ -584,6 +597,14 @@ async function printDoctor(args) {
   if (!report.ok) {
     process.exitCode = 1;
   }
+}
+
+async function printStats(args) {
+  const cwd = resolve(args.cwd || '.');
+  const runsDir = resolveRunsDir(cwd, args.runsDir);
+  const records = await loadRunRecords(runsDir);
+  const stats = computeStats(records);
+  process.stdout.write(`${formatStats(stats)}\n`);
 }
 
 async function printVersion() {

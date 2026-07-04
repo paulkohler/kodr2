@@ -1,0 +1,99 @@
+name: stats
+status: implemented
+description: >
+  `kodr stats` -- aggregates every saved run record in a runs directory into
+  summary rates (completion, no-op, heal success, compaction, retry, verify
+  pass) so a slow-burn pattern across many runs is visible without hand-
+  rolling a jq/grep pass over .kodr/runs/*.json. inspect-run.mjs (see
+  scripts/inspect-run.mjs) looks at one run; this looks at all of them.
+
+  Read-only: never writes anything, never touches LM Studio. A corrupt or
+  unparseable run file is skipped rather than aborting the whole command,
+  since one bad file shouldn't hide every other run's data.
+
+inputs:
+  cwd:
+    type: string
+    description: Workspace root, for resolving the default runs directory (default ".")
+  runsDir:
+    type: string
+    description: Explicit runs directory, overriding cwd-based resolution (mirrors --runs-dir / KODR_RUNS_DIR)
+
+outputs:
+  total:
+    type: number
+    description: Number of run records successfully loaded
+  stoppedReasonCounts:
+    type: object
+    description: Count of runs per stoppedReason value (complete, error, tool-limit, budget-exceeded)
+  noOpRate:
+    type: number
+    description: Fraction of runs with noOpCompletion true
+  healAttemptedRate:
+    type: number
+    description: Fraction of runs where healed is not null (a Stop hook failed and heal ran)
+  healSuccessRate:
+    type: number
+    description: Fraction of healed attempts that succeeded (null when heal never ran in this set)
+  compactionRate:
+    type: number
+    description: Fraction of runs with at least one compaction
+  avgCompactions:
+    type: number
+    description: Average compactions per run across the whole set
+  retryRate:
+    type: number
+    description: Fraction of runs with at least one model-request retry
+  avgRetries:
+    type: number
+    description: Average retries per run across the whole set
+  verifyAttemptedRate:
+    type: number
+    description: Fraction of runs where verification ran at all
+  verifyPassRate:
+    type: number
+    description: Fraction of verified runs that passed (null when verification never ran in this set)
+  avgToolTurns:
+    type: number
+    description: Average tool-call round trips per run
+  avgDurationMs:
+    type: number
+    description: Average run duration in ms (null when no run recorded a duration)
+  totalUsage:
+    type: object
+    description: "{ prompt, completion } tokens summed across every run in the set"
+
+constraints:
+  - loadRunRecords reads every "*.json" file directly in a runs directory (not "*-debug.jsonl"
+    sidecars from --debug, and not subdirectories) and parses each as a run record
+  - A run file that fails to parse (corrupt JSON, truncated write) is skipped, not fatal --
+    one bad file must not hide every other run's data
+  - computeStats returns { total: 0 } and no other fields when given an empty record set,
+    rather than dividing by zero into NaN
+  - Rates needing a denominator that could be zero for this set (healSuccessRate,
+    verifyPassRate) are null, not NaN or 0, when that denominator is zero -- 0 would
+    misleadingly read as "heal always fails" rather than "heal never ran in this set"
+  - CLI `kodr stats` resolves the runs directory the same way `kodr run` does (cwd +
+    --runs-dir / KODR_RUNS_DIR via harness.mjs's resolveRunsDir), so pointing it at the same
+    workspace a run used just works
+  - Never writes to the workspace or LM Studio; purely reads existing run records
+
+tests:
+  unit:
+    - loadRunRecords reads and parses every run record json file in a directory
+    - loadRunRecords skips *-debug.jsonl sidecar files
+    - loadRunRecords skips a file that fails to parse, without throwing
+    - loadRunRecords returns an empty array for a missing or empty directory
+    - computeStats returns { total: 0 } for an empty record set
+    - computeStats counts runs per stoppedReason
+    - computeStats computes noOpRate from noOpCompletion
+    - computeStats computes healAttemptedRate and healSuccessRate
+    - computeStats reports healSuccessRate as null when no run in the set attempted healing
+    - computeStats computes compactionRate and avgCompactions
+    - computeStats computes retryRate and avgRetries
+    - computeStats computes verifyAttemptedRate and verifyPassRate
+    - computeStats reports verifyPassRate as null when no run in the set was verified
+    - computeStats computes avgToolTurns and avgDurationMs across the set
+    - computeStats sums prompt/completion usage across the set
+    - formatStats renders total runs, stopped-reason breakdown, and every rate
+    - formatStats renders "n/a" for a null rate rather than an empty or NaN value

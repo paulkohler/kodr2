@@ -243,6 +243,59 @@ function statusIcon(status) {
   return `${RED}✗${RESET}`;
 }
 
+/**
+ * Format a `kodr stats` report.
+ * @param {object} stats - See computeStats' return shape
+ * @returns {string}
+ */
+export function formatStats(stats) {
+  if (stats.total === 0) {
+    return formatNotice('No run records found.');
+  }
+
+  const lines = [
+    `${BOLD}kodr stats${RESET} ${DIM}${stats.total} runs${RESET}`,
+    '',
+  ];
+
+  const reasons = Object.entries(stats.stoppedReasonCounts)
+    .map(([reason, count]) => `${reason}: ${count}`)
+    .join(', ');
+  lines.push(`  ${DIM}stopped reasons:${RESET} ${reasons}`);
+  lines.push(`  ${DIM}no-op completions:${RESET} ${pct(stats.noOpRate)}`);
+  lines.push(
+    `  ${DIM}heal attempted:${RESET} ${pct(stats.healAttemptedRate)}${DIM}  succeeded:${RESET} ${pctOrNA(stats.healSuccessRate)}`,
+  );
+  lines.push(
+    `  ${DIM}compaction rate:${RESET} ${pct(stats.compactionRate)}${DIM}  avg per run:${RESET} ${stats.avgCompactions.toFixed(2)}`,
+  );
+  lines.push(
+    `  ${DIM}retry rate:${RESET} ${pct(stats.retryRate)}${DIM}  avg per run:${RESET} ${stats.avgRetries.toFixed(2)}`,
+  );
+  lines.push(
+    `  ${DIM}verify attempted:${RESET} ${pct(stats.verifyAttemptedRate)}${DIM}  passed:${RESET} ${pctOrNA(stats.verifyPassRate)}`,
+  );
+  lines.push(
+    `  ${DIM}avg tool turns:${RESET} ${stats.avgToolTurns.toFixed(1)}`,
+  );
+  lines.push(
+    `  ${DIM}avg duration:${RESET} ${stats.avgDurationMs === null ? 'n/a' : `${Math.round(stats.avgDurationMs)}ms`}`,
+  );
+  lines.push(
+    `  ${DIM}total tokens:${RESET} ${stats.totalUsage.prompt} in / ${stats.totalUsage.completion} out`,
+  );
+
+  return lines.join('\n');
+}
+
+function pct(fraction) {
+  return `${Math.round(fraction * 100)}%`;
+}
+
+function pctOrNA(fraction) {
+  return fraction === null ? 'n/a' : pct(fraction);
+}
+
 // --- helpers ---
 
 function summariseArgs(name, args) {

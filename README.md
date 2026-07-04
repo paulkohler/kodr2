@@ -91,6 +91,26 @@ produces more than one). Off by default; for diagnosing a malformed model
 response after the fact, when the assembled message and token counts alone
 don't explain what went wrong.
 
+`kodr stats` aggregates every saved run record into summary rates -- heal
+success, compaction, retry, verify pass -- so a slow-burn pattern across many
+runs (a rising retry rate, a heal success rate trending down) is visible
+without hand-rolling a jq/grep pass over `.kodr/runs/*.json`.
+
+```
+$ kodr stats
+kodr stats 12 runs
+
+  stopped reasons: complete: 11, error: 1
+  no-op completions: 8%
+  heal attempted: 17%  succeeded: 100%
+  compaction rate: 25%  avg per run: 0.33
+  retry rate: 8%  avg per run: 0.08
+  verify attempted: 92%  passed: 91%
+  avg tool turns: 4.2
+  avg duration: 18432ms
+  total tokens: 48213 in / 6104 out
+```
+
 ## Tools
 
 The model has these tools available:
