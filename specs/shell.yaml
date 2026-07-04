@@ -39,6 +39,18 @@ inputs:
     type: function
     required: false
     description: Called with elapsed ms on each heartbeat tick
+  killGraceMs:
+    type: number
+    required: false
+    description: >
+      Delay in ms before escalating a timed-out command tree from SIGTERM
+      to SIGKILL (default 5,000)
+  psTimeoutMs:
+    type: number
+    required: false
+    description: >
+      Timeout in ms for the `ps` call used to discover a timed-out
+      command's descendant processes (default 2,000)
 
 outputs:
   stdout:
@@ -59,6 +71,34 @@ constraints:
   - Output is truncated per stream and marked with a trailing [truncated]
   - onHeartbeat fires only while heartbeatMs > 0 and a callback is provided;
     the interval is cleared as soon as the command finishes
+  - >
+    A timeout kills every process the command spawned, not just the
+    immediate /bin/sh child. execFile's own built-in timeout only signals
+    that direct child, so a grandchild the shell spawned (npm's own `node
+    --test` child, for example) could outlive the "timed out" command and
+    hang the box indefinitely -- this matters because /bin/sh -c "npm
+    test" is a process tree, not a single process. Descendants are found
+    by walking `ps -Ao pid,ppid` from the direct child's pid rather than
+    by relying on OS process groups, since some sandboxed/containerized
+    hosts silently refuse to create a new process group for a detached
+    child, which would make a group-based kill a silent no-op.
+  - >
+    The descendant list is snapshotted once, at the moment SIGTERM is
+    sent, and the same list is reused for the SIGKILL escalation rather
+    than re-querying `ps`. Once a process in the tree dies, any surviving
+    child of it is reparented (to init), which changes its ppid -- a
+    second lookup at SIGKILL time would lose track of it.
+  - >
+    A timed-out command tree first gets SIGTERM, then SIGKILL after
+    killGraceMs if any of it hasn't exited. The SIGKILL escalation is not
+    cancelled just because the command's own callback already fired --
+    the immediate child can die quickly from SIGTERM while a stubborn
+    descendant (one that ignores SIGTERM) is still running and needs the
+    follow-up SIGKILL.
+  - >
+    The `ps` call used to discover descendants is itself bounded by
+    psTimeoutMs, so a wedged `ps` binary can't reintroduce the same class
+    of hang this mechanism exists to close
 
 tests:
   unit:
@@ -67,6 +107,7 @@ tests:
     - captures stdout and stderr separately
     - truncates long output and marks it
     - timed out command returns a non-zero exit code
+    - kills grandchild processes on timeout, not just the shell
     - calls onHeartbeat on an interval while a command runs
     - does not call onHeartbeat when heartbeatMs is 0
     - stops calling onHeartbeat once the command finishes

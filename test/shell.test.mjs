@@ -1,10 +1,19 @@
-import { afterEach, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { runShell } from '../src/shell.mjs';
+
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 let tmpDir;
 
@@ -50,6 +59,41 @@ describe('runShell', () => {
       { timeout: 20 },
     );
     assert.notEqual(result.exitCode, 0);
+  });
+
+  it('kills grandchild processes on timeout, not just the shell', async () => {
+    // Simulates `npm test` spawning a `node --test` grandchild that hangs on
+    // a stray interval: the direct child (standing in for npm) stays alive
+    // the whole time, and the grandchild ignores SIGTERM (as an un-refed
+    // interval effectively does -- the process just never exits on its
+    // own). A timeout that only signals the direct child would resolve
+    // runShell but leave this orphaned and running forever.
+    const markerFile = join(tmpDir, 'grandchild.pid');
+    const parentScript = join(tmpDir, 'parent.mjs');
+    await writeFile(
+      parentScript,
+      `
+      import { spawn } from 'node:child_process';
+      import { writeFileSync } from 'node:fs';
+      const child = spawn(process.execPath, ['-e', 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000);'], { stdio: 'ignore' });
+      writeFileSync(process.argv[2], String(child.pid));
+      setInterval(() => {}, 1000);
+      `,
+    );
+
+    await runShell(
+      `${process.execPath} ${parentScript} ${markerFile}`,
+      tmpDir,
+      { timeout: 100, killGraceMs: 100 },
+    );
+
+    const grandchildPid = Number(await readFile(markerFile, 'utf8'));
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.equal(
+      isProcessAlive(grandchildPid),
+      false,
+      'grandchild process should have been killed along with the rest of the command tree',
+    );
   });
 
   it('calls onHeartbeat on an interval while a command runs', async () => {
