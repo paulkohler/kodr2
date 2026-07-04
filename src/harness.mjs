@@ -370,6 +370,16 @@ export async function run(prompt, options) {
     if (stoppedReason === 'complete') {
       const touchedWorkspace =
         tools.filesChanged().length > 0 || tools.commandsRun() > 0;
+      // A run can legitimately finish untouched (a question-answering task),
+      // so this is a visible signal, not a failure -- but it looks identical
+      // to a quiet real success unless called out, which let a compaction-
+      // derailed run report a normal "complete" stop with nothing done.
+      result.noOpCompletion = !touchedWorkspace;
+      if (!touchedWorkspace && !quiet) {
+        process.stderr.write(
+          `${formatNotice('agent finished with no files changed and no commands run')}\n`,
+        );
+      }
       // The initial verify is capped to leave a heal reserve, so a hook that
       // hangs cannot consume the whole budget and starve repair. Heal's own
       // re-verifies use the full remaining budget (the reserve plus leftover).

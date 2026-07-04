@@ -250,6 +250,7 @@ export function summarizeResult(result) {
     healed: result.healed ?? null,
     healTurns: result.healTurns ?? null,
     verified: result.verification?.passed ?? null,
+    noOpCompletion: result.noOpCompletion ?? false,
     filesChanged: result.filesChanged ?? [],
     packageCommands: result.packageCommands ?? [],
     response: result.response ?? '',

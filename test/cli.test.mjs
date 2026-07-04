@@ -207,6 +207,7 @@ describe('summarizeResult', () => {
     assert.equal(summary.toolTurns, 5);
     assert.deepEqual(summary.filesChanged, ['server.js']);
     assert.equal(summary.error, null);
+    assert.equal(summary.noOpCompletion, false);
   });
 
   it('marks incomplete runs and surfaces errors', () => {
@@ -217,6 +218,15 @@ describe('summarizeResult', () => {
     assert.equal(summary.completed, false);
     assert.equal(summary.verified, null);
     assert.equal(summary.error, 'HTTP 500');
+  });
+
+  it('surfaces a no-op completion', () => {
+    const summary = summarizeResult({
+      stoppedReason: 'complete',
+      noOpCompletion: true,
+      filesChanged: [],
+    });
+    assert.equal(summary.noOpCompletion, true);
   });
 });
 

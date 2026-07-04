@@ -55,6 +55,16 @@ outputs:
   verification:
     type: object
     description: "{ passed, command, output, exitCode }"
+  noOpCompletion:
+    type: boolean
+    description: >
+      true when stoppedReason is "complete" but the workspace was never
+      touched (no files written, no commands run). Not itself a failure --
+      a question-answering task can legitimately finish this way -- but
+      it's otherwise indistinguishable from a quiet real success (no Stop
+      hooks run either, since they gate on the workspace being touched),
+      which let a compaction-derailed run silently report success having
+      done nothing.
   healed:
     type: boolean
     description: Whether healing succeeded (null if not attempted)
@@ -98,6 +108,7 @@ constraints:
   - System prompt file listing skips operator logs, copied kodr artifacts, and common build/dependency dirs (node_modules, target, dist, build, .next, __pycache__, .venv, venv, .gradle) so a build can't flood the prompt; ignored paths are still readable directly
   - System prompt requires tools to be called through the provided tool channel, not text-form pseudo calls
   - Verification runs when a test command is set and the workspace was touched (files written or a command run)
+  - A "complete" stop where the workspace was never touched sets noOpCompletion and emits a one-line stderr notice, so a genuine no-op (nothing to do) and a derailed run that quietly did nothing both stay visible instead of looking like an ordinary success
   - Healing only attempted when verification fails
   - CLI exits non-zero when final verification fails
   - CLI accepts -p/--prompt as a compatibility alias for prompt text
@@ -112,6 +123,8 @@ tests:
     - parseArgs handles all flag variants
     - CLI process failure follows final verification failure
     - summarizeResult produces a compact machine-readable run summary
+    - summarizeResult surfaces a no-op completion
+    - a run that completes without touching the workspace sets noOpCompletion and emits a notice
     - CLI process fails when run stopped before completion
     - maxRunMs budget detection works
     - remaining run budget can be used as a command timeout

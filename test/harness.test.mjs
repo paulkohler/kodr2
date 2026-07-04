@@ -231,6 +231,42 @@ describe('run failure artifacts', () => {
   });
 });
 
+describe('no-op completion', () => {
+  it('flags a run that completes without touching the workspace', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'kodr-noop-'));
+    const server = createServer((req, res) => {
+      if (req.url === '/api/v0/models') {
+        res.writeHead(404);
+        res.end('not found');
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end(
+        'data: {"choices":[{"delta":{"role":"assistant","content":"nothing to change"}}]}\n\n' +
+          'data: [DONE]\n\n',
+      );
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address();
+
+    try {
+      const result = await run('do work', {
+        cwd,
+        baseUrl: `http://127.0.0.1:${port}`,
+        model: 'test',
+        quiet: true,
+      });
+
+      assert.equal(result.stoppedReason, 'complete');
+      assert.equal(result.noOpCompletion, true);
+      assert.deepEqual(result.filesChanged, []);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 async function startFailingModel() {
   const server = createServer((req, res) => {
     if (req.url === '/api/v0/models') {
