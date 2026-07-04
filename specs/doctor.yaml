@@ -1,0 +1,78 @@
+name: doctor
+status: implemented
+description: >
+  `kodr doctor` -- a preflight command that checks the environment a run
+  would use (LM Studio reachability, a loaded model, git availability, the
+  Node.js version) and reports problems before a real run starts, instead
+  of a task failing mid-run with a bare connection error or an obscure
+  "command not found". Read-only: never changes anything, never touches a
+  workspace.
+
+  Deliberately does not check for the `biome` binary: biome is a
+  contributor-only dev-tool dependency of this repository's own build
+  (see scripts/require-biome.mjs and CLAUDE.md's zero-dependency rule),
+  not something the harness ever shells out to on behalf of an end user's
+  target workspace. A doctor check that's really about developing kodr
+  itself doesn't belong in a command shipped to every user of the CLI.
+
+inputs:
+  baseUrl:
+    type: string
+    description: LM Studio API base URL (default same as the model client's)
+  model:
+    type: string
+    description: Model identifier, if explicitly configured
+  timeoutMs:
+    type: number
+    description: Timeout for the LM Studio reachability probe (default 5000)
+  gitCheckFn:
+    type: function
+    description: Overridable for tests; defaults to running `git --version`
+  nodeVersion:
+    type: string
+    description: Overridable for tests; defaults to process.version
+
+outputs:
+  checks:
+    type: array
+    description: "One entry per check: { name, status: 'ok'|'warn'|'fail', detail }"
+  ok:
+    type: boolean
+    description: False when any check's status is 'fail' -- drives the CLI's exit code
+
+constraints:
+  - Runs four checks, in this order -- Node.js version, LM Studio reachability, a
+    loaded/resolvable model, git availability
+  - Node.js version below the package's engines requirement (22) is a fail; a
+    process already running on an unsupported version may behave unpredictably
+    elsewhere, so this is reported even though the check itself trivially passed
+  - LM Studio unreachable (connection refused, timeout, DNS failure) is a fail;
+    an ECONNREFUSED gets a specific "is LM Studio running?" hint rather than a
+    bare Node error message
+  - The model check only runs when LM Studio was reachable -- skipped, not
+    failed, since there's nothing meaningful to report without a connection
+  - No models loaded in LM Studio is a warn, not a fail -- kodr can still be
+    pointed at a model once one is loaded, so this isn't fatal to the tool itself
+  - git missing is a warn, not a fail -- only --raw-then-fix-commits and the
+    workspace-is-a-repo check for that feature need it; plenty of kodr runs
+    never touch git
+  - `ok` is true whenever no check is 'fail', even if some are 'warn'
+  - CLI `kodr doctor` prints a formatted report and exits 1 if any check failed,
+    0 otherwise (warnings do not affect the exit code)
+  - Never writes to the workspace or LM Studio; every check is read-only
+
+tests:
+  unit:
+    - checkNodeVersion is ok at or above the minimum
+    - checkNodeVersion fails below the minimum
+    - runDoctorChecks reports LM Studio reachable when the server responds
+    - runDoctorChecks reports a fail with a "is LM Studio running?" hint on ECONNREFUSED
+    - runDoctorChecks reports a fail on a timeout
+    - runDoctorChecks skips the model check when LM Studio is unreachable
+    - runDoctorChecks warns when LM Studio has no models loaded
+    - runDoctorChecks reports the resolved model id when one is loaded
+    - runDoctorChecks reports git ok when the check function succeeds
+    - runDoctorChecks warns when the git check function fails
+    - ok is false when any check fails, true when only warnings are present
+    - formatDoctorReport renders each check's status icon, name, and detail
+    - parseArgs recognizes "kodr doctor" as a standalone subcommand, taking no prompt

@@ -5,8 +5,9 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { DEFAULT_COMMIT_TIMEOUT_MS } from './commit.mjs';
+import { runDoctorChecks } from './doctor.mjs';
 import { parseEnvNames } from './env.mjs';
-import { formatModelsList } from './format.mjs';
+import { formatDoctorReport, formatModelsList } from './format.mjs';
 import { DEFAULT_HEARTBEAT_MS, resolveRunsDir, run } from './harness.mjs';
 import { DEFAULT_INCIDENT_HEARTBEAT_MS } from './incident.mjs';
 import { createClient, DEFAULT_MAX_RETRIES } from './model.mjs';
@@ -36,6 +37,11 @@ export async function main(argv) {
 
   if (args.command === 'models') {
     await printModels(args);
+    return;
+  }
+
+  if (args.command === 'doctor') {
+    await printDoctor(args);
     return;
   }
 
@@ -476,6 +482,8 @@ export function parseArgs(argv) {
     // prompt is already set from positional
   } else if (args.command === 'models') {
     // standalone subcommand — lists models, takes no prompt
+  } else if (args.command === 'doctor') {
+    // standalone subcommand — preflight checks, takes no prompt
   } else if (args.command && !args.prompt) {
     // Treat the command as the prompt (shorthand)
     args.prompt = args.command;
@@ -493,6 +501,7 @@ Usage:
   kodr run "your prompt"          Run a coding task
   kodr "your prompt"              Shorthand for 'kodr run'
   kodr models                     List LM Studio models and their context windows
+  kodr doctor                     Preflight checks: LM Studio, a loaded model, git, Node.js version
 
 Options:
   --cwd <path>                    Workspace directory (default: .)
@@ -554,6 +563,17 @@ async function printModels(args) {
   const client = createClient({ baseUrl: args.baseUrl, model: args.model });
   const models = await client.richModels();
   process.stdout.write(`${formatModelsList(models, args.baseUrl)}\n`);
+}
+
+async function printDoctor(args) {
+  const report = await runDoctorChecks({
+    baseUrl: args.baseUrl,
+    model: args.model,
+  });
+  process.stdout.write(`${formatDoctorReport(report)}\n`);
+  if (!report.ok) {
+    process.exitCode = 1;
+  }
 }
 
 async function printVersion() {

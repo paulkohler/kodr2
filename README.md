@@ -66,6 +66,24 @@ $ kodr models
 ○ openai/gpt-oss-20b      131072 max
 ```
 
+`kodr doctor` checks the environment a run would use -- LM Studio
+reachability, a loaded model, git, and the Node.js version -- and reports
+problems before a task fails mid-run with a bare connection error. Read-only;
+exits non-zero only if a check actually fails (warnings don't affect the exit
+code).
+
+```
+$ kodr doctor
+kodr doctor
+
+  ✓ Node.js version -- v24.16.0
+  ✓ LM Studio -- reachable at http://localhost:1234/v1
+  ✓ model -- google/gemma-4-26b-a4b
+  ✓ git -- git version 2.53.0
+
+ok
+```
+
 ## Tools
 
 The model has these tools available:

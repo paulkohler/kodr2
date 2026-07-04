@@ -7,7 +7,7 @@
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 
-const DEFAULT_BASE_URL = 'http://localhost:1234/v1';
+export const DEFAULT_BASE_URL = 'http://localhost:1234/v1';
 const DEFAULT_TIMEOUT = 600_000; // 10 minutes
 export const DEFAULT_MAX_RETRIES = 1;
 

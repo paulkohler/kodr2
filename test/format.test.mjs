@@ -10,6 +10,7 @@ import {
   formatNotice,
   formatSummary,
   formatModelsList,
+  formatDoctorReport,
 } from '../src/format.mjs';
 
 // Strip ANSI escapes so assertions read against plain text.
@@ -187,5 +188,36 @@ describe('formatModelsList', () => {
   it('reports when no models are available', () => {
     const out = plain(formatModelsList([], 'http://localhost:1234/v1'));
     assert.match(out, /No models reported/);
+  });
+});
+
+describe('formatDoctorReport', () => {
+  it("renders each check's status icon, name, and detail", () => {
+    const out = plain(
+      formatDoctorReport({
+        ok: false,
+        checks: [
+          { name: 'Node.js version', status: 'ok', detail: 'v22.1.0' },
+          { name: 'git', status: 'warn', detail: 'git not found' },
+          { name: 'LM Studio', status: 'fail', detail: 'not reachable' },
+        ],
+      }),
+    );
+
+    assert.match(out, /✓ Node\.js version.*v22\.1\.0/);
+    assert.match(out, /⚠ git.*git not found/);
+    assert.match(out, /✗ LM Studio.*not reachable/);
+    assert.match(out, /failed/);
+  });
+
+  it('reports ok with no failure line when every check passes', () => {
+    const out = plain(
+      formatDoctorReport({
+        ok: true,
+        checks: [{ name: 'git', status: 'ok', detail: 'git version 2.42.0' }],
+      }),
+    );
+    assert.match(out, /\bok\b/);
+    assert.doesNotMatch(out, /failed/);
   });
 });

@@ -212,6 +212,37 @@ function modelContextSummary(model) {
   return `${DIM}${max ?? '?'} max${RESET}`;
 }
 
+/**
+ * Format a `kodr doctor` report.
+ * @param {{ checks: Array<{ name: string, status: string, detail: string }>, ok: boolean }} report
+ * @returns {string}
+ */
+export function formatDoctorReport(report) {
+  const lines = [`${BOLD}kodr doctor${RESET}`, ''];
+  for (const check of report.checks) {
+    lines.push(
+      `  ${statusIcon(check.status)} ${check.name}${DIM} -- ${check.detail}${RESET}`,
+    );
+  }
+  lines.push('');
+  lines.push(
+    report.ok
+      ? `${GREEN}ok${RESET}`
+      : `${RED}failed -- see the checks above${RESET}`,
+  );
+  return lines.join('\n');
+}
+
+function statusIcon(status) {
+  if (status === 'ok') {
+    return `${GREEN}✓${RESET}`;
+  }
+  if (status === 'warn') {
+    return `${YELLOW}⚠${RESET}`;
+  }
+  return `${RED}✗${RESET}`;
+}
+
 // --- helpers ---
 
 function summariseArgs(name, args) {
