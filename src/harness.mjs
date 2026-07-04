@@ -1045,6 +1045,7 @@ export function createRunRecord(result, finish = {}) {
     compactions: result.compactions ?? null,
     error: result.error ?? null,
     verified: result.verification?.passed ?? null,
+    noOpCompletion: result.noOpCompletion ?? false,
     healed: result.healed ?? null,
     healTurns: result.healTurns ?? null,
     messages: result.messages,

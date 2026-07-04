@@ -41,6 +41,7 @@ describe('createRunRecord', () => {
         verification: { passed: true },
         healed: false,
         healTurns: 1,
+        noOpCompletion: false,
         messages: [],
       },
       {
@@ -58,6 +59,7 @@ describe('createRunRecord', () => {
     assert.equal(record.error, null);
     assert.equal(record.verified, true);
     assert.equal(record.healTurns, 1);
+    assert.equal(record.noOpCompletion, false);
   });
 });
 
