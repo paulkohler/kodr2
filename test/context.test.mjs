@@ -1,13 +1,13 @@
-import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, mkdir, rm, symlink } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import {
   buildSystemPrompt,
-  readInstructions,
   listWorkspaceFiles,
+  readInstructions,
 } from '../src/context.mjs';
 
 let tmpDir;
@@ -161,5 +161,29 @@ describe('buildSystemPrompt', () => {
   it('omits the skills section when no skills exist', async () => {
     const prompt = await buildSystemPrompt(tmpDir);
     assert.ok(!prompt.includes('<available-skills>'));
+  });
+
+  it('includes MEMORY.md as a section distinct from workspace-instructions', async () => {
+    await writeFile(join(tmpDir, 'KODR.md'), 'human-authored rules');
+    await writeFile(
+      join(tmpDir, 'MEMORY.md'),
+      'agent-proposed, human-approved lesson',
+    );
+    const prompt = await buildSystemPrompt(tmpDir);
+    assert.ok(prompt.includes('<memory>'));
+    assert.ok(prompt.includes('agent-proposed, human-approved lesson'));
+    assert.ok(prompt.includes('<workspace-instructions>'));
+    assert.ok(prompt.includes('human-authored rules'));
+    // Genuinely separate sections, not one absorbed into the other.
+    const memorySection = prompt.slice(
+      prompt.indexOf('<memory>'),
+      prompt.indexOf('</memory>'),
+    );
+    assert.ok(!memorySection.includes('human-authored rules'));
+  });
+
+  it('omits the memory section when MEMORY.md does not exist', async () => {
+    const prompt = await buildSystemPrompt(tmpDir);
+    assert.ok(!prompt.includes('<memory>'));
   });
 });

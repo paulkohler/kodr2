@@ -35,6 +35,13 @@ import {
 } from './incident.mjs';
 import { ensureModelLoaded } from './lms.mjs';
 import {
+  isMemoryEnabled,
+  memorySizeCap,
+  memorySizeNotice,
+  readMemory,
+  runMemoryRetrospective,
+} from './memory.mjs';
+import {
   createClient,
   DEFAULT_MAX_RETRIES,
   hasContextHeadroom,
@@ -94,6 +101,18 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  *   notice (not an error) when cwd isn't a git work tree.
  * @param {number} [options.commitTimeoutMs] - Timeout for each git call raw-then-fix
  *   commit mode makes (default 30 seconds — KODR_COMMIT_TIMEOUT_MS)
+ * @param {boolean} [options.memory] - Run an end-of-run retrospective proposing lessons
+ *   for future runs in this workspace (also KODR_MEMORY). Off by default. Never writes
+ *   to MEMORY.md without a human decision — see specs/memory.yaml.
+ * @param {number} [options.memoryReserve] - Fraction of the run budget the retrospective
+ *   refuses to spend into, mirroring healReserve (default 0.1 — KODR_MEMORY_RESERVE)
+ * @param {boolean} [options.memoryAttended] - Whether to prompt inline for confirmation
+ *   (true when stdout is a TTY and neither --quiet nor --json is set); unattended runs
+ *   write a proposal file instead
+ * @param {boolean} [options.memoryAutoApply] - Skip the confirmation prompt and apply
+ *   directly (--memory-auto-apply); opt-in only, never the default
+ * @param {number} [options.memorySizeCap] - Size cap for MEMORY.md in characters, past
+ *   which a notice (not truncation) is printed (default 8000 — KODR_MEMORY_SIZE_CAP)
  * @returns {Promise<object>} Run result
  */
 export async function run(prompt, options) {
@@ -178,7 +197,23 @@ export async function run(prompt, options) {
     maxRunMs,
   });
   const commandEnv = buildEnv(envPassthrough);
-  const systemPrompt = await buildSystemPrompt(cwd);
+  // Read once and pass the same content to both buildSystemPrompt and the
+  // size-cap check below, rather than each reading MEMORY.md separately --
+  // two independent reads could otherwise observe different content if a
+  // concurrent process appended to it in between.
+  const memoryContent = await readMemory(cwd);
+  const systemPrompt = await buildSystemPrompt(cwd, { memory: memoryContent });
+
+  // MEMORY.md is always loaded into the prompt above when it exists; this
+  // never truncates it, just flags an oversized file so a human notices
+  // and prunes instead of it growing unbounded with no signal either way.
+  const sizeNotice = memorySizeNotice(
+    memoryContent,
+    memorySizeCap(options.memorySizeCap),
+  );
+  if (sizeNotice && !quiet) {
+    process.stderr.write(`${formatNotice(sizeNotice)}\n`);
+  }
 
   // Build messages
   const messages = [];
@@ -439,30 +474,94 @@ export async function run(prompt, options) {
     }
   }
 
-  // Review pass: a fresh tool-loop conversation over what the build phase
-  // changed, on the review model if one's configured. Never lets a review
-  // failure overwrite an otherwise-successful build result -- it's an
-  // added opinion, not part of the outcome the run is judged on.
-  if (options.reviewModel && result.stoppedReason === 'complete') {
-    result.review = await runReviewPass({
-      cwd,
-      client,
-      reviewModel: options.reviewModel,
-      reviewContextWindow: options.reviewContextWindow,
-      buildContextWindow: contextWindow,
-      filesChanged: tools.filesChanged(),
-      startedAt,
-      maxRunMs,
-      heartbeatMs,
-      onHeartbeat: onModelHeartbeat,
-      envPassthrough,
-      minToolCalls: options.reviewMinToolCalls,
-      maxToolTurns: options.reviewMaxToolTurns,
-      quiet,
-    });
-    if (result.review.usage) {
-      result.usage.prompt += result.review.usage.prompt;
-      result.usage.completion += result.review.usage.completion;
+  // Both post-build steps below (review pass, memory retrospective)
+  // already protect against their OWN internal errors -- runReviewPass
+  // and runMemoryRetrospective's own try/catch never let a model/tool
+  // failure propagate. This outer try/catch is a last-resort net for
+  // something more fundamental in the glue code around them (a notice
+  // write, a usage-accumulation bug) so it can't take an otherwise-
+  // successful build result down with it.
+  try {
+    // Review pass: a fresh tool-loop conversation over what the build phase
+    // changed, on the review model if one's configured. Never lets a review
+    // failure overwrite an otherwise-successful build result -- it's an
+    // added opinion, not part of the outcome the run is judged on.
+    if (options.reviewModel && result.stoppedReason === 'complete') {
+      result.review = await runReviewPass({
+        cwd,
+        client,
+        reviewModel: options.reviewModel,
+        reviewContextWindow: options.reviewContextWindow,
+        buildContextWindow: contextWindow,
+        filesChanged: tools.filesChanged(),
+        startedAt,
+        maxRunMs,
+        heartbeatMs,
+        onHeartbeat: onModelHeartbeat,
+        envPassthrough,
+        minToolCalls: options.reviewMinToolCalls,
+        maxToolTurns: options.reviewMaxToolTurns,
+        quiet,
+      });
+      if (result.review.usage) {
+        result.usage.prompt += result.review.usage.prompt;
+        result.usage.completion += result.review.usage.completion;
+      }
+    }
+
+    // End-of-run retrospective: never writes to MEMORY.md without a human
+    // decision in the loop (see specs/memory.yaml). Off by default. Unlike
+    // incident telemetry, noSave only skips the unattended proposal-file
+    // write (runMemoryRetrospective handles that internally) rather than
+    // the whole feature -- --memory-auto-apply writes directly to
+    // MEMORY.md at the workspace root, unrelated to runsDir hygiene, and
+    // must keep working under --no-save.
+    if (isMemoryEnabled(options.memory)) {
+      try {
+        result.memory = await runMemoryRetrospective({
+          client,
+          modelId,
+          messages,
+          cwd,
+          startedAt,
+          maxRunMs,
+          memoryReserve: options.memoryReserve,
+          toolTurns: result.toolTurns,
+          runsDir,
+          attended: options.memoryAttended,
+          autoApply: options.memoryAutoApply,
+          noSave,
+        });
+      } catch (err) {
+        result.memory = { proposed: false, error: err.message };
+      }
+
+      if (!quiet) {
+        if (result.memory.error) {
+          process.stderr.write(
+            `${formatNotice(`memory retrospective failed: ${result.memory.error}`)}\n`,
+          );
+        } else if (result.memory.proposalPath) {
+          process.stderr.write(
+            `${formatNotice(`memory proposal written: ${result.memory.proposalPath}`)}\n`,
+          );
+        } else if (result.memory.applied) {
+          process.stderr.write(
+            `${formatNotice('memory notes applied to MEMORY.md')}\n`,
+          );
+        }
+      }
+
+      if (result.memory.usage) {
+        result.usage.prompt += result.memory.usage.prompt;
+        result.usage.completion += result.memory.usage.completion;
+      }
+    }
+  } catch (err) {
+    if (!quiet) {
+      process.stderr.write(
+        `${formatNotice(`post-build step failed: ${err.message}`)}\n`,
+      );
     }
   }
 

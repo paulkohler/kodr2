@@ -1,5 +1,5 @@
 name: memory
-status: proposed
+status: implemented
 description: >
   End-of-run retrospective. After the tool loop reaches an outcome, distill
   the conversation and ask the model to propose lessons for future runs in
@@ -76,13 +76,69 @@ constraints:
   - Distillation reuses compact.mjs's renderTranscript rather than a second bespoke transcript renderer
   - Never writes to MEMORY.md without a human decision in the loop:
     - Attended (TTY stdout, no --quiet/--json) — print the proposed notes and prompt "Keep these notes for future runs? [y/N]"; apply on yes, discard on no or no response
-    - Unattended (CI, --json, --quiet, or no TTY) — write the proposal to .kodr/runs/<timestamp>/memory-proposal.md, peer to the run transcript, and print one notice line pointing at it; MEMORY.md is left untouched
+    - Unattended (CI, --json, --quiet, or no TTY) — write the proposal to
+      `<runsDir>/<timestamp>.memory-proposal.md` — a flat file peer to the run
+      transcript, matching this codebase's actual runsDir layout (run
+      transcripts, incident records, and heartbeats are all flat files
+      distinguished by suffix, not per-run subdirectories) — and print one
+      notice line pointing at it; MEMORY.md is left untouched
     - --memory-auto-apply bypasses the prompt and applies directly; opt-in only, for a pipeline that has already decided to trust the loop (e.g. a scheduled dogfood run) — never the default
+  - >
+    noSave only skips the *unattended proposal-file* write, not the whole
+    feature — narrower than incident telemetry's gate, deliberately.
+    --memory-auto-apply writes directly to MEMORY.md at the workspace
+    root, unrelated to runsDir hygiene, and must keep working under
+    --no-save; an explicit --memory --memory-auto-apply --no-save
+    combination should do what the user asked, not silently do nothing.
+    Under noSave with neither auto-apply nor an attended "yes", the
+    generated notes are still returned to the caller (visible in --json
+    output or a programmatic caller's own result object) — nothing is
+    written to disk, but nothing is silently discarded either.
+  - >
+    appendMemoryNotes appends via the OS-level 'a' (O_APPEND) flag rather
+    than a read-then-write-whole-file. Two concurrent kodr processes in
+    the same workspace (a scheduled dogfood run overlapping a manual one)
+    would otherwise race on a read-modify-write and the last writer would
+    silently discard the other's entry — a real violation of "never drops
+    existing content" that a read-then-write implementation had during
+    development, confirmed with a concurrent-write repro. O_APPEND makes
+    each write atomic at the OS level, so both entries always land.
+  - >
+    The attended y/N prompt has its own timeout (default 5 minutes —
+    KODR_MEMORY_PROMPT_TIMEOUT_MS), independent of readline's own
+    behavior. Confirmed directly during development: an unanswered
+    readline question() never resolves on its own on EOF or even when the
+    interface is explicitly closed — there is no built-in way it settles
+    without a real answer. Without this timeout, attended being
+    miscomputed against a stream that isn't genuinely interactive (e.g.
+    stdout is a TTY but stdin is piped/redirected) would hang the entire
+    process indefinitely with no notice. On timeout, the notes fall back
+    to the same persisted-proposal path an unattended session gets,
+    rather than being silently discarded as a plain "no" would be.
+  - >
+    MEMORY.md itself is always loaded into the system prompt when it
+    exists, regardless of whether --memory is set for the current run —
+    --memory only toggles whether a *new* retrospective is generated at the
+    end of this run, not whether a human-approved MEMORY.md from a past run
+    gets used. The file is only ever written to by a human's own edits or
+    by an explicitly-approved/auto-applied proposal, never by its mere
+    presence being read.
   - MEMORY.md lives at the workspace root, alongside KODR.md/AGENTS.md — human-editable, git-trackable, reviewable in a diff
   - Applying a proposal appends; it never rewrites or drops existing MEMORY.md content, so a human's own edits survive
   - MEMORY.md is loaded into the system prompt as its own section, separate from <workspace-instructions> (context.mjs), since one is human-authored and the other is human-approved-but-agent-written — the model (and any human reading a transcript) should be able to tell them apart
-  - MEMORY.md has a size cap (default matches the existing context.mjs file-listing style: a fixed line/token ceiling); going over it produces a notice rather than silent truncation, so a human notices and prunes instead of memory quietly losing content
+  - >
+    MEMORY.md has a size cap (default 8,000 characters — KODR_MEMORY_SIZE_CAP).
+    Going over it never truncates the content actually loaded into the
+    system prompt — the full file is still used — it only produces a
+    notice, so a human notices and prunes instead of memory silently
+    shrinking or growing unbounded with no signal either way.
   - A run with no meaningful tool activity (e.g. the model answered with no tool call at all) skips the retrospective — nothing to learn from
+  - >
+    The model's own signal for "nothing worth keeping" is the literal
+    reply "No findings." (matching the same convention specs/review.yaml
+    already uses for its review pass) — treated as proposed: true (a
+    retrospective did run) but notes: '' and applied: false, with no
+    prompt and no proposal file, since there's nothing to confirm or write.
 
 open_questions:
   - What triggers "worth a retrospective"? Every run, or only non-trivial ones (tool calls above some floor, or stoppedReason != complete)? Running it unconditionally is the simplest default but spends tokens on runs that taught nothing.
@@ -102,5 +158,10 @@ tests:
     - applying a proposal appends to existing MEMORY.md content rather than replacing it
     - MEMORY.md is injected into the system prompt as a section distinct from workspace-instructions
     - MEMORY.md over the size cap produces a notice instead of silent truncation
+    - --memory-auto-apply still writes to MEMORY.md under noSave
+    - unattended session under noSave returns the notes without writing a proposal file
+    - promptYesNo resolves to null, not a hang, when no answer is ever obtained
+    - an attended prompt timeout falls back to a persisted proposal rather than discarding the notes
+    - concurrent appendMemoryNotes calls never lose an entry
   eval:
     - two sequential runs in the same workspace, second run's approach visibly reflects an applied lesson from the first

@@ -4,11 +4,12 @@
  * that goes into the system prompt.
  */
 
-import { readFile, readdir } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
+import { shouldIgnoreEntry } from './ignore.mjs';
+import { readMemory } from './memory.mjs';
 import { resolveExistingPath } from './path-jail.mjs';
 import { discoverSkills } from './skills.mjs';
-import { shouldIgnoreEntry } from './ignore.mjs';
 
 const INSTRUCTION_FILES = ['KODR.md', 'AGENTS.md'];
 const MAX_FILES = 200;
@@ -16,9 +17,14 @@ const MAX_FILES = 200;
 /**
  * Assemble the system prompt for a workspace.
  * @param {string} cwd - Workspace root
+ * @param {object} [options]
+ * @param {string|null} [options.memory] - Pre-fetched MEMORY.md content. Reads it
+ *   itself when omitted; callers that also need the content separately (e.g. for a
+ *   size-cap notice) should read it once and pass it through here instead, so the
+ *   file can't change between two independent reads.
  * @returns {Promise<string>}
  */
-export async function buildSystemPrompt(cwd) {
+export async function buildSystemPrompt(cwd, options = {}) {
   const parts = [BASE_PROMPT];
 
   const instructions = await readInstructions(cwd);
@@ -26,6 +32,21 @@ export async function buildSystemPrompt(cwd) {
     parts.push('<workspace-instructions>');
     parts.push(instructions);
     parts.push('</workspace-instructions>');
+  }
+
+  // Distinct from <workspace-instructions>: one is human-authored, the
+  // other is human-approved-but-agent-written -- always loaded when
+  // MEMORY.md exists, regardless of whether a new retrospective runs for
+  // this particular run.
+  const memory =
+    options.memory !== undefined ? options.memory : await readMemory(cwd);
+  if (memory) {
+    parts.push('<memory>');
+    parts.push(
+      'Lessons proposed by a prior run in this workspace and approved by a human.',
+    );
+    parts.push(memory);
+    parts.push('</memory>');
   }
 
   const skills = await discoverSkills(cwd);

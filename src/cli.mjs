@@ -149,6 +149,20 @@ export async function main(argv) {
     noSave: args.noSave,
     rawThenFixCommits: args.rawThenFixCommits,
     commitTimeoutMs: args.commitTimeoutMs,
+    memory: args.memory,
+    memoryAutoApply: args.memoryAutoApply,
+    // Attended: an interactive terminal where output isn't being scraped
+    // (--quiet) or consumed as machine-readable (--json) -- only then does
+    // prompting for a y/N confirmation make sense. Both ends of the
+    // terminal matter here, not just stdout: stdin also has to be a real
+    // TTY, or a y/N prompt has nothing to actually read an answer from
+    // (memory.mjs's own prompt timeout is a backstop, not a substitute
+    // for getting this right at the source).
+    memoryAttended:
+      Boolean(process.stdout.isTTY) &&
+      Boolean(process.stdin.isTTY) &&
+      !args.quiet &&
+      !args.json,
   };
   if (args.contextWindow !== null) {
     options.contextWindow = args.contextWindow;
@@ -284,6 +298,8 @@ export function parseArgs(argv) {
     runsDir: null,
     noSave: false,
     rawThenFixCommits: false,
+    memory: false,
+    memoryAutoApply: false,
     commitTimeoutMs: DEFAULT_COMMIT_TIMEOUT_MS,
     json: false,
     noFail: false,
@@ -420,6 +436,16 @@ export function parseArgs(argv) {
       i++;
       continue;
     }
+    if (arg === '--memory') {
+      args.memory = true;
+      i++;
+      continue;
+    }
+    if (arg === '--memory-auto-apply') {
+      args.memoryAutoApply = true;
+      i++;
+      continue;
+    }
     if (arg === '--json') {
       args.json = true;
       i++;
@@ -498,6 +524,14 @@ Options:
                                   Off by default; skipped with a notice outside a git repo.
   --commit-timeout-ms <n>         Timeout for each git call raw-then-fix commit mode makes
                                   (or KODR_COMMIT_TIMEOUT_MS; default: 30000)
+  --memory                        Propose lessons for future runs in this workspace at the
+                                  end of the run (or KODR_MEMORY). Off by default. Never
+                                  writes to MEMORY.md without a human decision -- an
+                                  attended terminal gets a y/N prompt, otherwise a proposal
+                                  file is written next to the run transcript.
+  --memory-auto-apply             Skip the confirmation prompt and apply proposed notes
+                                  directly; opt-in only, for a pipeline that has already
+                                  decided to trust the loop.
   --json                          Print a machine-readable run summary to stdout
   --no-fail                       Always exit 0 (or KODR_NO_FAIL); for external-verifier runs
   --quiet, -q                     Suppress streaming output

@@ -369,3 +369,48 @@ describe('review pass wiring', () => {
     assert.match(result.error, /reviewer model not found/);
   });
 });
+
+describe('memory retrospective wiring', () => {
+  it('attaches no memory result when --memory is not set', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'kodr-nomemory-'));
+    const model = await startFailingModel();
+    try {
+      const result = await run('do work', {
+        cwd,
+        baseUrl: model.baseUrl,
+        model: 'test',
+        quiet: true,
+      });
+      assert.equal(result.memory, undefined);
+    } finally {
+      await model.close();
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('still attempts the retrospective when noSave is set and memory is enabled -- noSave only skips the proposal-file write, not the whole feature', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'kodr-nomemory-nosave-'));
+    const model = await startFailingModel();
+    try {
+      const result = await run('do work', {
+        cwd,
+        noSave: true,
+        memory: true,
+        baseUrl: model.baseUrl,
+        model: 'test',
+        quiet: true,
+      });
+      // The model fails before any tool call, so toolTurns is 0 and the
+      // retrospective's own internal check skips it -- but that's a
+      // different reason than the gate itself blocking the attempt, which
+      // is exactly what this test distinguishes: result.memory is defined
+      // (the feature was reached and ran its own logic), not undefined
+      // (the feature never got a chance to run at all).
+      assert.notEqual(result.memory, undefined);
+      assert.equal(result.memory.proposed, false);
+    } finally {
+      await model.close();
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
