@@ -1,8 +1,8 @@
-import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { createToolRegistry } from '../src/tools/index.mjs';
 
@@ -88,5 +88,24 @@ describe('createToolRegistry', () => {
     assert.deepEqual(registry.packageCommands(), [
       'node --version && npm install --help',
     ]);
+  });
+
+  it('restricts definitions to allowedTools when given', () => {
+    const registry = createToolRegistry(tmpDir, {
+      allowedTools: ['read_file', 'list_files', 'search'],
+    });
+    const names = registry.definitions().map((d) => d.name);
+    assert.deepEqual(names.sort(), ['list_files', 'read_file', 'search']);
+  });
+
+  it('rejects dispatch to a tool excluded by allowedTools', async () => {
+    const registry = createToolRegistry(tmpDir, {
+      allowedTools: ['read_file'],
+    });
+    const result = await registry.dispatch('write_file', {
+      path: 'a.txt',
+      content: 'a',
+    });
+    assert.match(result.error, /unknown tool/i);
   });
 });

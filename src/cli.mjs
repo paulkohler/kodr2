@@ -9,6 +9,10 @@ import { formatModelsList } from './format.mjs';
 import { DEFAULT_HEARTBEAT_MS, resolveRunsDir, run } from './harness.mjs';
 import { DEFAULT_INCIDENT_HEARTBEAT_MS } from './incident.mjs';
 import { createClient, DEFAULT_MAX_RETRIES } from './model.mjs';
+import {
+  DEFAULT_MIN_REVIEW_TOOL_CALLS,
+  DEFAULT_REVIEW_MAX_TOOL_TURNS,
+} from './review.mjs';
 import { MAX_TOOL_TURNS } from './tool-loop.mjs';
 
 /**
@@ -84,6 +88,37 @@ export async function main(argv) {
     process.exitCode = 1;
     return;
   }
+  if (
+    args.reviewContextWindow !== null &&
+    (!Number.isInteger(args.reviewContextWindow) ||
+      args.reviewContextWindow < 0)
+  ) {
+    process.stderr.write(
+      '--review-context-window must be a non-negative integer.\n',
+    );
+    process.exitCode = 1;
+    return;
+  }
+  if (
+    !Number.isInteger(args.reviewMinToolCalls) ||
+    args.reviewMinToolCalls < 0
+  ) {
+    process.stderr.write(
+      '--review-min-tool-calls must be a non-negative integer.\n',
+    );
+    process.exitCode = 1;
+    return;
+  }
+  if (
+    !Number.isInteger(args.reviewMaxToolTurns) ||
+    args.reviewMaxToolTurns < 1
+  ) {
+    process.stderr.write(
+      '--review-max-tool-turns must be a positive integer.\n',
+    );
+    process.exitCode = 1;
+    return;
+  }
 
   const cwd = resolve(args.cwd || '.');
   const options = {
@@ -97,6 +132,9 @@ export async function main(argv) {
     heartbeatMs: args.heartbeatMs,
     incidentHeartbeatMs: args.incidentHeartbeatMs,
     maxRetries: args.modelRetries,
+    reviewModel: args.reviewModel,
+    reviewMinToolCalls: args.reviewMinToolCalls,
+    reviewMaxToolTurns: args.reviewMaxToolTurns,
     quiet: args.quiet || args.json,
     envPassthrough: args.env,
     runsDir: args.runsDir,
@@ -104,6 +142,9 @@ export async function main(argv) {
   };
   if (args.contextWindow !== null) {
     options.contextWindow = args.contextWindow;
+  }
+  if (args.reviewContextWindow !== null) {
+    options.reviewContextWindow = args.reviewContextWindow;
   }
 
   // Handle continuation
@@ -222,6 +263,10 @@ export function parseArgs(argv) {
     incidentHeartbeatMs: DEFAULT_INCIDENT_HEARTBEAT_MS,
     modelRetries: DEFAULT_MAX_RETRIES,
     contextWindow: null,
+    reviewModel: null,
+    reviewContextWindow: null,
+    reviewMinToolCalls: DEFAULT_MIN_REVIEW_TOOL_CALLS,
+    reviewMaxToolTurns: DEFAULT_REVIEW_MAX_TOOL_TURNS,
     quiet: false,
     env: [],
     continue: null,
@@ -312,6 +357,26 @@ export function parseArgs(argv) {
       i++;
       continue;
     }
+    if (arg === '--review-model' && argv[i + 1]) {
+      args.reviewModel = argv[++i];
+      i++;
+      continue;
+    }
+    if (arg === '--review-context-window' && argv[i + 1]) {
+      args.reviewContextWindow = parseInt(argv[++i], 10);
+      i++;
+      continue;
+    }
+    if (arg === '--review-min-tool-calls' && argv[i + 1]) {
+      args.reviewMinToolCalls = parseInt(argv[++i], 10);
+      i++;
+      continue;
+    }
+    if (arg === '--review-max-tool-turns' && argv[i + 1]) {
+      args.reviewMaxToolTurns = parseInt(argv[++i], 10);
+      i++;
+      continue;
+    }
     if (arg === '--env' && argv[i + 1]) {
       args.env = parseEnvNames(argv[++i]);
       i++;
@@ -393,6 +458,14 @@ Options:
                                   default: 30000, 0 disables)
   --model-retries <n>             Retries for a 5xx chat response, e.g. a local backend crash (or KODR_MODEL_RETRIES; default: 1, 0 disables)
   --context-window <n>            Max context window in tokens; compact at 80% (default: 8192, 0 disables)
+  --review-model <id>             Run a review pass on this model after a successful build.
+                                  Kodr owns the LM Studio load/unload/verify sequencing for
+                                  both models via lms (see specs/lms.yaml). Omitted (the
+                                  default): a single model serves both roles, unchanged.
+  --review-context-window <n>     Context window for the review model (default: same as --context-window)
+  --review-min-tool-calls <n>     Tool-call floor before a review counts as grounded (or
+                                  KODR_REVIEW_MIN_TOOL_CALLS; default: 2, 0 disables the floor)
+  --review-max-tool-turns <n>     Tool-turn ceiling per review attempt (or KODR_REVIEW_MAX_TOOL_TURNS; default: 12)
   --env <a,b,c>                   Extra env vars to expose to commands (CSV of names)
   --continue <last|path>          Continue from a prior run
   --runs-dir <path>               Where to write run transcripts (or KODR_RUNS_DIR)

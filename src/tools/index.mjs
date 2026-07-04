@@ -2,13 +2,13 @@
  * Tool registry — collects tools, generates API schemas, dispatches calls.
  */
 
-import readFile from './read-file.mjs';
-import writeFile from './write-file.mjs';
 import editFile from './edit-file.mjs';
 import listFiles from './list-files.mjs';
-import search from './search.mjs';
-import runCommand from './run-command.mjs';
 import loadSkill from './load-skill.mjs';
+import readFile from './read-file.mjs';
+import runCommand from './run-command.mjs';
+import search from './search.mjs';
+import writeFile from './write-file.mjs';
 
 const ALL_TOOLS = [
   readFile,
@@ -28,6 +28,8 @@ const ALL_TOOLS = [
  * @param {number} [options.commandTimeoutMs] - Default shell timeout for run_command
  * @param {Date} [options.startedAt] - Run start, for remaining-budget timeouts
  * @param {number} [options.maxRunMs] - Overall run budget in ms
+ * @param {string[]} [options.allowedTools] - Restrict the registry to these
+ *   tool names (e.g. a read-only review pass). Omitted means every tool.
  * @returns {object} Registry with `definitions`, `dispatch`, and `context`
  */
 export function createToolRegistry(cwd, options = {}) {
@@ -54,8 +56,14 @@ export function createToolRegistry(cwd, options = {}) {
     },
   };
 
+  const activeTools = options.allowedTools
+    ? ALL_TOOLS.filter((tool) =>
+        options.allowedTools.includes(tool.definition.name),
+      )
+    : ALL_TOOLS;
+
   const toolMap = new Map();
-  for (const tool of ALL_TOOLS) {
+  for (const tool of activeTools) {
     toolMap.set(tool.definition.name, tool);
   }
 
@@ -65,7 +73,7 @@ export function createToolRegistry(cwd, options = {}) {
      * @returns {Array}
      */
     definitions() {
-      return ALL_TOOLS.map((t) => t.definition);
+      return activeTools.map((t) => t.definition);
     },
 
     /**

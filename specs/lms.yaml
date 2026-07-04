@@ -1,0 +1,100 @@
+name: lms model control
+status: implemented
+description: >
+  A thin wrapper over LM Studio's `lms` CLI for explicit model load/unload
+  and context-size verification. The chat completions HTTP API has no way
+  to request a context window size — that's only settable at load time via
+  `lms load -c` — so switching between a build model and a review model
+  with a specific context size requires shelling out, not just changing
+  which model id a request names.
+
+  This exists because of a real incident: a dogfooding run's model
+  reloaded at 8192 tokens of context instead of the requested 131072, and
+  the mismatch wasn't noticed until a run failed for reasons that took
+  manual `lms ps` forensics to trace back to it. `ensureModelLoaded`
+  verifies the load actually took, at the requested context size, before
+  the caller proceeds — rather than trusting that `lms load` exiting 0
+  means what was asked for is what's now loaded.
+
+inputs:
+  model:
+    type: string
+    required: true
+    description: Model key to load (also used as its --identifier)
+  contextWindow:
+    type: number
+    required: false
+    description: Context length in tokens to load the model at (lms load -c)
+  ttlSec:
+    type: number
+    required: false
+    description: >
+      Seconds of inactivity before LM Studio unloads the model on its own
+      (default 600 — KODR_LMS_TTL_SEC)
+  cwd:
+    type: string
+    required: false
+    description: Working directory for the lms shell-out (default process.cwd())
+  env:
+    type: object
+    required: false
+    description: Child environment (defaults to the curated allowlist)
+  timeoutMs:
+    type: number
+    required: false
+    description: >
+      Timeout for each lms invocation (default 120,000 — model loads can
+      take a while — KODR_LMS_TIMEOUT_MS)
+  run:
+    type: function
+    required: false
+    description: Overridable shell runner for tests; defaults to shell.mjs's runShell
+
+outputs:
+  model:
+    type: object
+    description: >
+      The matching entry from `lms ps --json` once verified (includes
+      `identifier` and `contextLength`)
+  error:
+    type: string
+    description: >
+      Set instead of `model` when unload, load, or verification fails —
+      never thrown
+
+constraints:
+  - >
+    ensureModelLoaded always unloads everything first (lms unload --all),
+    then loads the requested model, then re-lists loaded models and
+    confirms the target model's identifier and contextLength match what
+    was asked for. A load call exiting 0 is not treated as sufficient on
+    its own.
+  - >
+    contextWindow is only checked when provided (0 or omitted skips the
+    context-length check, matching a caller that doesn't care)
+  - Never throws — every failure mode (missing lms binary, a non-zero exit,
+    unparseable --json output, a loaded-but-mismatched model) returns
+    { error } instead
+  - >
+    All three lms invocations (unload, load, ps) go through shell.mjs's
+    runShell, not a fresh execFile call, so they inherit its hard external
+    kill (see specs/shell.yaml) rather than risking a hung lms process
+    blocking a run indefinitely
+
+tests:
+  unit:
+    - unloadAllModels runs "lms unload --all" and returns {} on success
+    - unloadAllModels returns an error when the command exits non-zero
+    - loadModel runs lms load with the model, context length, ttl, and identifier
+    - loadModel returns an error when the command exits non-zero
+    - listLoadedModels parses lms ps --json output into an array
+    - listLoadedModels returns an error when output isn't valid JSON
+    - listLoadedModels returns an error when the command exits non-zero
+    - ensureModelLoaded returns the matching model when identifier and contextLength match
+    - ensureModelLoaded returns an error when the requested model isn't in lms ps afterward
+    - ensureModelLoaded returns an error when the loaded contextLength doesn't match the request
+    - ensureModelLoaded skips the contextLength check when contextWindow is 0 or omitted
+    - ensureModelLoaded stops and returns the error if unload fails, without attempting to load
+    - ensureModelLoaded stops and returns the error if load fails, without attempting to verify
+  eval:
+    - ensureModelLoaded against a real lms binary actually loads the requested model at the requested context size

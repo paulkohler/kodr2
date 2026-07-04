@@ -1,0 +1,155 @@
+name: review pass
+status: implemented
+description: >
+  A review pass: a fresh tool-loop conversation over what the build phase
+  changed, with real (read-only) file access instead of a single pasted
+  diff and nothing else. Optionally runs on a separate review model,
+  loaded and verified via lms.mjs (see specs/lms.yaml) rather than the
+  build model's own load.
+
+  This replaces an entirely manual practice from dogfooding this harness
+  against Claude Code head-to-head: pasting a diff to a second model by
+  hand and judging its findings. That comparison showed the upside and the
+  risk of giving a reviewer real tools side by side with the same model
+  used diff-only in this harness — most tool-backed reviews were grounded
+  and specific, but one answered in a single turn with zero tool calls and
+  fabricated findings wholesale (a quoted error message that doesn't exist
+  in the file, a syntax the file doesn't use, a cited file that isn't in
+  the repo at all). Nothing about the output format distinguished it from
+  a real review until its specific claims were checked against the actual
+  code. The minimum-tool-call floor exists specifically to catch that
+  failure mode automatically instead of relying on a human to notice it.
+
+inputs:
+  client:
+    type: object
+    required: true
+    description: Model client (same one used for the build phase; the review model is just a different modelId on the same client)
+  modelId:
+    type: string
+    required: true
+    description: Review model to use
+  cwd:
+    type: string
+    required: true
+    description: Workspace root
+  filesChanged:
+    type: string[]
+    required: true
+    description: Files touched during the build phase. An empty list skips the review entirely — there's nothing to look at.
+  startedAt:
+    type: Date
+    required: false
+  maxRunMs:
+    type: number
+    required: false
+    description: Stop between turns after this many ms (0 disables), same run budget as the build phase
+  contextWindow:
+    type: number
+    required: false
+  heartbeatMs:
+    type: number
+    required: false
+  onHeartbeat:
+    type: function
+    required: false
+  envPassthrough:
+    type: string[]
+    required: false
+  minToolCalls:
+    type: number
+    required: false
+    description: >
+      Tool-call floor before a review counts as grounded (default 2 —
+      KODR_REVIEW_MIN_TOOL_CALLS; 0 disables the floor and the retry)
+  maxToolTurns:
+    type: number
+    required: false
+    description: >
+      Tool-turn ceiling for each review attempt (default 12 —
+      KODR_REVIEW_MAX_TOOL_TURNS)
+  diffTimeoutMs:
+    type: number
+    required: false
+    description: >
+      Timeout for the git diff call that gathers review context (default
+      30,000 — KODR_REVIEW_DIFF_TIMEOUT_MS)
+
+outputs:
+  skipped:
+    type: boolean
+    description: True when there were no changed files to review
+  findings:
+    type: string
+    description: The review model's final text response
+  grounded:
+    type: boolean
+    description: >
+      False when even the retry attempt stayed under minToolCalls — the
+      findings are still returned, but callers should present them as
+      unverified rather than as a reliable review
+  toolTurns:
+    type: number
+    description: Tool calls made by whichever attempt is reported (the retry's, if one happened)
+  usage:
+    type: object
+    description: Combined prompt/completion token usage across both attempts
+
+constraints:
+  - >
+    The tool registry is restricted to read_file, list_files, and search —
+    never write_file, edit_file, or run_command. A review pass must not be
+    able to touch the workspace, matching the existing guarantee that
+    review never edits files.
+  - >
+    A diff (git diff -- <changed files>) is generated once, up front, by
+    the harness itself — not exposed as a run_command call the model could
+    make, since the read-only tool set has no shell access at all. If git
+    isn't available or the workspace isn't a repo, the diff is silently
+    empty and the model relies entirely on read_file/list_files/search;
+    this is not an error, just a smaller starting context.
+  - >
+    If the first attempt's tool-call count is under minToolCalls, exactly
+    one retry runs with an explicit nudge appended to the prompt ("read
+    the actual changed files... a review that never opened a file has no
+    business citing a file:line"). If the retry is still under the floor,
+    grounded is false but the findings are still returned — never silently
+    discarded, so a human (or a future automated consumer) can see and
+    discount them explicitly rather than have low-tool-call reviews
+    silently vanish.
+  - >
+    Skipped when filesChanged is empty — there's nothing for a reviewer to
+    look at, and running one anyway would either stall on an empty diff or
+    invite exactly the hallucination this feature exists to catch.
+  - >
+    Model switching (build model -> review model) goes through
+    lms.mjs's ensureModelLoaded when a review model is configured — see
+    specs/lms.yaml. When no review model is given, none of this runs at
+    all; a single model for both roles is the default, unchanged behavior.
+  - >
+    The harness's own orchestration (runReviewPass in harness.mjs) never
+    lets a failure in either the model switch or the review itself escape
+    as a thrown error — both are caught and turned into
+    { skipped: true, error }, so a review-pass failure can never overwrite
+    or crash an otherwise-successful build result. reviewContextWindow is
+    treated as unset only when it's null/undefined, not merely falsy — an
+    explicit 0 (this repo's own "disable" convention) must not be silently
+    replaced by the build model's own context window.
+
+tests:
+  unit:
+    - returns skipped: true when filesChanged is empty, without calling the model
+    - runs a read-only tool loop and returns findings from the final turn
+    - restricts the tool registry so write_file/edit_file/run_command are unavailable
+    - marks a review grounded when the first attempt meets minToolCalls
+    - retries once with a nudge when the first attempt is under minToolCalls
+    - marks grounded: false when the retry is still under minToolCalls, but still returns its findings
+    - does not retry when minToolCalls is 0
+    - combines usage across both attempts when a retry happens
+    - includes a git diff of the changed files in the prompt when one is available
+    - falls back to no diff without erroring when git is unavailable or the workspace isn't a repo
+    - minReviewToolCalls resolves option, then KODR_REVIEW_MIN_TOOL_CALLS, then the default
+    - reviewMaxToolTurns resolves option, then KODR_REVIEW_MAX_TOOL_TURNS, then the default
+    - reviewDiffTimeoutMs resolves option, then KODR_REVIEW_DIFF_TIMEOUT_MS, then the default
+    - runReviewPass returns { skipped, error } rather than throwing when the model switch fails
+    - runReviewPass returns { skipped, error } rather than throwing when the review itself fails

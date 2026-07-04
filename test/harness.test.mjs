@@ -1,23 +1,23 @@
-import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-
-import { DEFAULT_MAX_RETRIES } from '../src/model.mjs';
+import { join } from 'node:path';
+import { afterEach, describe, it } from 'node:test';
 import {
+  createRunRecord,
   DEFAULT_HEAL_RESERVE,
   DEFAULT_HEARTBEAT_MS,
-  createRunRecord,
   healReserveFraction,
   heartbeatIntervalMs,
   isRunBudgetExceeded,
   modelMaxRetries,
   remainingRunBudgetMs,
   run,
+  runReviewPass,
   stopVerifyBudgetMs,
 } from '../src/harness.mjs';
+import { DEFAULT_MAX_RETRIES } from '../src/model.mjs';
 
 describe('createRunRecord', () => {
   it('includes run metadata and duration', () => {
@@ -291,5 +291,81 @@ describe('run transcript location', () => {
       await model.close();
       await rm(cwd, { recursive: true, force: true });
     }
+  });
+});
+
+describe('review pass wiring', () => {
+  it('attaches no review result when reviewModel is not set', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'kodr-noreview-'));
+    const model = await startFailingModel();
+    try {
+      const result = await run('do work', {
+        cwd,
+        noSave: true,
+        baseUrl: model.baseUrl,
+        model: 'test',
+        quiet: true,
+      });
+      assert.equal(result.review, undefined);
+    } finally {
+      await model.close();
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('returns { skipped: true, error } rather than throwing when the model switch fails', async () => {
+    const result = await runReviewPass({
+      cwd: '/tmp',
+      client: {},
+      reviewModel: 'reviewer',
+      buildContextWindow: 8192,
+      filesChanged: ['a.mjs'],
+      quiet: true,
+      ensureModelLoadedFn: async () => {
+        throw new Error('lms exploded');
+      },
+      runReviewFn: async () => {
+        throw new Error('should not be called -- load already failed');
+      },
+    });
+
+    assert.equal(result.skipped, true);
+    assert.match(result.error, /lms exploded/);
+  });
+
+  it('returns { skipped: true, error } rather than throwing when the review itself fails', async () => {
+    const result = await runReviewPass({
+      cwd: '/tmp',
+      client: {},
+      reviewModel: 'reviewer',
+      buildContextWindow: 8192,
+      filesChanged: ['a.mjs'],
+      quiet: true,
+      ensureModelLoadedFn: async () => ({ model: { identifier: 'reviewer' } }),
+      runReviewFn: async () => {
+        throw new Error('review crashed mid-flight');
+      },
+    });
+
+    assert.equal(result.skipped, true);
+    assert.match(result.error, /review crashed mid-flight/);
+  });
+
+  it("returns { skipped: true, error } from ensureModelLoaded's own error path, without throwing", async () => {
+    const result = await runReviewPass({
+      cwd: '/tmp',
+      client: {},
+      reviewModel: 'reviewer',
+      buildContextWindow: 8192,
+      filesChanged: ['a.mjs'],
+      quiet: true,
+      ensureModelLoadedFn: async () => ({ error: 'reviewer model not found' }),
+      runReviewFn: async () => {
+        throw new Error('should not be called -- load already failed');
+      },
+    });
+
+    assert.equal(result.skipped, true);
+    assert.match(result.error, /reviewer model not found/);
   });
 });

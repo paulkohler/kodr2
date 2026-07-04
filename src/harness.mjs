@@ -32,11 +32,17 @@ import {
   installIncidentHandlers,
   sweepOrphanedHeartbeats,
 } from './incident.mjs';
+import { ensureModelLoaded } from './lms.mjs';
 import {
   createClient,
   DEFAULT_MAX_RETRIES,
   hasContextHeadroom,
 } from './model.mjs';
+import {
+  minReviewToolCalls,
+  reviewMaxToolTurns,
+  runReview,
+} from './review.mjs';
 import {
   isRunBudgetExceeded,
   MAX_TOOL_TURNS,
@@ -70,6 +76,17 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  * @param {number} [options.incidentHeartbeatMs] - Interval for the on-disk heartbeat used
  *   to detect a run that never exited cleanly (0 disables; default KODR_INCIDENT_HEARTBEAT_MS
  *   or 30000). No effect when noSave is set.
+ * @param {string} [options.reviewModel] - Review model. When set, Kodr owns the LM Studio
+ *   load/unload/verify sequencing for both the build model and this one (see lms.mjs)
+ *   instead of the operator swapping models by hand between phases, and a review pass
+ *   runs after a successful build. Omitted (the default) changes nothing: a single
+ *   model serves both roles and no lms shell-outs happen at all.
+ * @param {number} [options.reviewContextWindow] - Context window for the review model
+ *   (defaults to the build model's own contextWindow)
+ * @param {number} [options.reviewMinToolCalls] - Tool-call floor before a review counts
+ *   as grounded (default 2 — KODR_REVIEW_MIN_TOOL_CALLS; 0 disables the floor and its retry)
+ * @param {number} [options.reviewMaxToolTurns] - Tool-turn ceiling per review attempt
+ *   (default 12 — KODR_REVIEW_MAX_TOOL_TURNS)
  * @returns {Promise<object>} Run result
  */
 export async function run(prompt, options) {
@@ -114,6 +131,26 @@ export async function run(prompt, options) {
     modelId,
     quiet,
   });
+
+  // A review model means Kodr owns the LM Studio load/unload sequencing
+  // itself, rather than the operator swapping models by hand between
+  // phases -- the incident that motivated this was a run killed by the
+  // model having silently reloaded at the wrong context size, diagnosed
+  // by hand after the fact. With no review model configured (today's
+  // default), none of this runs -- LM Studio's own on-demand loading is
+  // unchanged.
+  if (options.reviewModel) {
+    const loadResult = await ensureModelLoaded({
+      model: modelId,
+      contextWindow,
+    });
+    if (loadResult.error && !quiet) {
+      process.stderr.write(
+        `${formatNotice(`build model load: ${loadResult.error}`)}\n`,
+      );
+    }
+  }
+
   const metadata = {
     cwd,
     prompt,
@@ -329,6 +366,33 @@ export async function run(prompt, options) {
     });
     if (!quiet) {
       process.stderr.write(`${formatNotice(`run failed: ${err.message}`)}\n`);
+    }
+  }
+
+  // Review pass: a fresh tool-loop conversation over what the build phase
+  // changed, on the review model if one's configured. Never lets a review
+  // failure overwrite an otherwise-successful build result -- it's an
+  // added opinion, not part of the outcome the run is judged on.
+  if (options.reviewModel && result.stoppedReason === 'complete') {
+    result.review = await runReviewPass({
+      cwd,
+      client,
+      reviewModel: options.reviewModel,
+      reviewContextWindow: options.reviewContextWindow,
+      buildContextWindow: contextWindow,
+      filesChanged: tools.filesChanged(),
+      startedAt,
+      maxRunMs,
+      heartbeatMs,
+      onHeartbeat: onModelHeartbeat,
+      envPassthrough,
+      minToolCalls: options.reviewMinToolCalls,
+      maxToolTurns: options.reviewMaxToolTurns,
+      quiet,
+    });
+    if (result.review.usage) {
+      result.usage.prompt += result.review.usage.prompt;
+      result.usage.completion += result.review.usage.completion;
     }
   }
 
@@ -591,6 +655,89 @@ function emptyCompactionResult(metadata, messages, response) {
     compactions: 0,
     messages,
   };
+}
+
+/**
+ * Orchestrates the review pass: switch to the review model, run the
+ * review, and never let a failure in either step escape as a thrown
+ * error -- a review is an added opinion, not part of the outcome the run
+ * is judged on. `ensureModelLoadedFn`/`runReviewFn` are only ever
+ * overridden in tests, to prove that guarantee holds even if either step
+ * throws, without needing a real lms binary or model server to do it.
+ * @param {object} params
+ * @param {function} [params.ensureModelLoadedFn]
+ * @param {function} [params.runReviewFn]
+ */
+export async function runReviewPass(params) {
+  const {
+    cwd,
+    client,
+    reviewModel,
+    reviewContextWindow,
+    buildContextWindow,
+    filesChanged,
+    startedAt,
+    maxRunMs,
+    heartbeatMs,
+    onHeartbeat,
+    envPassthrough,
+    minToolCalls,
+    maxToolTurns,
+    quiet,
+    ensureModelLoadedFn = ensureModelLoaded,
+    runReviewFn = runReview,
+  } = params;
+  // reviewContextWindow is explicitly "unset" only when it's null/undefined
+  // -- 0 is a legitimate value (this repo's own "0 disables" convention),
+  // and `|| buildContextWindow` would otherwise silently override it.
+  const contextWindow = Number.isInteger(reviewContextWindow)
+    ? reviewContextWindow
+    : buildContextWindow;
+
+  try {
+    const loadResult = await ensureModelLoadedFn({
+      model: reviewModel,
+      contextWindow,
+    });
+    if (loadResult.error) {
+      if (!quiet) {
+        process.stderr.write(
+          `${formatNotice(`review skipped: ${loadResult.error}`)}\n`,
+        );
+      }
+      return { skipped: true, error: loadResult.error };
+    }
+
+    const reviewResult = await runReviewFn({
+      client,
+      modelId: reviewModel,
+      cwd,
+      filesChanged,
+      startedAt,
+      maxRunMs,
+      contextWindow,
+      heartbeatMs,
+      onHeartbeat,
+      envPassthrough,
+      minToolCalls: minReviewToolCalls(minToolCalls),
+      maxToolTurns: reviewMaxToolTurns(maxToolTurns),
+    });
+
+    if (!quiet && !reviewResult.skipped) {
+      const status = reviewResult.grounded
+        ? 'review complete'
+        : 'review complete (ungrounded -- treat with caution)';
+      process.stderr.write(`${formatNotice(status)}\n`);
+    }
+    return reviewResult;
+  } catch (err) {
+    if (!quiet) {
+      process.stderr.write(
+        `${formatNotice(`review failed: ${err.message}`)}\n`,
+      );
+    }
+    return { skipped: true, error: err.message };
+  }
 }
 
 /**
