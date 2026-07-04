@@ -148,7 +148,7 @@ npm test
 npm run eval
 
 # Syntax check
-node --check bin/*.mjs && node --check src/*.mjs && node --check src/tools/*.mjs
+npm run check
 
 # Format
 npm run format

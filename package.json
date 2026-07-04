@@ -33,7 +33,7 @@
     "test": "node --test test/*.test.mjs",
     "eval": "node --test eval/*.eval.mjs",
     "arena": "node eval/arena/run.mjs",
-    "check": "node --check bin/*.mjs && node --check src/*.mjs && node --check src/tools/*.mjs",
+    "check": "find bin src -name '*.mjs' -exec node --check {} +",
     "format": "biome format --write bin src test eval specs *.md *.json",
     "format:check": "biome format bin src test eval specs *.md *.json",
     "lint": "biome lint bin src test eval",
