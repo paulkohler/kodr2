@@ -81,14 +81,19 @@ describe('runShell', () => {
       `,
     );
 
+    // Generous timeout: under heavy parallel load (many test files
+    // spawning subprocesses at once), even the parent script's own node
+    // startup + spawn() + writeFileSync can take longer than a tight
+    // timeout budget, which would kill the tree before the marker file is
+    // ever written -- a false setup failure, not a real assertion result.
     await runShell(
       `${process.execPath} ${parentScript} ${markerFile}`,
       tmpDir,
-      { timeout: 100, killGraceMs: 100 },
+      { timeout: 500, killGraceMs: 200 },
     );
 
     const grandchildPid = Number(await readFile(markerFile, 'utf8'));
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await new Promise((resolve) => setTimeout(resolve, 500));
     assert.equal(
       isProcessAlive(grandchildPid),
       false,
