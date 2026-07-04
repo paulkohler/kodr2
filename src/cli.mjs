@@ -4,6 +4,7 @@
 
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { DEFAULT_COMMIT_TIMEOUT_MS } from './commit.mjs';
 import { parseEnvNames } from './env.mjs';
 import { formatModelsList } from './format.mjs';
 import { DEFAULT_HEARTBEAT_MS, resolveRunsDir, run } from './harness.mjs';
@@ -75,6 +76,13 @@ export async function main(argv) {
     process.exitCode = 1;
     return;
   }
+  if (!Number.isInteger(args.commitTimeoutMs) || args.commitTimeoutMs < 0) {
+    process.stderr.write(
+      '--commit-timeout-ms must be a non-negative integer.\n',
+    );
+    process.exitCode = 1;
+    return;
+  }
   if (!Number.isInteger(args.modelRetries) || args.modelRetries < 0) {
     process.stderr.write('--model-retries must be a non-negative integer.\n');
     process.exitCode = 1;
@@ -139,6 +147,8 @@ export async function main(argv) {
     envPassthrough: args.env,
     runsDir: args.runsDir,
     noSave: args.noSave,
+    rawThenFixCommits: args.rawThenFixCommits,
+    commitTimeoutMs: args.commitTimeoutMs,
   };
   if (args.contextWindow !== null) {
     options.contextWindow = args.contextWindow;
@@ -230,6 +240,7 @@ export function summarizeResult(result) {
     packageCommands: result.packageCommands ?? [],
     response: result.response ?? '',
     error: result.error?.message ?? null,
+    commits: result.commits ?? null,
   };
 }
 
@@ -272,6 +283,8 @@ export function parseArgs(argv) {
     continue: null,
     runsDir: null,
     noSave: false,
+    rawThenFixCommits: false,
+    commitTimeoutMs: DEFAULT_COMMIT_TIMEOUT_MS,
     json: false,
     noFail: false,
     help: false,
@@ -397,6 +410,16 @@ export function parseArgs(argv) {
       i++;
       continue;
     }
+    if (arg === '--raw-then-fix-commits') {
+      args.rawThenFixCommits = true;
+      i++;
+      continue;
+    }
+    if (arg === '--commit-timeout-ms' && argv[i + 1]) {
+      args.commitTimeoutMs = parseInt(argv[++i], 10);
+      i++;
+      continue;
+    }
     if (arg === '--json') {
       args.json = true;
       i++;
@@ -470,6 +493,11 @@ Options:
   --continue <last|path>          Continue from a prior run
   --runs-dir <path>               Where to write run transcripts (or KODR_RUNS_DIR)
   --no-save                       Don't write a run transcript (or KODR_NO_SAVE)
+  --raw-then-fix-commits          Commit the build's raw output immediately, then any heal
+                                  fix as a separate commit on top (or KODR_RAW_THEN_FIX_COMMITS).
+                                  Off by default; skipped with a notice outside a git repo.
+  --commit-timeout-ms <n>         Timeout for each git call raw-then-fix commit mode makes
+                                  (or KODR_COMMIT_TIMEOUT_MS; default: 30000)
   --json                          Print a machine-readable run summary to stdout
   --no-fail                       Always exit 0 (or KODR_NO_FAIL); for external-verifier runs
   --quiet, -q                     Suppress streaming output

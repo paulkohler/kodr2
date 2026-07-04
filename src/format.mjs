@@ -110,6 +110,10 @@ export function formatSummary(result) {
     lines.push(`${DIM}healed:${RESET} ${result.healed}`);
   }
 
+  if (result.commits) {
+    lines.push(...formatCommitLines(result.commits));
+  }
+
   const tokens = result.usage;
   if (tokens) {
     lines.push(
@@ -118,6 +122,33 @@ export function formatSummary(result) {
   }
 
   return lines.join('\n');
+}
+
+/**
+ * Lines for raw-then-fix commit mode's result -- a rejected hook or a
+ * failed `git add`/`git commit` is actionable and must not be silently
+ * absorbed into the result object with no visible signal. A clean skip
+ * (no files changed, nothing to commit) stays quiet.
+ * @param {{ raw?: object, fix?: object }} commits
+ * @returns {string[]}
+ */
+function formatCommitLines(commits) {
+  const lines = [];
+  for (const [label, commit] of Object.entries(commits)) {
+    if (!commit) {
+      continue;
+    }
+    if (commit.committed) {
+      lines.push(
+        `${DIM}commit (${label}):${RESET} ${GREEN}${commit.sha.slice(0, 8)}${RESET}`,
+      );
+    } else if (commit.error) {
+      lines.push(
+        `${DIM}commit (${label}):${RESET} ${RED}failed${RESET} ${commit.error}`,
+      );
+    }
+  }
+  return lines;
 }
 
 /**

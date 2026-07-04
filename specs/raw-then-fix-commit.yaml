@@ -1,0 +1,113 @@
+name: raw-then-fix commit mode
+status: implemented
+description: >
+  An opt-in mode where Kodr commits the build phase's raw output
+  immediately after the tool loop finishes, and — if a heal pass runs
+  afterward — commits whatever heal changed as a separate commit on top.
+  This automates a manual convention from dogfooding this harness: commit
+  the model's raw diff first (even if incomplete or buggy), then commit
+  any fix on top, so the git history always shows what the model actually
+  produced versus what verification/heal corrected afterward. Previously
+  this meant reconstructing the pre-fix state by hand — reverting an edit,
+  committing, then reapplying it — whenever a fix landed in a file that
+  still had uncommitted raw output. Lower priority than the model-split
+  and review-pass work — a workflow nicety, not something that caused lost
+  time or wrong results.
+
+inputs:
+  rawThenFixCommits:
+    type: boolean
+    required: false
+    description: >
+      Off by default (also KODR_RAW_THEN_FIX_COMMITS). When on, requires
+      cwd to be inside a git work tree; if it isn't, commits are skipped
+      with a notice rather than failing the run.
+
+outputs:
+  commits:
+    type: object
+    description: >
+      Attached to the run result as result.commits when the mode is on.
+      { raw: CommitResult, fix?: CommitResult } — fix is only present if
+      a heal pass ran.
+  CommitResult:
+    type: object
+    description: >
+      { committed: boolean, sha?: string, reason?: string, error?: string }.
+      reason explains a clean skip (no files changed, or the staged files
+      produced no actual diff); error is set on a git failure. Never
+      thrown either way.
+
+constraints:
+  - >
+    Only ever `git add -- <files changed by this run>`, never `git add -A`
+    or `git add .` — an auto-commit must not sweep in unrelated changes
+    the user already had staged or unstaged in their working tree before
+    the run started.
+  - >
+    A clean skip (nothing to commit) is not an error: an empty
+    filesChanged list, or a file list that stages with zero actual diff
+    (git diff --cached --quiet exits 0), both return
+    { committed: false, reason: ... } rather than attempting a commit
+    with nothing to commit — git itself would refuse that with a
+    confusing error otherwise.
+  - >
+    Never bypasses the repo's own commit hooks (no --no-verify) — an
+    auto-commit is still a commit a human would plausibly make by hand,
+    and should be held to the same gate. A hook rejecting the commit
+    surfaces as { committed: false, error }, not a thrown exception or a
+    silently-lost change (the files stay staged either way).
+  - >
+    The raw commit runs once, right after the build tool loop finishes,
+    regardless of stoppedReason — even an incomplete run (tool-limit,
+    budget-exceeded) gets its raw output committed rather than leaving it
+    to a heal pass that may never run.
+  - >
+    The fix commit only runs if a heal pass actually ran. It reuses the
+    same tools.filesChanged() list as the raw commit (not a computed
+    delta) — since the raw commit already captured that state, a second
+    add+commit of the identical file list only ever picks up whatever
+    changed since, including a file heal edited that build had already
+    touched. If heal made no further changes, the fix commit is a clean
+    skip, not an empty commit.
+  - >
+    Never throws and never fails the run itself — a commit failure (a
+    rejected hook, a detached HEAD, a merge in progress) is recorded in
+    result.commits and surfaced as a notice, but the run's own outcome
+    (stoppedReason, verification, etc.) is unaffected. A raw commit that
+    already landed for real before something else in the run throws is
+    preserved in result.commits rather than lost along with the rest of
+    the discarded in-progress result.
+  - >
+    A pre-commit hook that mutates a file without re-staging it (e.g. an
+    auto-formatter that doesn't `git add` its own output) produces a
+    commit that doesn't match the post-hook working tree — this is
+    standard git behavior, not something kodr papers over, and restaging
+    inside the hook is the operator's own responsibility if they want the
+    commit to reflect the hook's changes.
+  - >
+    Each git call's timeout is configurable (commitTimeoutMs, then
+    KODR_COMMIT_TIMEOUT_MS, then the default) rather than a fixed ceiling
+    a caller can't raise — a slow pre-commit hook (a full test suite, a
+    formatter) could otherwise exceed a hardcoded timeout with no way out.
+  - >
+    A commit failure (not a clean skip) is surfaced in --json output
+    (summarizeResult's commits field) and in the terminal summary
+    (formatSummary), not only inside the returned result object a caller
+    might not inspect — a rejected hook is actionable and shouldn't be
+    silently absorbed.
+
+tests:
+  unit:
+    - isGitRepo returns true inside a real git work tree
+    - isGitRepo returns false outside a git work tree
+    - commitFiles commits exactly the given files and returns the new commit sha
+    - commitFiles returns { committed: false, reason } when files is empty
+    - commitFiles returns { committed false, reason } when the given files produce no actual diff
+    - commitFiles never runs git add -A -- only the files it was given
+    - commitFiles returns { committed: false, error } without throwing when git commit fails (e.g. a rejected hook)
+    - commitFiles correctly stages a file whose path looks like a git flag or contains spaces
+    - commitTimeoutMs resolves option, then KODR_COMMIT_TIMEOUT_MS, then the default
+    - commitFiles does not pass --no-verify to git commit
+  eval:
+    - a real run with rawThenFixCommits produces two commits when a Stop hook fails and heal fixes it

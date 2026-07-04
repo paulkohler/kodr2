@@ -4,6 +4,7 @@
  */
 
 import { join, resolve } from 'node:path';
+import { commitFiles, commitTimeoutMs, isGitRepo } from './commit.mjs';
 import {
   compactMessages,
   configuredContextWindow,
@@ -87,6 +88,12 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  *   as grounded (default 2 — KODR_REVIEW_MIN_TOOL_CALLS; 0 disables the floor and its retry)
  * @param {number} [options.reviewMaxToolTurns] - Tool-turn ceiling per review attempt
  *   (default 12 — KODR_REVIEW_MAX_TOOL_TURNS)
+ * @param {boolean} [options.rawThenFixCommits] - Commit the build phase's raw output as
+ *   soon as the tool loop finishes, then commit whatever heal changes on top as a
+ *   separate commit (also KODR_RAW_THEN_FIX_COMMITS). Off by default; skipped with a
+ *   notice (not an error) when cwd isn't a git work tree.
+ * @param {number} [options.commitTimeoutMs] - Timeout for each git call raw-then-fix
+ *   commit mode makes (default 30 seconds — KODR_COMMIT_TIMEOUT_MS)
  * @returns {Promise<object>} Run result
  */
 export async function run(prompt, options) {
@@ -102,6 +109,7 @@ export async function run(prompt, options) {
     envPassthrough = [],
   } = options;
   const runsDir = resolveRunsDir(cwd, options.runsDir);
+  const rawThenFixCommits = rawThenFixCommitsEnabled(options.rawThenFixCommits);
   const noSave = isSaveDisabled(options.noSave);
 
   // A previous run's leftover heartbeat is the only evidence of a true
@@ -286,6 +294,40 @@ export async function run(prompt, options) {
       messages,
     };
 
+    // Raw-then-fix commit mode: commit exactly what the model just
+    // produced, before any heal pass has a chance to touch the same
+    // files -- runs regardless of stoppedReason, since an incomplete run
+    // (tool-limit, budget-exceeded) still deserves its raw output
+    // committed rather than left to a heal pass that may never run.
+    let isRepo;
+    if (rawThenFixCommits) {
+      result.commits = {};
+      isRepo = await isGitRepo(cwd, {
+        env: commandEnv,
+        timeoutMs: commitTimeoutMs(options.commitTimeoutMs),
+      });
+      if (!isRepo) {
+        if (!quiet) {
+          process.stderr.write(
+            `${formatNotice('raw-then-fix commits skipped: not a git repository')}\n`,
+          );
+        }
+      } else {
+        result.commits.raw = await commitFiles({
+          cwd,
+          files: tools.filesChanged(),
+          message: 'kodr: raw build output',
+          env: commandEnv,
+          timeoutMs: commitTimeoutMs(options.commitTimeoutMs),
+        });
+        if (result.commits.raw.error && !quiet) {
+          process.stderr.write(
+            `${formatNotice(`raw commit failed: ${result.commits.raw.error}`)}\n`,
+          );
+        }
+      }
+    }
+
     // Stop hooks: run when the agent finishes a turn. The `--test` command is
     // the first Stop hook, followed by any in .kodr/hooks.json. Each hook gates
     // on whether the workspace was touched (writes or shell commands), unless it
@@ -355,15 +397,43 @@ export async function run(prompt, options) {
         result.packageCommands = tools.packageCommands();
         totalUsage.prompt += healResult.usage.prompt;
         totalUsage.completion += healResult.usage.completion;
+
+        // Fix commit: reuses the same file list as the raw commit, not a
+        // computed delta -- the raw commit already captured that state,
+        // so a second add+commit of the identical list only ever picks
+        // up whatever changed since, including a file heal edited that
+        // build had already touched. A clean skip if heal made no
+        // further changes.
+        if (rawThenFixCommits && isRepo) {
+          result.commits.fix = await commitFiles({
+            cwd,
+            files: tools.filesChanged(),
+            message: 'kodr: heal fix',
+            env: commandEnv,
+            timeoutMs: commitTimeoutMs(options.commitTimeoutMs),
+          });
+          if (result.commits.fix.error && !quiet) {
+            process.stderr.write(
+              `${formatNotice(`fix commit failed: ${result.commits.fix.error}`)}\n`,
+            );
+          }
+        }
       }
     }
   } catch (err) {
+    // A raw commit may have already landed for real before this throw --
+    // preserve it rather than losing the only record of it along with the
+    // rest of the (now-discarded) in-progress result.
+    const commitsBeforeError = result?.commits;
     result = createErrorResult({
       metadata,
       err,
       messages,
       tools,
     });
+    if (commitsBeforeError) {
+      result.commits = commitsBeforeError;
+    }
     if (!quiet) {
       process.stderr.write(`${formatNotice(`run failed: ${err.message}`)}\n`);
     }
@@ -819,6 +889,20 @@ export function isSaveDisabled(option) {
     return true;
   }
   const env = process.env.KODR_NO_SAVE;
+  return env === '1' || env === 'true';
+}
+
+/**
+ * Whether raw-then-fix commit mode is on, via the rawThenFixCommits
+ * option or KODR_RAW_THEN_FIX_COMMITS ("1"/"true"). Off by default.
+ * @param {boolean} [option]
+ * @returns {boolean}
+ */
+export function rawThenFixCommitsEnabled(option) {
+  if (option === true) {
+    return true;
+  }
+  const env = process.env.KODR_RAW_THEN_FIX_COMMITS;
   return env === '1' || env === 'true';
 }
 
