@@ -161,8 +161,12 @@ const PACKAGE_COMMAND_PATTERNS = [
 ];
 
 function splitCommandSegments(command) {
+  // Split on every shell segment boundary, including the pipe -- otherwise
+  // `echo y | npm install foo` reads as a single `echo ...` segment and the
+  // package install goes untracked. Keep this in step with findCdTargets,
+  // which already treats `|` as a boundary in its cd scan.
   return command
-    .split(/&&|;|\n/)
+    .split(/&&|\|\||[;|\n]/)
     .map((segment) => segment.trim())
     .filter(Boolean);
 }

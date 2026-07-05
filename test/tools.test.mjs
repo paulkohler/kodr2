@@ -527,6 +527,11 @@ describe('run_command', () => {
     assert.equal(isPackageManagerCommand('cargo test'), false);
   });
 
+  it('detects a package-manager command behind a pipe', () => {
+    assert.equal(isPackageManagerCommand('echo y | npm install left-pad'), true);
+    assert.equal(isPackageManagerCommand('cat reqs | pip install -r -'), true);
+  });
+
   it('caps command timeout to the remaining run budget', () => {
     const timeout = commandTimeout({
       commandTimeoutMs: 600_000,
