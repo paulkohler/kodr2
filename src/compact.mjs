@@ -9,7 +9,32 @@
 
 export const COMPACTION_THRESHOLD = 0.8;
 export const DEFAULT_CONTEXT_WINDOW = 8192;
-const MAX_TOOL_RESULT_CHARS = 2000;
+export const DEFAULT_COMPACT_MESSAGE_CHARS = 2000;
+
+/**
+ * Per-message character cap applied when flattening the transcript for
+ * summarization. Compaction fires precisely because the live context is near
+ * the window, so the summarize request has to be smaller than what triggered
+ * it -- bounding each rendered message keeps one huge paste, tool result, or
+ * reasoning dump from pushing the summarize call back over the same window and
+ * into a fail-and-retry loop. Overridable (per AGENTS.md) via an option, then
+ * KODR_COMPACT_MESSAGE_CHARS, then the default.
+ * @param {number} [option]
+ * @returns {number}
+ */
+export function compactMessageChars(option) {
+  if (Number.isInteger(option) && option > 0) {
+    return option;
+  }
+  const fromEnv = Number.parseInt(
+    process.env.KODR_COMPACT_MESSAGE_CHARS || '',
+    10,
+  );
+  if (Number.isInteger(fromEnv) && fromEnv > 0) {
+    return fromEnv;
+  }
+  return DEFAULT_COMPACT_MESSAGE_CHARS;
+}
 
 const SUMMARY_SYSTEM = `You are compacting a long coding session so it can continue with a smaller context window. Produce a dense, factual summary of the work so far. Preserve, in order:
 - The original task and goal.
@@ -70,30 +95,37 @@ export function isCompactCommand(prompt) {
 
 /**
  * Flatten a message history into plain text for summarization. The system
- * message is skipped (it is preserved separately). Tool results are truncated
- * so a single huge read does not dominate the summary input.
+ * message is skipped (it is preserved separately). The first user message (the
+ * original task/goal) is kept verbatim because the summary is required to
+ * preserve it; every other message -- later user turns, assistant text, tool
+ * call arguments, and tool results -- is truncated to `maxChars`, so no single
+ * huge message can push the summarize request back over the window that
+ * triggered compaction.
  * @param {Array} messages
+ * @param {number} [maxChars] - Per-message cap for non-task content
  * @returns {string}
  */
-export function renderTranscript(messages) {
+export function renderTranscript(messages, maxChars = compactMessageChars()) {
   const lines = [];
+  let taskSeen = false;
   for (const message of messages) {
     if (message.role === 'system') {
       continue;
     }
     if (message.role === 'user') {
-      lines.push(`User:\n${message.content || ''}`);
+      const content = message.content || '';
+      lines.push(`User:\n${taskSeen ? truncate(content, maxChars) : content}`);
+      taskSeen = true;
     } else if (message.role === 'assistant') {
       if (message.content) {
-        lines.push(`Assistant:\n${message.content}`);
+        lines.push(`Assistant:\n${truncate(message.content, maxChars)}`);
       }
       for (const call of message.tool_calls || []) {
-        lines.push(
-          `Assistant called ${call.function.name}(${call.function.arguments})`,
-        );
+        const args = truncate(call.function.arguments || '', maxChars);
+        lines.push(`Assistant called ${call.function.name}(${args})`);
       }
     } else if (message.role === 'tool') {
-      lines.push(`Tool result:\n${truncate(message.content || '')}`);
+      lines.push(`Tool result:\n${truncate(message.content || '', maxChars)}`);
     }
   }
   return lines.join('\n\n');
@@ -112,6 +144,9 @@ export function renderTranscript(messages) {
  * @param {number} [params.heartbeatMs] - Interval for onHeartbeat "still waiting" notices (0 disables)
  * @param {function} [params.onHeartbeat] - Called with elapsed ms on each heartbeat tick
  * @param {function} [params.onDebug] - Forwarded to the summary chat call (see specs/debug-log.yaml)
+ * @param {number} [params.maxMessageChars] - Per-message cap for the rendered transcript
+ *   (also KODR_COMPACT_MESSAGE_CHARS; default 2000), so the summarize request stays
+ *   smaller than the conversation that triggered compaction
  * @returns {Promise<{ messages: Array, summary: string, usage: { prompt: number, completion: number }, retries: number, error?: string }>}
  */
 export async function compactMessages(params) {
@@ -129,7 +164,10 @@ export async function compactMessages(params) {
     };
   }
 
-  const transcript = renderTranscript(history);
+  const transcript = renderTranscript(
+    history,
+    compactMessageChars(params.maxMessageChars),
+  );
   let response;
   try {
     response = await client.chat({
@@ -188,11 +226,11 @@ function buildCompacted(system, summary) {
   return compacted;
 }
 
-function truncate(text) {
-  if (text.length <= MAX_TOOL_RESULT_CHARS) {
+function truncate(text, maxChars) {
+  if (text.length <= maxChars) {
     return text;
   }
-  return `${text.slice(0, MAX_TOOL_RESULT_CHARS)}… [truncated]`;
+  return `${text.slice(0, maxChars)}… [truncated]`;
 }
 
 function zeroUsage() {

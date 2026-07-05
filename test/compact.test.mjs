@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 
 import {
   COMPACTION_THRESHOLD,
+  compactMessageChars,
   compactMessages,
   configuredContextWindow,
+  DEFAULT_COMPACT_MESSAGE_CHARS,
   isCompactCommand,
   needsCompaction,
   renderTranscript,
@@ -151,6 +153,69 @@ describe('renderTranscript', () => {
     ]);
     assert.doesNotMatch(text, /SECRET SYSTEM PROMPT/);
   });
+
+  it('keeps the first user (task) message verbatim but bounds later ones', () => {
+    const task = `TASK ${'t'.repeat(5000)}`;
+    const laterUser = `FOLLOWUP ${'u'.repeat(5000)}`;
+    const text = renderTranscript(
+      [
+        { role: 'user', content: task },
+        { role: 'assistant', content: `THOUGHT ${'a'.repeat(5000)}` },
+        { role: 'tool', content: `RESULT ${'r'.repeat(5000)}` },
+        { role: 'user', content: laterUser },
+      ],
+      100,
+    );
+    // The task is preserved in full; everything after it is truncated.
+    assert.ok(text.includes(task));
+    assert.doesNotMatch(text, /a{5000}/);
+    assert.doesNotMatch(text, /r{5000}/);
+    assert.doesNotMatch(text, /u{5000}/);
+    assert.match(text, /… \[truncated\]/);
+  });
+
+  it('truncates a huge tool_call argument blob', () => {
+    const text = renderTranscript(
+      [
+        { role: 'user', content: 'task' },
+        {
+          role: 'assistant',
+          content: '',
+          tool_calls: [
+            {
+              function: {
+                name: 'write_file',
+                arguments: `{"content":"${'x'.repeat(5000)}"}`,
+              },
+            },
+          ],
+        },
+      ],
+      100,
+    );
+    assert.doesNotMatch(text, /x{5000}/);
+    assert.match(text, /Assistant called write_file\(/);
+  });
+});
+
+describe('compactMessageChars', () => {
+  const original = process.env.KODR_COMPACT_MESSAGE_CHARS;
+  afterEach(() => {
+    if (original === undefined) {
+      delete process.env.KODR_COMPACT_MESSAGE_CHARS;
+    } else {
+      process.env.KODR_COMPACT_MESSAGE_CHARS = original;
+    }
+  });
+
+  it('uses an explicit option, then the env var, then the default', () => {
+    delete process.env.KODR_COMPACT_MESSAGE_CHARS;
+    assert.equal(compactMessageChars(500), 500);
+    assert.equal(compactMessageChars(undefined), DEFAULT_COMPACT_MESSAGE_CHARS);
+    process.env.KODR_COMPACT_MESSAGE_CHARS = '1234';
+    assert.equal(compactMessageChars(undefined), 1234);
+    assert.equal(compactMessageChars(500), 500);
+  });
 });
 
 describe('compactMessages', () => {
@@ -184,6 +249,30 @@ describe('compactMessages', () => {
     // The summary request never leaks the original system prompt.
     const sent = client.calls[0].messages;
     assert.equal(sent[0].content.includes('system prompt'), false);
+  });
+
+  it('bounds the summarize request so a huge message cannot overflow it', async () => {
+    const client = scriptedClient([finalTurn('SUMMARY')]);
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'the original task' },
+      { role: 'assistant', content: 'x'.repeat(200_000) },
+      { role: 'tool', content: 'y'.repeat(200_000) },
+    ];
+
+    await compactMessages({
+      client,
+      modelId: 'm',
+      messages,
+      quiet: true,
+      maxMessageChars: 2000,
+    });
+
+    // The transcript sent to the summary model is bounded well under the raw
+    // 400k of history, while the original task survives.
+    const sent = client.calls[0].messages[1].content;
+    assert.ok(sent.length < 20_000, `transcript too large: ${sent.length}`);
+    assert.match(sent, /the original task/);
   });
 
   it('forwards timeoutMs to the summary chat call', async () => {

@@ -34,6 +34,12 @@ inputs:
   quiet:
     type: boolean
     description: Suppress streamed summary output (default false)
+  maxMessageChars:
+    type: number
+    description: >
+      Per-message character cap for the rendered transcript (also
+      KODR_COMPACT_MESSAGE_CHARS; default 2000). Keeps the summarize request
+      smaller than the conversation that triggered compaction.
   timeoutMs:
     type: number
     description: Per-call timeout override forwarded to the summary chat call (e.g. the run's remaining maxRunMs budget)
@@ -63,6 +69,13 @@ outputs:
 
 constraints:
   - The system message is preserved verbatim — never summarized or dropped
+  - Compaction is out of band: a separate summarize call whose result replaces
+    only the history, leaving the system prompt and fresh tool definitions intact
+  - The summarize request is bounded so it stays smaller than the conversation
+    that triggered compaction: the first user message (the task/goal) is rendered
+    verbatim, and every other message — later user turns, assistant text, tool
+    call arguments, and tool results — is truncated to a per-message character
+    cap (default 2000, overridable via maxMessageChars / KODR_COMPACT_MESSAGE_CHARS)
   - Tool definitions are not part of the message history; they are supplied
     fresh on every model call, so compaction always keeps full tool access
   - Only the non-system messages (the history) are compressed
@@ -93,6 +106,10 @@ tests:
     - needsCompaction is true at or above the threshold
     - renderTranscript flattens user, assistant, tool-call, and tool messages
     - renderTranscript skips the system message
+    - renderTranscript keeps the first user (task) message verbatim but bounds later ones
+    - renderTranscript truncates a huge tool_call argument blob
+    - compactMessages bounds the summarize request so a huge message cannot overflow it
+    - compactMessageChars uses an explicit option, then the env var, then the default
     - compactMessages keeps the system message and replaces history with a summary
     - compactMessages leaves messages unchanged when summarization fails
     - compactMessages is a no-op when there is no history to compact
@@ -109,3 +126,4 @@ tests:
     - client probes loaded context length from /api/v0/models
   eval:
     - a long multi-turn session compacts and still completes the task
+    - a session whose bulk is a large pasted blob compacts and still completes

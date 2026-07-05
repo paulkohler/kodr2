@@ -195,6 +195,32 @@ describe('harness eval', {
     assert.match(content, /14/);
   });
 
+  it('compacts a session whose bulk is a large pasted blob', {
+    timeout: 180_000,
+  }, async () => {
+    // The residual compaction risk is a run whose tokens live in user/assistant
+    // content, not tool results -- renderTranscript now bounds those too, so the
+    // summarize request stays under the window. Force that path with a big paste
+    // in the prompt and a tiny window, and assert it still compacts and finishes.
+    const blob = Array.from(
+      { length: 400 },
+      (_, i) => `note ${i}: the marker value to remember is 4242.`,
+    ).join('\n');
+    const result = await run(
+      `Here is context:\n${blob}\n\nCreate marker.txt containing exactly the marker value mentioned above.`,
+      {
+        cwd: tmpDir,
+        baseUrl: LM_STUDIO_URL,
+        quiet: true,
+        contextWindow: 1,
+      },
+    );
+
+    assert.ok(result.compactions >= 1, 'should have compacted at least once');
+    const content = await readFile(join(tmpDir, 'marker.txt'), 'utf8');
+    assert.match(content, /4242/);
+  });
+
   it('continues a prior run through the CLI', {
     timeout: 180_000,
   }, async () => {
