@@ -138,6 +138,18 @@ constraints:
     treated as unset only when it's null/undefined, not merely falsy — an
     explicit 0 (this repo's own "disable" convention) must not be silently
     replaced by the build model's own context window.
+  - >
+    run() itself only calls runReviewPass when the build's own
+    stoppedReason is 'complete' — a timeout, an externally-recovered hang,
+    tool-limit, or budget-exceeded skips the review pass entirely rather
+    than reviewing a build that didn't finish. When reviewModel is
+    configured but this gate skips the call, result.review is still set
+    explicitly to { skipped: true, reason } rather than left undefined —
+    undefined is reserved for "no review model configured at all." Without
+    this, --json output (summarizeResult's review field) made the two
+    cases indistinguishable, discovered during a long dogfood run where
+    half the phases silently never got reviewed and it wasn't obvious from
+    the run's own output why.
 
 tests:
   unit:
@@ -157,3 +169,5 @@ tests:
     - reviewDiffTimeoutMs resolves option, then KODR_REVIEW_DIFF_TIMEOUT_MS, then the default
     - runReviewPass returns { skipped, error } rather than throwing when the model switch fails
     - runReviewPass returns { skipped, error } rather than throwing when the review itself fails
+    - run() sets result.review to { skipped: true, reason } when reviewModel is set but the build's stoppedReason isn't 'complete'
+    - summarizeResult includes the review field (null when absent) so --json output distinguishes "no review model configured" from "configured but skipped"

@@ -545,6 +545,16 @@ export async function run(prompt, options) {
       if (result.review.retries) {
         result.retries = (result.retries || 0) + result.review.retries;
       }
+    } else if (options.reviewModel) {
+      // A review model is configured but the build itself didn't reach
+      // 'complete' (a timeout, a hang recovered externally, tool-limit,
+      // budget-exceeded) -- reviewing a build that didn't finish isn't
+      // meaningful, so the pass is skipped outright rather than attempted.
+      // Recorded explicitly rather than left as the same undefined a run
+      // with no --review-model at all would show, so --json output (and
+      // anyone reading it later) can tell "no review configured" apart
+      // from "configured, but never got to run."
+      result.review = reviewSkippedForIncompleteBuild(result.stoppedReason);
     }
 
     // End-of-run retrospective: never writes to MEMORY.md without a human
@@ -867,6 +877,23 @@ function emptyCompactionResult(metadata, messages, response) {
     usage: { prompt: 0, completion: 0 },
     compactions: 0,
     messages,
+  };
+}
+
+/**
+ * The result.review value for a run where a review model is configured
+ * but the build never reached 'complete', so runReviewPass was never
+ * called at all. Kept as its own function (rather than inlined) so it's
+ * directly unit-testable without needing to drive a full run() through
+ * the real, non-injectable ensureModelLoaded call that a truthy
+ * options.reviewModel otherwise triggers at the top of run().
+ * @param {string} stoppedReason
+ * @returns {{ skipped: true, reason: string }}
+ */
+export function reviewSkippedForIncompleteBuild(stoppedReason) {
+  return {
+    skipped: true,
+    reason: `build did not complete (stoppedReason: ${stoppedReason})`,
   };
 }
 

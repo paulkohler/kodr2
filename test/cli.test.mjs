@@ -257,6 +257,35 @@ describe('summarizeResult', () => {
     const summary = summarizeResult({ stoppedReason: 'complete', retries: 3 });
     assert.equal(summary.retries, 3);
   });
+
+  it('defaults review to null when absent', () => {
+    const summary = summarizeResult({ stoppedReason: 'complete' });
+    assert.equal(summary.review, null);
+  });
+
+  it('surfaces a completed review pass', () => {
+    const summary = summarizeResult({
+      stoppedReason: 'complete',
+      review: { findings: 'No findings.', grounded: true },
+    });
+    assert.deepEqual(summary.review, {
+      findings: 'No findings.',
+      grounded: true,
+    });
+  });
+
+  it('distinguishes a review skipped for an incomplete build from no review configured at all', () => {
+    const noReview = summarizeResult({ stoppedReason: 'error' });
+    const skippedReview = summarizeResult({
+      stoppedReason: 'error',
+      review: {
+        skipped: true,
+        reason: "build did not complete (stoppedReason: error)",
+      },
+    });
+    assert.equal(noReview.review, null);
+    assert.equal(skippedReview.review.skipped, true);
+  });
 });
 
 describe('exitCodeFor', () => {

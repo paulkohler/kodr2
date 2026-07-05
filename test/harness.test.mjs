@@ -14,6 +14,7 @@ import {
   isRunBudgetExceeded,
   modelMaxRetries,
   remainingRunBudgetMs,
+  reviewSkippedForIncompleteBuild,
   run,
   runReviewPass,
   stopVerifyBudgetMs,
@@ -606,6 +607,25 @@ describe('review pass wiring', () => {
 
     assert.equal(result.skipped, true);
     assert.match(result.error, /reviewer model not found/);
+  });
+});
+
+describe('reviewSkippedForIncompleteBuild', () => {
+  it('reports skipped: true with the stoppedReason in the message', () => {
+    const result = reviewSkippedForIncompleteBuild('error');
+    assert.equal(result.skipped, true);
+    assert.match(result.reason, /stoppedReason: error/);
+  });
+
+  it('reflects whichever stoppedReason it is given', () => {
+    assert.match(
+      reviewSkippedForIncompleteBuild('tool-limit').reason,
+      /tool-limit/,
+    );
+    assert.match(
+      reviewSkippedForIncompleteBuild('budget-exceeded').reason,
+      /budget-exceeded/,
+    );
   });
 });
 

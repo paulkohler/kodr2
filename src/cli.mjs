@@ -280,6 +280,7 @@ export function summarizeResult(result) {
     response: result.response ?? '',
     error: result.error?.message ?? null,
     commits: result.commits ?? null,
+    review: result.review ?? null,
   };
 }
 
