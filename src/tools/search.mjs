@@ -63,6 +63,13 @@ export default {
     } else {
       await searchDir(resolved, root, pattern, glob, matches);
     }
+    // Surface the cap so a caller (or the read-only review pass) doesn't read a
+    // capped result as the complete set and conclude, e.g., "no other matches
+    // exist." Set whenever the cap is reached; a result that lands exactly on
+    // MAX_MATCHES with nothing more is flagged too, which is the safe direction.
+    if (matches.length >= MAX_MATCHES) {
+      return { matches, truncated: true, limit: MAX_MATCHES };
+    }
     return { matches };
   },
 };

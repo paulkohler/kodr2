@@ -69,6 +69,12 @@ export default {
       }
     }
 
+    // Flag the cap so a capped listing isn't read as the whole directory. Set
+    // whenever the cap is reached; a listing that lands exactly on MAX_ENTRIES
+    // is flagged too, which is the safe direction.
+    if (files.length >= MAX_ENTRIES) {
+      return { files, truncated: true, limit: MAX_ENTRIES };
+    }
     return { files };
   },
 };

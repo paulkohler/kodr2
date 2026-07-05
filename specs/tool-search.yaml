@@ -24,6 +24,12 @@ outputs:
   matches:
     type: array
     description: "Array of { file, line, text }"
+  truncated:
+    type: boolean
+    description: Present and true only when the 100-match cap was hit, so a capped result isn't read as the complete set
+  limit:
+    type: number
+    description: The match cap that was hit; present only alongside truncated
   error:
     type: string
     description: Error message if search failed
@@ -46,6 +52,7 @@ tests:
     - accepts a glob-style "*.mjs" extension filter
     - skips ignored directories
     - caps at 100 matches
+    - flags truncation when the match cap is hit
     - truncates long match lines
     - rejects paths escaping workspace
     - skips symlinked files outside workspace

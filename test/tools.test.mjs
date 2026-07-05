@@ -336,6 +336,14 @@ describe('list_files', () => {
     );
     const result = await listFilesTool.execute({ recursive: true }, context);
     assert.equal(result.files.length, 500);
+    assert.equal(result.truncated, true);
+    assert.equal(result.limit, 500);
+  });
+
+  it('does not flag truncation for a small listing', async () => {
+    await writeFile(join(tmpDir, 'only.txt'), '');
+    const result = await listFilesTool.execute({}, context);
+    assert.equal(result.truncated, undefined);
   });
 
   it('rejects paths escaping workspace', async () => {
@@ -419,6 +427,14 @@ describe('search', () => {
     await writeFile(join(tmpDir, 'many.txt'), 'target\n'.repeat(110));
     const result = await searchTool.execute({ pattern: 'target' }, context);
     assert.equal(result.matches.length, 100);
+    assert.equal(result.truncated, true);
+    assert.equal(result.limit, 100);
+  });
+
+  it('does not flag truncation for a result under the cap', async () => {
+    await writeFile(join(tmpDir, 'few.txt'), 'target\ntarget\n');
+    const result = await searchTool.execute({ pattern: 'target' }, context);
+    assert.equal(result.truncated, undefined);
   });
 
   it('truncates matching lines to 200 characters', async () => {

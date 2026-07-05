@@ -16,12 +16,19 @@ outputs:
   files:
     type: array
     description: File paths relative to workspace root (dirs suffixed with /)
+  truncated:
+    type: boolean
+    description: Present and true only when the 500-entry cap was hit, so a capped listing isn't read as the whole directory
+  limit:
+    type: number
+    description: The entry cap that was hit; present only alongside truncated
   error:
     type: string
     description: Error message if listing failed
 
 constraints:
   - Capped at 500 entries to prevent flooding
+  - Signals truncation with a `truncated` flag when the cap is hit
   - Skips .git, node_modules, .kodr directories
   - Directories have trailing slash in output
   - Path must resolve within workspace root
@@ -34,6 +41,7 @@ tests:
     - skips ignored directories
     - directories have trailing slash
     - caps at 500 entries
+    - flags truncation when the entry cap is hit
     - rejects paths escaping workspace
   eval:
     - model uses list_files to explore a project structure
