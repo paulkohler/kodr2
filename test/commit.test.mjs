@@ -97,6 +97,46 @@ describe('commitFiles', () => {
     assert.equal(result.reason, 'no changes to commit');
   });
 
+  it('commits the non-ignored files and skips a gitignored one in the same list, rather than erroring', async () => {
+    await initRepo(tmpDir);
+    await writeFile(join(tmpDir, '.gitignore'), 'data.db\n');
+    await writeFile(join(tmpDir, 'a.mjs'), 'export const a = 1;\n');
+    await writeFile(join(tmpDir, 'data.db'), 'not real sqlite\n');
+
+    const result = await commitFiles({
+      cwd: tmpDir,
+      files: ['a.mjs', 'data.db'],
+      message: 'kodr: raw build output',
+    });
+
+    assert.equal(result.committed, true);
+    const filesInCommit = await git(tmpDir, [
+      'show',
+      '--name-only',
+      '--format=',
+    ]);
+    assert.equal(filesInCommit, 'a.mjs');
+    // data.db was never staged (nor lost) -- git status --ignored still sees
+    // it sitting there untracked, just excluded from this commit.
+    const status = await git(tmpDir, ['status', '--porcelain', '--ignored']);
+    assert.match(status, /!! data\.db/);
+  });
+
+  it('returns a clean skip when every given file is gitignored', async () => {
+    await initRepo(tmpDir);
+    await writeFile(join(tmpDir, '.gitignore'), 'data.db\n');
+    await writeFile(join(tmpDir, 'data.db'), 'not real sqlite\n');
+
+    const result = await commitFiles({
+      cwd: tmpDir,
+      files: ['data.db'],
+      message: 'kodr: raw build output',
+    });
+
+    assert.equal(result.committed, false);
+    assert.equal(result.reason, 'no files to commit (all gitignored)');
+  });
+
   it('never runs git add -A -- only the files it was given', async () => {
     await initRepo(tmpDir);
     await writeFile(join(tmpDir, 'a.mjs'), 'export const a = 1;\n');

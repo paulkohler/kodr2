@@ -45,6 +45,17 @@ constraints:
     the user already had staged or unstaged in their working tree before
     the run started.
   - >
+    A file in the given list that's gitignored (e.g. a runtime db the
+    target app creates) is silently excluded from `git add` rather than
+    passed through — `git add -- <path>` errors on an explicitly-named
+    ignored path instead of skipping it, which would otherwise abort the
+    whole commit over one incidental file. Detected with
+    `git check-ignore`, itself best-effort: if it fails for any reason,
+    commitFiles proceeds as if nothing were ignored (same behavior as
+    before this filter existed) rather than letting the check itself block
+    a commit. If every given file turns out to be ignored, this is a clean
+    skip ({ committed: false, reason: ... }), not an error.
+  - >
     A clean skip (nothing to commit) is not an error: an empty
     filesChanged list, or a file list that stages with zero actual diff
     (git diff --cached --quiet exits 0), both return
@@ -109,5 +120,7 @@ tests:
     - commitFiles correctly stages a file whose path looks like a git flag or contains spaces
     - commitTimeoutMs resolves option, then KODR_COMMIT_TIMEOUT_MS, then the default
     - commitFiles does not pass --no-verify to git commit
+    - commitFiles commits the non-ignored files and skips a gitignored one in the same list, rather than erroring
+    - commitFiles returns a clean skip when every given file is gitignored
   eval:
     - a real run with rawThenFixCommits produces two commits when a Stop hook fails and heal fixes it
