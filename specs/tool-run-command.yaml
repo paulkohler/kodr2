@@ -38,12 +38,16 @@ constraints:
   - Default env allowlist: PATH, HOME, TMPDIR, LANG, LC_ALL, LC_CTYPE, TERM, TZ
   - Extra variables are passed through by name only (--env a,b,c)
   - Tracks files changed by shell commands using a bounded before/after workspace snapshot
+  - The snapshot file cap defaults to 1000 but is overridable via the snapshotCap
+    registry option or KODR_SNAPSHOT_CAP, so a large workspace isn't silently
+    capped (a changed file past the cap would otherwise be dropped from tracking)
 
 tests:
   unit:
     - executes a simple command and returns output
     - captures non-zero exit codes
     - tracks files changed by shell commands
+    - snapshot cap is overridable via option and KODR_SNAPSHOT_CAP
     - rejects cd targets outside the workspace
     - allows cd targets inside the workspace
     - does not expose non-allowlisted environment variables by default

@@ -19,6 +19,11 @@ import searchTool from '../src/tools/search.mjs';
 import runCommandTool from '../src/tools/run-command.mjs';
 import { isPackageManagerCommand } from '../src/tools/run-command.mjs';
 import { commandTimeout } from '../src/tools/run-command.mjs';
+import {
+  DEFAULT_SNAPSHOT_CAP,
+  snapshotCap,
+  snapshotWorkspace,
+} from '../src/tools/run-command.mjs';
 
 let tmpDir;
 let context;
@@ -575,5 +580,35 @@ describe('run_command', () => {
     });
     assert.ok(timeout > 0);
     assert.ok(timeout <= 100);
+  });
+
+  it('snapshot cap is overridable via option and KODR_SNAPSHOT_CAP', () => {
+    const original = process.env.KODR_SNAPSHOT_CAP;
+    try {
+      delete process.env.KODR_SNAPSHOT_CAP;
+      assert.equal(snapshotCap({}), DEFAULT_SNAPSHOT_CAP);
+      assert.equal(snapshotCap({ snapshotCap: 5000 }), 5000);
+
+      process.env.KODR_SNAPSHOT_CAP = '3000';
+      assert.equal(snapshotCap({}), 3000);
+      // An explicit option beats the env var.
+      assert.equal(snapshotCap({ snapshotCap: 42 }), 42);
+    } finally {
+      if (original === undefined) {
+        delete process.env.KODR_SNAPSHOT_CAP;
+      } else {
+        process.env.KODR_SNAPSHOT_CAP = original;
+      }
+    }
+  });
+
+  it('snapshot walk stops at the cap', async () => {
+    await Promise.all(
+      Array.from({ length: 12 }, (_, index) =>
+        writeFile(join(tmpDir, `snap-${index}.txt`), ''),
+      ),
+    );
+    const snapshot = await snapshotWorkspace(tmpDir, 5);
+    assert.equal(snapshot.size, 5);
   });
 });

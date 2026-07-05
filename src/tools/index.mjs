@@ -26,6 +26,9 @@ const ALL_TOOLS = [
  * @param {object} [options]
  * @param {string[]} [options.envPassthrough] - Extra env var names for run_command
  * @param {number} [options.commandTimeoutMs] - Default shell timeout for run_command
+ * @param {number} [options.snapshotCap] - Max files run_command's changed-file
+ *   snapshot walks (also KODR_SNAPSHOT_CAP; default 1000). Raise it for a large
+ *   workspace so a changed file past the cap isn't dropped from tracking.
  * @param {Date} [options.startedAt] - Run start, for remaining-budget timeouts
  * @param {number} [options.maxRunMs] - Overall run budget in ms
  * @param {string[]} [options.allowedTools] - Restrict the registry to these
@@ -46,6 +49,7 @@ export function createToolRegistry(cwd, options = {}) {
     cwd,
     envPassthrough: options.envPassthrough ?? [],
     commandTimeoutMs: options.commandTimeoutMs,
+    snapshotCap: options.snapshotCap,
     startedAt: options.startedAt,
     maxRunMs: options.maxRunMs ?? 0,
     trackWrite(path) {

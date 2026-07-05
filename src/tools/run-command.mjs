@@ -8,7 +8,30 @@ import { buildEnv } from '../env.mjs';
 import { shouldIgnoreEntry } from '../ignore.mjs';
 import { DEFAULT_TIMEOUT, runShell } from '../shell.mjs';
 
-const MAX_SNAPSHOT_FILES = 1000;
+export const DEFAULT_SNAPSHOT_CAP = 1000;
+
+/**
+ * Max files the changed-file snapshot walks before stopping. The snapshot is
+ * bounded so a huge tree can't make every run_command call walk the whole
+ * workspace twice -- but the cap is overridable (per AGENTS.md: operational
+ * limits must be changeable by callers), because a file past the cap in
+ * traversal order would otherwise be silently missed from changed-file
+ * tracking, and so dropped from the run's filesChanged and any commit. Resolved
+ * from a registry option, then KODR_SNAPSHOT_CAP, then the default.
+ * @param {object} [context]
+ * @returns {number}
+ */
+export function snapshotCap(context) {
+  const option = context?.snapshotCap;
+  if (Number.isInteger(option) && option > 0) {
+    return option;
+  }
+  const fromEnv = Number.parseInt(process.env.KODR_SNAPSHOT_CAP || '', 10);
+  if (Number.isInteger(fromEnv) && fromEnv > 0) {
+    return fromEnv;
+  }
+  return DEFAULT_SNAPSHOT_CAP;
+}
 
 export default {
   definition: {
@@ -41,12 +64,13 @@ export default {
     if (isPackageManagerCommand(command) && context.trackPackageCommand) {
       context.trackPackageCommand(command);
     }
-    const before = await snapshotWorkspace(context.cwd);
+    const cap = snapshotCap(context);
+    const before = await snapshotWorkspace(context.cwd, cap);
     const result = await runShell(command, context.cwd, {
       env: buildEnv(context.envPassthrough),
       timeout: commandTimeout(context),
     });
-    const changed = await changedFiles(context.cwd, before);
+    const changed = await changedFiles(context.cwd, before, cap);
     for (const path of changed) {
       if (context.trackWrite) {
         context.trackWrite(path);
@@ -75,14 +99,14 @@ function remainingRunBudgetMs(context) {
   return context.maxRunMs - (Date.now() - context.startedAt.getTime());
 }
 
-export async function snapshotWorkspace(cwd) {
+export async function snapshotWorkspace(cwd, cap = DEFAULT_SNAPSHOT_CAP) {
   const files = new Map();
-  await snapshotDir(cwd, cwd, files);
+  await snapshotDir(cwd, cwd, files, cap);
   return files;
 }
 
-export async function changedFiles(cwd, before) {
-  const after = await snapshotWorkspace(cwd);
+export async function changedFiles(cwd, before, cap = DEFAULT_SNAPSHOT_CAP) {
+  const after = await snapshotWorkspace(cwd, cap);
   const changed = [];
   for (const [path, sig] of after) {
     if (before.get(path) !== sig) {
@@ -97,8 +121,8 @@ export async function changedFiles(cwd, before) {
   return changed.sort();
 }
 
-async function snapshotDir(dir, root, files) {
-  if (files.size >= MAX_SNAPSHOT_FILES) {
+async function snapshotDir(dir, root, files, cap) {
+  if (files.size >= cap) {
     return;
   }
   let entries;
@@ -108,7 +132,7 @@ async function snapshotDir(dir, root, files) {
     return;
   }
   for (const entry of entries) {
-    if (files.size >= MAX_SNAPSHOT_FILES) {
+    if (files.size >= cap) {
       return;
     }
     if (shouldIgnoreEntry(entry.name)) {
