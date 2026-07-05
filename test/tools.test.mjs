@@ -560,7 +560,10 @@ describe('run_command', () => {
   });
 
   it('detects a package-manager command behind a pipe', () => {
-    assert.equal(isPackageManagerCommand('echo y | npm install left-pad'), true);
+    assert.equal(
+      isPackageManagerCommand('echo y | npm install left-pad'),
+      true,
+    );
     assert.equal(isPackageManagerCommand('cat reqs | pip install -r -'), true);
   });
 
