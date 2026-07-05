@@ -75,6 +75,11 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  * @param {number} [options.maxRunMs] - Stop between turns after this many ms (0 disables)
  * @param {boolean} [options.quiet] - Suppress terminal output
  * @param {Array} [options.priorMessages] - Continuation from previous run
+ * @param {string[]} [options.priorFilesChanged] - The continued run's own
+ *   filesChanged, from its saved transcript -- seeds this session's tool
+ *   registry so a raw-then-fix commit covers files the prior, interrupted
+ *   attempt touched but never got to commit, not just files this specific
+ *   session's own tool calls touch.
  * @param {string[]} [options.envPassthrough] - Extra env var names for commands
  * @param {number} [options.contextWindow] - Max context window in tokens (0 disables compaction)
  * @param {number} [options.healReserve] - Fraction of the run budget held back for heal (0..0.9; default KODR_HEAL_RESERVE or 0.25)
@@ -129,6 +134,7 @@ export async function run(prompt, options) {
     maxToolTurns = MAX_TOOL_TURNS,
     quiet = false,
     priorMessages,
+    priorFilesChanged = [],
     envPassthrough = [],
   } = options;
   const runsDir = resolveRunsDir(cwd, options.runsDir);
@@ -199,6 +205,7 @@ export async function run(prompt, options) {
     envPassthrough,
     startedAt,
     maxRunMs,
+    initialFilesChanged: priorFilesChanged,
   });
   const commandEnv = buildEnv(envPassthrough);
   // Read once and pass the same content to both buildSystemPrompt and the

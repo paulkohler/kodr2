@@ -72,6 +72,24 @@ describe('createToolRegistry', () => {
     assert.deepEqual(changed, ['a.txt']);
   });
 
+  it('seeds filesChanged() from initialFilesChanged', async () => {
+    const registry = createToolRegistry(tmpDir, {
+      initialFilesChanged: ['prior.mjs'],
+    });
+    await registry.dispatch('write_file', { path: 'new.mjs', content: 'a' });
+    const changed = registry.filesChanged();
+    assert.deepEqual(changed, ['prior.mjs', 'new.mjs']);
+  });
+
+  it('deduplicates initialFilesChanged against files touched again this session', async () => {
+    const registry = createToolRegistry(tmpDir, {
+      initialFilesChanged: ['a.mjs', 'a.mjs'],
+    });
+    await registry.dispatch('write_file', { path: 'a.mjs', content: 'v2' });
+    const changed = registry.filesChanged();
+    assert.deepEqual(changed, ['a.mjs']);
+  });
+
   it('counts shell commands run', async () => {
     const registry = createToolRegistry(tmpDir);
     assert.equal(registry.commandsRun(), 0);

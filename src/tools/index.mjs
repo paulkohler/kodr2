@@ -30,10 +30,15 @@ const ALL_TOOLS = [
  * @param {number} [options.maxRunMs] - Overall run budget in ms
  * @param {string[]} [options.allowedTools] - Restrict the registry to these
  *   tool names (e.g. a read-only review pass). Omitted means every tool.
+ * @param {string[]} [options.initialFilesChanged] - Seed filesChanged() with
+ *   these paths up front (e.g. a --continue session's prior run touched
+ *   them but never got them committed) so this session's own tracking
+ *   reflects the full set of changes still sitting in the working tree,
+ *   not just what this specific process touches.
  * @returns {object} Registry with `definitions`, `dispatch`, and `context`
  */
 export function createToolRegistry(cwd, options = {}) {
-  const filesChanged = [];
+  const filesChanged = [...new Set(options.initialFilesChanged ?? [])];
   const packageCommands = [];
   let commandCount = 0;
 

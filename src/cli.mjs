@@ -202,6 +202,7 @@ export async function main(argv) {
     );
     if (prior) {
       options.priorMessages = prior.messages;
+      options.priorFilesChanged = prior.filesChanged || [];
     } else {
       process.stderr.write('No prior run found to continue from.\n');
       process.exitCode = 1;

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -272,6 +273,73 @@ describe('no-op completion', () => {
       assert.equal(result.stoppedReason, 'complete');
       assert.equal(result.noOpCompletion, true);
       assert.deepEqual(result.filesChanged, []);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+function git(cwd, args) {
+  return new Promise((resolve, reject) => {
+    execFile('git', args, { cwd }, (err, stdout, stderr) => {
+      if (err) {
+        reject(
+          new Error(`git ${args.join(' ')} failed: ${stderr || err.message}`),
+        );
+        return;
+      }
+      resolve(stdout.trim());
+    });
+  });
+}
+
+describe('priorFilesChanged wiring', () => {
+  it('carries a continued run\'s prior filesChanged into this session\'s own tracking and its raw commit', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'kodr-continue-'));
+    await git(cwd, ['init']);
+    await git(cwd, ['config', 'user.email', 'test@test.com']);
+    await git(cwd, ['config', 'user.name', 'test']);
+    // Simulates the interrupted run's own uncommitted output, still sitting
+    // on disk when the continuation session starts.
+    await writeFile(join(cwd, 'prior.mjs'), 'export const a = 1;\n');
+
+    const server = createServer((req, res) => {
+      if (req.url === '/api/v0/models') {
+        res.writeHead(404);
+        res.end('not found');
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end(
+        'data: {"choices":[{"delta":{"role":"assistant","content":"nothing more to change"}}]}\n\n' +
+          'data: [DONE]\n\n',
+      );
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address();
+
+    try {
+      const result = await run('continue the previous work', {
+        cwd,
+        baseUrl: `http://127.0.0.1:${port}`,
+        model: 'test',
+        quiet: true,
+        rawThenFixCommits: true,
+        priorFilesChanged: ['prior.mjs'],
+      });
+
+      // This session's own tool calls touched nothing new, but the prior
+      // run's file is still reflected -- not lost just because this
+      // session didn't re-touch it.
+      assert.deepEqual(result.filesChanged, ['prior.mjs']);
+      assert.equal(result.commits.raw.committed, true);
+      const filesInCommit = await git(cwd, [
+        'show',
+        '--name-only',
+        '--format=',
+      ]);
+      assert.equal(filesInCommit, 'prior.mjs');
     } finally {
       await new Promise((resolve) => server.close(resolve));
       await rm(cwd, { recursive: true, force: true });
