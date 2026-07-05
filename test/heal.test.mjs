@@ -46,6 +46,43 @@ describe('healing', () => {
     assert.equal(result.healed, false);
   });
 
+  it('reports the last observed verification without re-verifying after turns exhaust', async () => {
+    const client = {
+      async chat() {
+        return {
+          message: { role: 'assistant', content: 'attempted a fix' },
+          usage: { prompt: 1, completion: 1 },
+        };
+      },
+    };
+    let verifyCalls = 0;
+    // Distinct output each call so the turn counts as progress (not no-op),
+    // and a flip to passing on a hypothetical second call so a stray re-verify
+    // would visibly change the reported outcome.
+    const verifyFn = async () => {
+      verifyCalls++;
+      if (verifyCalls === 1) {
+        return { passed: false, output: 'still failing (attempt 1)' };
+      }
+      return { passed: true, output: '' };
+    };
+    const result = await heal({
+      client,
+      modelId: 'unused',
+      messages: [],
+      tools: { definitions: () => [] },
+      verifyFn,
+      failure: { passed: false, output: 'initial failure' },
+      maxTurns: 1,
+      quiet: true,
+    });
+
+    assert.equal(verifyCalls, 1);
+    assert.equal(result.healed, false);
+    assert.equal(result.turns, 1);
+    assert.equal(result.verification.output, 'still failing (attempt 1)');
+  });
+
   it('forwards heartbeatMs and onHeartbeat to the model client', async () => {
     const calls = [];
     const client = {

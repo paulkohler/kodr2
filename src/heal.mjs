@@ -57,6 +57,7 @@ export async function heal(params) {
   } = params;
 
   let lastOutput = failure.output;
+  let lastResult = null;
   let compactions = 0;
   let totalRetries = 0;
   const totalUsage = { prompt: 0, completion: 0 };
@@ -106,6 +107,7 @@ ${lastOutput}
 
     // Re-verify
     const result = await verifyFn();
+    lastResult = result;
     if (result.passed) {
       return {
         healed: true,
@@ -144,8 +146,14 @@ ${lastOutput}
     lastOutput = result.output;
   }
 
-  // Exhausted turns
-  const finalResult = await verifyFn();
+  // Exhausted turns: report the last verification the loop already observed,
+  // rather than running verifyFn() a second, unbudgeted time. Re-verifying here
+  // both doubles the cost of the final check (a full test suite) and, on a
+  // flaky or timing-sensitive suite, could report a pass the state produced by
+  // the last heal turn never actually achieved -- corrupting the healed/verified
+  // signal that `kodr stats` aggregates. lastResult is only null when maxTurns
+  // is 0 (no repair turn ran), where a single verify is the intended behavior.
+  const finalResult = lastResult ?? (await verifyFn());
   return {
     healed: finalResult.passed,
     turns: maxTurns,
