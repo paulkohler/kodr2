@@ -66,7 +66,12 @@ export default {
       return { error: `old_string appears ${count} times — must be unique` };
     }
 
-    const updated = content.replace(old_string, new_string);
+    // A function replacer, not a string one: a plain string new_string would
+    // have its $-tokens ($&, $$, $`, $', $n) interpreted by String.replace and
+    // silently rewritten -- corrupting literal text the model meant to insert
+    // (e.g. "$$" in a Makefile, or "$&" in a shell script). old_string is
+    // already verified unique, so this replaces exactly that one occurrence.
+    const updated = content.replace(old_string, () => new_string);
 
     try {
       await writeFile(resolved, updated, 'utf8');

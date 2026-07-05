@@ -192,6 +192,22 @@ describe('edit_file', () => {
     assert.ok(content.includes('const x = 42;'));
   });
 
+  it('writes $-tokens in new_string literally, not as replacement patterns', async () => {
+    await writeFile(join(tmpDir, 'mk.txt'), 'PLACEHOLDER\n');
+    const literal = 'a $$ b $& c $1 d';
+    const result = await editFileTool.execute(
+      {
+        path: 'mk.txt',
+        old_string: 'PLACEHOLDER',
+        new_string: literal,
+      },
+      context,
+    );
+    assert.equal(result.edited, true);
+    const content = await readFile(join(tmpDir, 'mk.txt'), 'utf8');
+    assert.equal(content, `${literal}\n`);
+  });
+
   it('rejects when old_string appears multiple times', async () => {
     await writeFile(join(tmpDir, 'dup.mjs'), 'foo\nfoo\n');
     const result = await editFileTool.execute(
