@@ -538,7 +538,7 @@ Usage:
 Options:
   --cwd <path>                    Workspace directory (default: .)
   --base-url <url>                LM Studio URL (default: http://localhost:1234/v1)
-  --model <id>                    Model identifier
+  --model <id>                    Model identifier (or KODR_MODEL; auto-detected from LM Studio if omitted)
   --prompt, -p <text>             Prompt text (compatibility alias)
   --test <command>                First Stop hook (e.g. "npm test"); see .kodr/hooks.json
   --heal-turns <n>                Max repair turns (default: 3)
@@ -549,7 +549,8 @@ Options:
                                   never exited cleanly (or KODR_INCIDENT_HEARTBEAT_MS;
                                   default: 30000, 0 disables)
   --model-retries <n>             Retries for a 5xx chat response, e.g. a local backend crash (or KODR_MODEL_RETRIES; default: 1, 0 disables)
-  --context-window <n>            Max context window in tokens; compact at 80% (default: 8192, 0 disables)
+  --context-window <n>            Max context window in tokens; compact at 80% (or KODR_CONTEXT_WINDOW;
+                                  auto-detected from the loaded model, falls back to 8192; 0 disables)
   --review-model <id>             Run a review pass on this model after a successful build.
                                   Kodr owns the LM Studio load/unload/verify sequencing for
                                   both models via lms (see specs/lms.yaml). Omitted (the
