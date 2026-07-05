@@ -356,6 +356,17 @@ describe('search', () => {
     assert.equal(result.matches[0].file, 'a.mjs');
   });
 
+  it('accepts a glob-style "*.mjs" extension filter', async () => {
+    await writeFile(join(tmpDir, 'a.mjs'), 'target');
+    await writeFile(join(tmpDir, 'b.txt'), 'target');
+    const result = await searchTool.execute(
+      { pattern: 'target', glob: '*.mjs' },
+      context,
+    );
+    assert.equal(result.matches.length, 1);
+    assert.equal(result.matches[0].file, 'a.mjs');
+  });
+
   it('skips .git directory', async () => {
     await mkdir(join(tmpDir, '.git'));
     await writeFile(join(tmpDir, '.git/config'), 'target');

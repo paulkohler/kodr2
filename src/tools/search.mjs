@@ -28,7 +28,8 @@ export default {
         },
         glob: {
           type: 'string',
-          description: 'File extension filter, e.g. ".mjs" or ".json"',
+          description:
+            'File extension filter. A suffix match, e.g. ".mjs"; a glob-style "*.mjs" is also accepted.',
         },
       },
       required: ['pattern'],
@@ -66,6 +67,24 @@ export default {
   },
 };
 
+/**
+ * Match a filename against the extension filter. The parameter is named `glob`
+ * and models commonly pass a glob-style value (`*.mjs`), but the filter is a
+ * plain suffix match rather than a real glob. Normalize a leading `*` away so
+ * `*.mjs`, `.mjs`, and `mjs` all match `foo.mjs`, instead of a `*.mjs` matching
+ * nothing and silently returning zero results.
+ * @param {string} name
+ * @param {string} glob
+ * @returns {boolean}
+ */
+export function matchesGlob(name, glob) {
+  const suffix = glob.replace(/^\*+/, '');
+  if (suffix === '') {
+    return true;
+  }
+  return name.endsWith(suffix);
+}
+
 async function searchDir(dir, root, pattern, glob, matches) {
   if (matches.length >= MAX_MATCHES) {
     return;
@@ -93,7 +112,7 @@ async function searchDir(dir, root, pattern, glob, matches) {
       continue;
     }
 
-    if (glob && !entry.name.endsWith(glob)) {
+    if (glob && !matchesGlob(entry.name, glob)) {
       continue;
     }
     let safePath;

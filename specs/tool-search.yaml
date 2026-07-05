@@ -15,7 +15,10 @@ inputs:
     description: Directory to search, or a single file to search directly (default workspace root)
   glob:
     type: string
-    description: File extension filter (e.g. ".mjs")
+    description: >
+      File extension filter, a plain suffix match (e.g. ".mjs"). A glob-style
+      "*.mjs" is normalized to the same suffix so it matches too, rather than
+      silently matching nothing.
 
 outputs:
   matches:
@@ -40,6 +43,7 @@ tests:
   unit:
     - finds matches in text files
     - respects glob filter
+    - accepts a glob-style "*.mjs" extension filter
     - skips ignored directories
     - caps at 100 matches
     - truncates long match lines
