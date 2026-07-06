@@ -8,10 +8,27 @@ Kodr reads a prompt, assembles workspace context, lets the model use tools to re
 
 ## Quick start
 
-```bash
-# Install globally from GitHub
-npm install -g github:paulkohler/kodr2
+Clone the repo and install a local shim (writes `~/.local/bin/kodr` by
+default; make sure that directory is on your `PATH`):
 
+```bash
+git clone https://github.com/paulkohler/kodr2.git
+cd kodr2
+npm run install-local
+```
+
+Override the destination with `--dir`/`--name`, e.g.
+`node bin/install-local.mjs --dir ./bin-local --name kodr-dev`.
+
+Alternatively, install globally from GitHub via npm:
+
+```bash
+npm install -g github:paulkohler/kodr2
+```
+
+Either way, once `kodr` is on your `PATH`:
+
+```bash
 # Run a coding task
 kodr run "add input validation to server.mjs"
 

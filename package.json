@@ -34,6 +34,7 @@
     "eval": "node --test eval/*.eval.mjs",
     "arena": "node eval/arena/run.mjs",
     "inspect-run": "node scripts/inspect-run.mjs",
+    "install-local": "node bin/install-local.mjs",
     "check": "find bin src -name '*.mjs' -exec node --check {} +",
     "check:biome": "node scripts/require-biome.mjs",
     "preformat": "npm run check:biome",

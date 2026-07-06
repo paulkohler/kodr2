@@ -9,6 +9,10 @@ constraints:
   - Local settings, tests, evals, and development specifications are excluded
   - Installed kodr executable supports help and version output
   - CLI failures return a non-zero exit code
+  - A local install script writes an executable shim invoking this checkout's
+    bin/kodr.mjs, for running kodr without an npm/global install
+  - Local install shim destination directory and name are overridable
+    (default ~/.local/bin/kodr)
 
 tests:
   unit:
@@ -18,6 +22,9 @@ tests:
     - unavailable LM Studio exits unsuccessfully
     - packed tarball excludes development and local files
     - packed tarball installs and exposes the kodr executable
+    - local install writes an executable shim under the given dir
+    - installed shim reports the checkout version
+    - local install shim name defaults to kodr
   eval:
     - CLI continuation loads the prior transcript and completes a follow-up task
     - model performs multiple tool calls while exploring files
