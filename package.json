@@ -1,6 +1,6 @@
 {
   "name": "kodr",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A one-shot coding harness for local LM Studio models",
   "keywords": [
     "coding-agent",
