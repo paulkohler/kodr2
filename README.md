@@ -4,6 +4,8 @@ A one-shot coding harness for LM Studio. Zero dependencies, Node.js 22+.
 
 Kodr reads a prompt, assembles workspace context, lets the model use tools to read and write files, optionally verifies the result, and heals if verification fails.
 
+> **Note:** kodr2 is a from-scratch rebuild of the original [kodr](https://github.com/paulkohler/kodr), which grew to 264 numbered phases and became hard to reason about. This repo restarts spec-first: every feature gets a YAML spec in `specs/` before it's implemented, and spec status moves `proposed → accepted → implemented → deprecated`. The original is kept as a frozen archive — see [the switchover post](https://paulkohler.me/blog/2026-07-07-kodr2-starting-over/) for why.
+
 ## Quick start
 
 ```bash
