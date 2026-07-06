@@ -280,7 +280,7 @@ describe('summarizeResult', () => {
       stoppedReason: 'error',
       review: {
         skipped: true,
-        reason: "build did not complete (stoppedReason: error)",
+        reason: 'build did not complete (stoppedReason: error)',
       },
     });
     assert.equal(noReview.review, null);

@@ -296,7 +296,7 @@ function git(cwd, args) {
 }
 
 describe('priorFilesChanged wiring', () => {
-  it('carries a continued run\'s prior filesChanged into this session\'s own tracking and its raw commit', async () => {
+  it("carries a continued run's prior filesChanged into this session's own tracking and its raw commit", async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'kodr-continue-'));
     await git(cwd, ['init']);
     await git(cwd, ['config', 'user.email', 'test@test.com']);
