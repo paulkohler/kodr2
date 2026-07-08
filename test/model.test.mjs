@@ -1,6 +1,6 @@
-import { after, afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
+import { after, afterEach, describe, it } from 'node:test';
 
 import {
   assembleResponse,
@@ -39,7 +39,7 @@ describe('assembleResponse', () => {
     ]);
 
     assert.equal(result.message.content, 'hello');
-    assert.deepEqual(result.usage, { prompt: 12, completion: 3 });
+    assert.deepEqual(result.usage, { prompt: 12, completion: 3, cost: 0 });
   });
 
   it('accumulates tool call arguments and generates missing IDs', () => {
@@ -73,6 +73,60 @@ describe('assembleResponse', () => {
     assert.equal(call.function.name, 'read_file');
     assert.equal(call.function.arguments, '{"path":"a"}');
   });
+
+  it('accumulates reasoning content and reasoning_details across chunks', () => {
+    const result = assembleResponse([
+      {
+        choices: [
+          {
+            delta: {
+              role: 'assistant',
+              reasoning: 'Step one. ',
+              reasoning_details: [
+                { type: 'reasoning.text', text: 'Step one. ', index: 0 },
+              ],
+            },
+          },
+        ],
+      },
+      {
+        choices: [
+          {
+            delta: {
+              reasoning: 'Step two.',
+              reasoning_details: [
+                { type: 'reasoning.text', text: 'Step two.', index: 0 },
+              ],
+            },
+          },
+        ],
+      },
+      { choices: [{ delta: { content: 'answer' } }] },
+    ]);
+
+    assert.equal(result.message.reasoning, 'Step one. Step two.');
+    assert.equal(result.message.reasoning_details.length, 2);
+    assert.equal(result.message.content, 'answer');
+  });
+
+  it('omits reasoning fields entirely when no reasoning deltas arrive', () => {
+    const result = assembleResponse([
+      { choices: [{ delta: { content: 'hello' } }] },
+    ]);
+    assert.equal(result.message.reasoning, undefined);
+    assert.equal(result.message.reasoning_details, undefined);
+  });
+
+  it('captures usage from a chunk whose delta is present but near-empty (e.g. OpenRouter final chunk)', () => {
+    const result = assembleResponse([
+      { choices: [{ delta: { content: 'ok' } }] },
+      {
+        choices: [{ delta: { content: '', role: 'assistant' } }],
+        usage: { prompt_tokens: 25, completion_tokens: 174 },
+      },
+    ]);
+    assert.deepEqual(result.usage, { prompt: 25, completion: 174, cost: 0 });
+  });
 });
 
 describe('model HTTP client', () => {
@@ -86,7 +140,7 @@ describe('model HTTP client', () => {
         res.writeHead(200, { 'Content-Type': 'text/event-stream' });
         res.end(
           'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n' +
-            'data: {"choices":[],"usage":{"prompt_tokens":4,"completion_tokens":1}}\n\n' +
+            'data: {"choices":[],"usage":{"prompt_tokens":4,"completion_tokens":1,"cost":0.000123}}\n\n' +
             'data: [DONE]\n\n',
         );
       });
@@ -94,7 +148,11 @@ describe('model HTTP client', () => {
     const client = createClient({ baseUrl, model: 'test' });
     const result = await client.chat({ messages: [] });
     assert.deepEqual(requestBody.stream_options, { include_usage: true });
-    assert.deepEqual(result.usage, { prompt: 4, completion: 1 });
+    assert.deepEqual(result.usage, {
+      prompt: 4,
+      completion: 1,
+      cost: 0.000123,
+    });
   });
 
   it('uses KODR_MODEL when no model option is provided', async () => {

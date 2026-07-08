@@ -60,7 +60,7 @@ export async function heal(params) {
   let lastResult = null;
   let compactions = 0;
   let totalRetries = 0;
-  const totalUsage = { prompt: 0, completion: 0 };
+  const totalUsage = { prompt: 0, completion: 0, cost: 0 };
 
   for (let turn = 1; turn <= maxTurns; turn++) {
     if (!quiet) {
@@ -102,6 +102,7 @@ ${lastOutput}
     });
     totalUsage.prompt += loop.usage.prompt;
     totalUsage.completion += loop.usage.completion;
+    totalUsage.cost += loop.usage.cost || 0;
     compactions += loop.compactions || 0;
     totalRetries += loop.retries || 0;
 

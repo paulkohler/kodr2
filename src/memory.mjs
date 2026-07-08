@@ -315,7 +315,7 @@ export async function runMemoryRetrospective(params) {
   }
 
   const notes = (response.message.content || '').trim();
-  const usage = response.usage || { prompt: 0, completion: 0 };
+  const usage = response.usage || { prompt: 0, completion: 0, cost: 0 };
   const retries = response.retries || 0;
 
   if (!notes || isNoFindings(notes)) {

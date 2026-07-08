@@ -1,8 +1,13 @@
 name: model-client
 status: implemented
 description: >
-  LM Studio HTTP client. Handles chat completions with streaming
-  and tool-call support. Single provider, OpenAI-compatible API.
+  OpenAI-compatible chat completions HTTP client: streaming, tool-call
+  support, and (since specs/provider.yaml) optional per-provider headers and
+  extra request-body fields. This module is provider-agnostic -- it's used
+  directly for LM Studio and wrapped by provider-lmstudio.mjs/
+  provider-openrouter.mjs, which are the only supported construction paths
+  (see specs/provider.yaml). createClient() itself remains callable
+  directly for anything that just needs a bare OpenAI-compatible client.
 
 inputs:
   baseUrl:
@@ -30,11 +35,28 @@ inputs:
       timeouts are never retried: a 4xx would fail identically again, and a
       timeout already means the model spent the full budget on that
       attempt.
+  headers:
+    type: object
+    description: >
+      Extra HTTP headers sent with every request (e.g. an Authorization
+      bearer token for a hosted provider). Empty by default -- LM Studio
+      needs none
+  extraBody:
+    type: object
+    description: >
+      Extra fields merged into every chat request body (e.g.
+      { reasoning: { enabled: true } }). Empty by default
 
 outputs:
   chat:
     type: function
-    description: "Send chat completion: (messages, tools, onToken, timeoutMs?, heartbeatMs?, onHeartbeat?, onDebug?) → { message, usage, retries }"
+    description: >
+      Send chat completion: (messages, tools, onToken, timeoutMs?,
+      heartbeatMs?, onHeartbeat?, onDebug?) →
+      { message, usage: { prompt, completion, cost }, retries }. cost is
+      the USD amount OpenRouter reports on usage.cost, captured verbatim;
+      always 0 for LM Studio (a local backend genuinely has no cost, not
+      an unknown one -- see specs/provider.yaml)
   models:
     type: function
     description: "List available models: () → [{ id }]"
@@ -58,12 +80,21 @@ constraints:
   - chat() reports how many retries it used as a `retries` field on the resolved result (0 when the first attempt succeeded), so a flaky-backend pattern is visible in the run record instead of only in live stderr
   - When chat() ultimately throws (retryable attempts exhausted, or a non-retryable error), the thrown Error also carries a `retries` field with the number of retries actually attempted, so callers recording telemetry on failure don't lose that count
   - chat() accepts an optional onDebug callback (see specs/debug-log.yaml): fires once per HTTP attempt with { url, requestBody, rawResponse, error? } -- the exact request sent and the raw, unparsed response text, before SSE parsing or message assembly. A retried request fires onDebug once per attempt
+  - headers are merged into every request (chat, models, richModels); extraBody is merged into every chat request body, after the built-in fields (model/messages/stream/stream_options) so a caller can add fields but not override them
+  - the streaming assembler accumulates delta.reasoning and delta.reasoning_details across chunks and exposes them on the resolved message as reasoning (string) and reasoning_details (array) when present, verbatim -- neither is parsed, summarized, or stripped
+  - the streaming assembler reads chunk.usage independently of whether that chunk also carries a delta -- some backends (observed: OpenRouter) attach usage to the final content-bearing chunk rather than a separate delta-less one, and usage must not be silently dropped depending on which shape a given backend uses
+  - the streaming assembler reads chunk.usage.cost verbatim into usage.cost when present and finite; usage.cost defaults to 0 (not null) when absent, since a provider that never reports cost (LM Studio) genuinely costs nothing, not an unknown amount
+  - every place usage is accumulated across multiple chat() calls in a single logical operation (tool-loop.mjs's turn loop, compaction, heal turns, review attempts, the memory retrospective, harness.mjs's review/heal/memory merges into the final run result) sums cost the same way prompt/completion are summed, so a run's total usage.cost is the real total spend across every call the run made, not just the last one
 
 tests:
   unit:
     - assembleResponse builds complete message from chunks
     - assembleResponse accumulates tool call arguments
     - assembleResponse generates IDs for tool calls without them
+    - assembleResponse accumulates reasoning content and reasoning_details across chunks
+    - assembleResponse omits reasoning fields entirely when no reasoning deltas arrive
+    - assembleResponse captures usage from a chunk whose delta is present but near-empty
+    - assembleResponse captures usage.cost when present and defaults it to 0 when absent
     - streaming requests ask the server to include token usage
     - KODR_MODEL is used when no model option is provided
     - explicit model option takes precedence over KODR_MODEL

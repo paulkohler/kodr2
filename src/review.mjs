@@ -211,6 +211,7 @@ export async function runReview(params) {
     });
     totalUsage.prompt += attempt.usage.prompt;
     totalUsage.completion += attempt.usage.completion;
+    totalUsage.cost += attempt.usage.cost || 0;
     totalRetries += attempt.retries || 0;
   }
 

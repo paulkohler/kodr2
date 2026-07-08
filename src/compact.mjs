@@ -234,5 +234,5 @@ function truncate(text, maxChars) {
 }
 
 function zeroUsage() {
-  return { prompt: 0, completion: 0 };
+  return { prompt: 0, completion: 0, cost: 0 };
 }

@@ -1,8 +1,8 @@
 # Kodr
 
-A one-shot coding harness for LM Studio. Zero dependencies, Node.js 22+.
+A one-shot coding harness for local and hosted LLMs. Zero dependencies, Node.js 22+.
 
-Kodr reads a prompt, assembles workspace context, lets the model use tools to read and write files, optionally verifies the result, and heals if verification fails.
+Kodr reads a prompt, assembles workspace context, lets the model use tools to read and write files, optionally verifies the result, and heals if verification fails. Works against LM Studio, Ollama (local or cloud), or OpenRouter — see [Providers](#providers).
 
 > **Note:** kodr2 is a from-scratch rebuild of the original [kodr](https://github.com/paulkohler/kodr), which grew to 264 numbered phases and became hard to reason about. This repo restarts spec-first: every feature gets a YAML spec in `specs/` before it's implemented, and spec status moves `proposed → accepted → implemented → deprecated`. The original is kept as a frozen archive — see [the switchover post](https://paulkohler.me/blog/2026-07-07-kodr2-starting-over/) for why.
 
@@ -49,8 +49,12 @@ extending it across several `--continue` turns — see
 ## Requirements
 
 - Node.js 22+
-- LM Studio running locally (default: `http://localhost:1234`)
-- A model loaded in LM Studio with tool/function calling support
+- A tool/function-calling-capable model, served by one of:
+  - **LM Studio**, running locally (default: `http://localhost:1234`) — the default provider, no setup needed beyond that
+  - **Ollama**, local (default: `http://localhost:11434`) or Ollama's hosted cloud API
+  - **OpenRouter**, hosted (`OPENROUTER_API_KEY` required)
+
+  See [Providers](#providers) for how to pick one and what differs between them.
 
 ## How it works
 
@@ -68,16 +72,18 @@ tool turns, once the live prompt crosses 80% of the context window, the older
 message history is summarized into one dense message and replaces it. The system
 prompt is kept verbatim and the tools stay available (they are supplied fresh on
 every model call), so only the history shrinks. The window is detected on
-startup from the model's loaded context length (LM Studio's `/api/v0/models`);
-override it with `--context-window` (or `KODR_CONTEXT_WINDOW`), and `0` disables
-it. You can also compact a saved conversation on demand:
-`kodr "/compact" --continue last`.
+startup from the model's real context length where the provider can report one
+(LM Studio's `/api/v0/models`; OpenRouter's `/models`) and otherwise falls back
+to a built-in default (Ollama's `/v1/models` doesn't report one); override it
+with `--context-window` (or `KODR_CONTEXT_WINDOW`), and `0` disables it. You can
+also compact a saved conversation on demand: `kodr "/compact" --continue last`.
 
 Because LM Studio often loads a model far below the context length it supports,
-`kodr models` lists every model with its loaded vs. max window and flags any
-with unused headroom — and a run warns when the loaded window could be much
-larger. A bigger window means longer sessions and fewer compactions, at the cost
-of memory.
+`kodr models` lists every LM Studio model with its loaded vs. max window and
+flags any with unused headroom — and a run warns when the loaded window could
+be much larger. A bigger window means longer sessions and fewer compactions,
+at the cost of memory. On OpenRouter/Ollama, which have no "loaded" concept,
+`kodr models` just lists the available model ids.
 
 ```
 $ kodr models
@@ -85,11 +91,11 @@ $ kodr models
 ○ openai/gpt-oss-20b      131072 max
 ```
 
-`kodr doctor` checks the environment a run would use -- LM Studio
-reachability, a loaded model, git, and the Node.js version -- and reports
-problems before a task fails mid-run with a bare connection error. Read-only;
-exits non-zero only if a check actually fails (warnings don't affect the exit
-code).
+`kodr doctor` checks the environment a run would use -- the resolved
+provider's reachability, a usable model, git, and the Node.js version -- and
+reports problems before a task fails mid-run with a bare connection error.
+Read-only; exits non-zero only if a check actually fails (warnings don't
+affect the exit code).
 
 ```
 $ kodr doctor
@@ -127,14 +133,18 @@ kodr stats 12 runs
   verify attempted: 92%  passed: 91%
   avg tool turns: 4.2
   avg duration: 18432ms
-  total tokens: 48213 in / 6104 out
+  total tokens: 48213 in / 6104 out ($0.4213)
 ```
+
+The cost figure only appears when nonzero -- OpenRouter reports real USD cost
+per request; LM Studio and Ollama don't charge per token, so it stays $0
+there and the suffix is omitted.
 
 `kodr replay <last|path>` re-runs a saved run's original prompt fresh (no
 prior conversation), against the same cwd/model/test command it originally
 used, to check whether a failure reproduces or was a one-off model/backend
 hiccup. Unlike `--continue` (which extends a prior conversation with a new
-instruction), replay starts over with the *same original prompt*:
+instruction), replay starts over with the _same original prompt_:
 
 ```
 $ kodr replay last
@@ -144,41 +154,113 @@ $ kodr replay last
 
 The model has these tools available:
 
-| Tool | What it does |
-|---|---|
-| `read_file` | Read file contents (path-jailed to workspace) |
-| `write_file` | Create or overwrite a file |
-| `edit_file` | Search/replace edit on an existing file |
-| `list_files` | List directory contents (optional recursive) |
-| `search` | Grep for a pattern across workspace files |
-| `run_command` | Execute a shell command |
+| Tool          | What it does                                  |
+| ------------- | --------------------------------------------- |
+| `read_file`   | Read file contents (path-jailed to workspace) |
+| `write_file`  | Create or overwrite a file                    |
+| `edit_file`   | Search/replace edit on an existing file       |
+| `list_files`  | List directory contents (optional recursive)  |
+| `search`      | Grep for a pattern across workspace files     |
+| `run_command` | Execute a shell command                       |
+
+## Providers
+
+Kodr talks to any OpenAI-compatible chat completions endpoint. Three
+providers are built in — pick one with `--provider` (or `KODR_PROVIDER`),
+default `lmstudio`:
+
+|                            | `lmstudio` (default)                               | `openrouter`                        | `ollama`                                      |
+| -------------------------- | -------------------------------------------------- | ----------------------------------- | --------------------------------------------- |
+| Default base URL           | `http://localhost:1234/v1`                         | `https://openrouter.ai/api/v1`      | `http://localhost:11434/v1`                   |
+| Auth                       | none                                               | `OPENROUTER_API_KEY` (required)     | `OLLAMA_API_KEY` (optional)                   |
+| `--model`                  | optional, auto-detects the loaded model            | **required**                        | optional, auto-detects the first listed model |
+| Model load/unload          | explicit, via the `lms` CLI (see `--review-model`) | n/a — model is just a request field | n/a — Ollama manages this itself              |
+| Context-window auto-detect | yes                                                | yes                                 | no (falls back to the default)                |
+| `--reasoning`              | not supported                                      | supported                           | not supported                                 |
+| Per-request cost           | always $0 (local)                                  | real, reported by OpenRouter        | always $0                                     |
+
+```bash
+# Default: local LM Studio
+kodr "add input validation to server.mjs"
+
+# OpenRouter — hosted, needs an API key, --model is required
+export OPENROUTER_API_KEY=sk-or-...
+kodr "add input validation to server.mjs" --provider openrouter --model qwen/qwen3.6-35b-a3b
+
+# Ollama — local by default; point --base-url at ollama.com for
+# no-local-install hosted access, or just name a ":cloud"-suffixed model
+# (e.g. "kimi-k2.7-code:cloud") to offload through a local install instead
+kodr "add input validation to server.mjs" --provider ollama --model qwen3-coder:30b
+```
+
+**Ollama context length**: Ollama's `/v1/models` reports no context-length
+field (unlike LM Studio's `/api/v0/models` or OpenRouter's
+`context_length`), so kodr can't auto-detect it and always falls back to its
+own conservative default (8192 tokens) for compaction bookkeeping —
+regardless of what your Ollama server is actually configured to run at. This
+is independent of Ollama's own context setting (the `Context length` slider
+in Ollama's app Settings, or `OLLAMA_CONTEXT_LENGTH` if you run `ollama
+serve` directly — see `ollama serve --help`), which controls the model's
+real usable context and defaults to 4k/32k/256k based on available VRAM. If
+you've raised that — e.g. to 256k — tell kodr the same number with
+`--context-window 262144` (or `KODR_CONTEXT_WINDOW=262144`) so its
+compaction threshold isn't needlessly conservative; kodr compacts at 80% of
+whatever value it's given.
+
+**Reasoning** (`--reasoning` / `KODR_REASONING`): asks OpenRouter for
+reasoning tokens on every call (`{ reasoning: { enabled: true } }`). Errors
+immediately at startup if the resolved provider doesn't support it, rather
+than silently running without it. LM Studio's chat completions endpoint has
+no reasoning control today ([tracked upstream, open, no
+ETA](https://github.com/lmstudio-ai/lmstudio-bug-tracker/issues/1250)).
+
+**OpenRouter privacy defaults**: kodr sends an opinionated
+`{ zdr: true, data_collection: "deny" }` on every OpenRouter request by
+default — Zero Data Retention routing and a refusal to route through
+providers that collect/train on prompt data — since sending code to a hosted
+model implies caring about this by default, not only when you remembered to
+ask. Turn either off with `--openrouter-no-zdr` /
+`--openrouter-allow-data-collection` (or the matching `KODR_OPENROUTER_*` env
+vars). Restrict or prioritize which upstream inference provider OpenRouter
+routes to with `--openrouter-provider-only akashml,parasail` (or
+`KODR_OPENROUTER_PROVIDER_ONLY`) — see [OpenRouter's provider
+routing docs](https://openrouter.ai/docs/features/provider-routing).
 
 ## CLI options
 
 ```
---cwd <path>           Workspace directory (default: .)
---base-url <url>       LM Studio URL (default: http://localhost:1234/v1)
---model <id>           Model identifier (or KODR_MODEL; auto-detected if omitted)
---test <command>       Verification command (e.g. "npm test")
---heal-turns <n>       Max repair turns (default: 3)
---max-tool-turns <n>   Tool-turn ceiling per loop (default: 20)
---heartbeat-ms <n>     "Still running" notice interval for Stop hooks and model requests (or KODR_HEARTBEAT_MS; default: 30000, 0 disables)
---model-retries <n>    Retries for a 5xx chat response, e.g. a local backend crash (or KODR_MODEL_RETRIES; default: 1, 0 disables)
---context-window <n>   Max context tokens; compact at 80% (auto-detected; 0 disables)
---env <a,b,c>          Extra env vars to expose to commands (CSV of names)
---continue <last|path> Continue from a prior run
---quiet, -q            Suppress streaming output
+--cwd <path>            Workspace directory (default: .)
+--provider <name>       lmstudio, openrouter, or ollama (or KODR_PROVIDER; default: lmstudio)
+--base-url <url>        Provider API URL (default: see Providers above)
+--model <id>            Model identifier (or KODR_MODEL; auto-detected for lmstudio/ollama;
+                         required for openrouter)
+--reasoning             Request reasoning tokens (or KODR_REASONING; openrouter only)
+--openrouter-no-zdr     Disable OpenRouter Zero Data Retention routing (on by default)
+--openrouter-allow-data-collection
+                        Allow OpenRouter routing to data-collecting providers (denied by default)
+--openrouter-provider-only <a,b>
+                        Restrict/prioritize OpenRouter's upstream providers (or KODR_OPENROUTER_PROVIDER_ONLY)
+--test <command>        Verification command (e.g. "npm test")
+--heal-turns <n>        Max repair turns (default: 3)
+--max-tool-turns <n>    Tool-turn ceiling per loop (default: 20)
+--heartbeat-ms <n>      "Still running" notice interval for Stop hooks and model requests (or KODR_HEARTBEAT_MS; default: 30000, 0 disables)
+--model-retries <n>     Retries for a 5xx chat response, e.g. a local backend crash (or KODR_MODEL_RETRIES; default: 1, 0 disables)
+--context-window <n>    Max context tokens; compact at 80% (auto-detected where the provider supports it; 0 disables)
+--env <a,b,c>           Extra env vars to expose to commands (CSV of names)
+--continue <last|path>  Continue from a prior run
+--quiet, -q             Suppress streaming output
 ```
 
-You can also set the model once for scripts and evals:
+You can also set the provider and model once for scripts and evals:
 
 ```bash
 KODR_MODEL=qwen/qwen3.6-35b-a3b kodr "fix the failing test"
-KODR_MODEL=qwen/qwen3.6-35b-a3b npm run eval
+KODR_PROVIDER=openrouter KODR_MODEL=qwen/qwen3.6-35b-a3b npm run eval
 ```
 
-`--model` takes precedence over `KODR_MODEL`. If neither is set, kodr uses the
-first model reported by LM Studio's OpenAI-compatible `/v1/models` endpoint.
+`--model` takes precedence over `KODR_MODEL`, and `--provider` over
+`KODR_PROVIDER`. If neither model option is set, lmstudio/ollama auto-detect
+from their model listing; openrouter requires one explicitly.
 
 ## Command environment
 
@@ -245,7 +327,12 @@ bin/kodr.mjs           CLI entry point
 src/
   cli.mjs              Argument parsing
   harness.mjs          Main execution loop
-  model.mjs            LM Studio client
+  model.mjs            OpenAI-compatible chat client (shared by every provider)
+  provider.mjs         Provider factory (lmstudio/openrouter/ollama selection)
+  provider-lmstudio.mjs   LM Studio provider
+  provider-openrouter.mjs OpenRouter provider
+  provider-ollama.mjs     Ollama provider
+  lms.mjs              LM Studio model load/unload via the `lms` CLI
   context.mjs          System prompt assembly
   verify.mjs           Test/check runner
   heal.mjs             Repair loop

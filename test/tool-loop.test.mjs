@@ -1,13 +1,13 @@
-import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import {
-  MAX_TOOL_TURNS,
   executeNativeToolCalls,
   executeRecoveredTextToolCall,
+  MAX_TOOL_TURNS,
   recoverTextToolCall,
   runToolLoop,
 } from '../src/tool-loop.mjs';
@@ -181,7 +181,7 @@ describe('runToolLoop', () => {
     assert.equal(loop.stoppedReason, 'complete');
     assert.equal(loop.finalText, 'done');
     assert.equal(loop.toolTurns, 0);
-    assert.deepEqual(loop.usage, { prompt: 2, completion: 3 });
+    assert.deepEqual(loop.usage, { prompt: 2, completion: 3, cost: 0 });
   });
 
   it('runs a tool call then completes, accumulating usage', async () => {
@@ -210,7 +210,7 @@ describe('runToolLoop', () => {
     assert.equal(loop.toolTurns, 1);
     assert.equal(loop.completed, true);
     assert.equal(loop.finalText, 'fixed');
-    assert.deepEqual(loop.usage, { prompt: 3, completion: 4 });
+    assert.deepEqual(loop.usage, { prompt: 3, completion: 4, cost: 0 });
     assert.ok(messages.some((m) => m.role === 'tool'));
   });
 

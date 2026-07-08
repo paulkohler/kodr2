@@ -120,12 +120,25 @@ export function formatSummary(result) {
 
   const tokens = result.usage;
   if (tokens) {
+    const costSuffix = tokens.cost ? ` (${formatCost(tokens.cost)})` : '';
     lines.push(
-      `${DIM}tokens:${RESET} ${tokens.prompt} in / ${tokens.completion} out`,
+      `${DIM}tokens:${RESET} ${tokens.prompt} in / ${tokens.completion} out${costSuffix}`,
     );
   }
 
   return lines.join('\n');
+}
+
+/**
+ * Format a USD cost value (OpenRouter's usage.cost; always 0 for a local
+ * backend like LM Studio, which has none). Four decimal places -- a single
+ * turn is commonly a fraction of a cent, and rounding to 2dp would show
+ * "$0.00" for real, nonzero spend.
+ * @param {number} cost
+ * @returns {string}
+ */
+export function formatCost(cost) {
+  return `$${cost.toFixed(4)}`;
 }
 
 /**
@@ -189,6 +202,31 @@ export function formatModelsList(models, baseUrl) {
     lines.push(
       `${YELLOW}⚠${RESET} ${DIM}A loaded model below its max can be reloaded with a larger context length in LM Studio. A bigger window means longer sessions and fewer compactions, at the cost of more memory.${RESET}`,
     );
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Format the model listing for `kodr models` on a provider with no
+ * richModels/context-probing capability (e.g. OpenRouter) -- just the
+ * model ids, no load state or context window (nothing to report).
+ * @param {Array<{ id: string }>} models
+ * @param {string} providerName
+ * @param {string} [baseUrl]
+ * @returns {string}
+ */
+export function formatSimpleModelsList(models, providerName, baseUrl) {
+  const url = baseUrl || '';
+  if (!models || models.length === 0) {
+    return `${formatNotice(`No models reported by ${providerName}${url ? ` at ${url}` : ''}.`)}`;
+  }
+
+  const lines = [
+    `${BOLD}${providerName} models${RESET}${url ? ` ${DIM}${url}${RESET}` : ''}`,
+    '',
+  ];
+  for (const model of models) {
+    lines.push(`  ${DIM}○${RESET} ${model.id}`);
   }
   return lines.join('\n');
 }
@@ -281,8 +319,11 @@ export function formatStats(stats) {
   lines.push(
     `  ${DIM}avg duration:${RESET} ${stats.avgDurationMs === null ? 'n/a' : `${Math.round(stats.avgDurationMs)}ms`}`,
   );
+  const totalCostSuffix = stats.totalUsage.cost
+    ? ` (${formatCost(stats.totalUsage.cost)})`
+    : '';
   lines.push(
-    `  ${DIM}total tokens:${RESET} ${stats.totalUsage.prompt} in / ${stats.totalUsage.completion} out`,
+    `  ${DIM}total tokens:${RESET} ${stats.totalUsage.prompt} in / ${stats.totalUsage.completion} out${totalCostSuffix}`,
   );
 
   return lines.join('\n');

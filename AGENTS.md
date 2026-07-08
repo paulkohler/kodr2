@@ -5,11 +5,20 @@ Rules for AI agents working in this repo.
 ## Stack
 
 - Node.js 22+, ESM, zero runtime dependencies.
-- LM Studio only (OpenAI-compatible API at localhost:1234). The standard
+- Three providers, all speaking the same OpenAI-compatible chat completions
+  contract (see `specs/provider.yaml`): LM Studio (default, localhost:1234,
+  no auth), OpenRouter (hosted, `OPENROUTER_API_KEY` required), and Ollama
+  (local by default at localhost:11434, or `https://ollama.com/v1` with
+  `OLLAMA_API_KEY` for hosted access). `src/model.mjs` is the shared
+  HTTP/streaming client; `src/provider-*.mjs` wrap it with each provider's
+  defaults/capabilities, selected via `src/provider.mjs`'s factory --
+  callers never construct a provider module directly. The standard
   `/v1/models` endpoint doesn't report context-window state; LM Studio's own
   `/api/v0/models` extension does (`state`, `loaded_context_length`,
-  `max_context_length`) and is what `contextInfo`/`richModels` in
-  `src/model.mjs` rely on.
+  `max_context_length`) and is what LM Studio's `contextInfo`/`richModels`
+  rely on -- OpenRouter's `/models` reports `context_length` directly
+  instead; Ollama's `/v1/models` reports neither, so `contextInfo` always
+  degrades to nulls there.
 - Biome for formatting as an external developer tool. Prefer a globally or environment-provided `biome` binary; do not add Biome to `dependencies` or `devDependencies`. CI has no lockfile (by design) and doesn't get Biome preinstalled either — CI must install it itself; never assume it's on the runner.
 - `node:test` for all tests.
 

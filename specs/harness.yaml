@@ -80,7 +80,11 @@ outputs:
     description: Whether healing succeeded (null if not attempted)
   usage:
     type: object
-    description: "{ prompt, completion } token counts"
+    description: >
+      { prompt, completion, cost } -- token counts plus total USD cost
+      (OpenRouter; always 0 for LM Studio) across the whole run, including
+      the build loop, any heal turns, the review pass, and the memory
+      retrospective (see specs/model-client.yaml, specs/provider.yaml)
   metadata:
     type: object
     description: "{ cwd, prompt, baseUrl, model, testCommand, maxHealTurns, envPassthrough, startedAt }"
@@ -161,6 +165,7 @@ tests:
     - shared tool loop completes, exhausts turns, and stops on budget
     - dispatches multi-call and repeated native tool calls, one result each
     - tolerates malformed argument JSON and model-invented tool names
+    - carries a provider's usage.cost through to the run result and saved record
   eval:
     - end-to-end run produces file changes on a simple task
     - tool loop terminates within turn limit

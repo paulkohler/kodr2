@@ -56,6 +56,7 @@ export function computeStats(records) {
   let durationSamples = 0;
   let totalPrompt = 0;
   let totalCompletion = 0;
+  let totalCost = 0;
 
   for (const record of records) {
     const reason = record.stoppedReason || 'unknown';
@@ -92,6 +93,7 @@ export function computeStats(records) {
     if (record.usage) {
       totalPrompt += record.usage.prompt || 0;
       totalCompletion += record.usage.completion || 0;
+      totalCost += record.usage.cost || 0;
     }
   }
 
@@ -110,6 +112,10 @@ export function computeStats(records) {
     avgToolTurns: totalToolTurns / total,
     avgDurationMs:
       durationSamples > 0 ? totalDurationMs / durationSamples : null,
-    totalUsage: { prompt: totalPrompt, completion: totalCompletion },
+    totalUsage: {
+      prompt: totalPrompt,
+      completion: totalCompletion,
+      cost: totalCost,
+    },
   };
 }

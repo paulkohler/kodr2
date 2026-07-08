@@ -53,14 +53,14 @@ function toolCallTurn(name, args) {
         },
       ],
     },
-    usage: { prompt: 1, completion: 1 },
+    usage: { prompt: 1, completion: 1, cost: 0.0001 },
   };
 }
 
 function finalTurn(text) {
   return {
     message: { role: 'assistant', content: text },
-    usage: { prompt: 2, completion: 3 },
+    usage: { prompt: 2, completion: 3, cost: 0.0002 },
   };
 }
 
@@ -224,6 +224,11 @@ describe('runReview', () => {
     // attempt, not just the final turn's.
     assert.equal(result.usage.prompt, 2 + 4);
     assert.equal(result.usage.completion, 3 + 5);
+    // Same shape for cost: first attempt (0.0002) + retry's cumulative
+    // (0.0001 + 0.0001 + 0.0002) -- computed with the identical
+    // left-to-right float additions the code performs, to sidestep
+    // floating-point non-associativity in the expected value.
+    assert.equal(result.usage.cost, 0.0002 + (0.0001 + 0.0001 + 0.0002));
   });
 
   it('combines chat-call retries across both attempts when a nudge retry happens', async () => {

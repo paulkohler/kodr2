@@ -10,11 +10,13 @@ import { parseEnvNames } from './env.mjs';
 import {
   formatDoctorReport,
   formatModelsList,
+  formatSimpleModelsList,
   formatStats,
 } from './format.mjs';
 import { DEFAULT_HEARTBEAT_MS, resolveRunsDir, run } from './harness.mjs';
 import { DEFAULT_INCIDENT_HEARTBEAT_MS } from './incident.mjs';
-import { createClient, DEFAULT_MAX_RETRIES } from './model.mjs';
+import { DEFAULT_MAX_RETRIES } from './model.mjs';
+import { createProvider, resolveProviderName } from './provider.mjs';
 import {
   DEFAULT_MIN_REVIEW_TOOL_CALLS,
   DEFAULT_REVIEW_MAX_TOOL_TURNS,
@@ -148,12 +150,25 @@ export async function main(argv) {
     process.exitCode = 1;
     return;
   }
+  const providerName = resolveProviderName(args.provider);
+  if (!['lmstudio', 'openrouter', 'ollama'].includes(providerName)) {
+    process.stderr.write(
+      `Unknown provider "${providerName}" -- must be one of: lmstudio, openrouter, ollama.\n`,
+    );
+    process.exitCode = 1;
+    return;
+  }
 
   const cwd = resolve(args.cwd || '.');
   const options = {
     cwd,
+    provider: args.provider,
     baseUrl: args.baseUrl,
     model: args.model,
+    reasoning: args.reasoning,
+    noZdr: args.openrouterNoZdr,
+    allowDataCollection: args.openrouterAllowDataCollection,
+    providerOrder: args.openrouterProviderOnly,
     testCommand: args.test,
     maxHealTurns: args.healTurns,
     maxRunMs: args.maxRunMs,
@@ -268,7 +283,7 @@ export function summarizeResult(result) {
     stoppedReason: result.stoppedReason,
     completed: result.stoppedReason === 'complete',
     toolTurns: result.toolTurns ?? 0,
-    usage: result.usage ?? { prompt: 0, completion: 0 },
+    usage: result.usage ?? { prompt: 0, completion: 0, cost: 0 },
     compactions: result.compactions ?? 0,
     retries: result.retries ?? 0,
     healed: result.healed ?? null,
@@ -304,8 +319,20 @@ export function parseArgs(argv) {
     command: null,
     prompt: null,
     cwd: null,
+    provider: null,
     baseUrl: null,
     model: null,
+    // null (not false) so the KODR_REASONING/KODR_OPENROUTER_NO_ZDR/
+    // KODR_OPENROUTER_ALLOW_DATA_COLLECTION env vars still take effect when
+    // the corresponding flag isn't passed -- reasoningEnabled/zdrEnabled/
+    // dataCollectionDenied treat an explicit false as an override that
+    // always wins over the env var, so defaulting to false here would make
+    // those env vars permanently unreachable through the CLI (see
+    // specs/provider.yaml).
+    reasoning: null,
+    openrouterNoZdr: null,
+    openrouterAllowDataCollection: null,
+    openrouterProviderOnly: [],
     test: null,
     healTurns: 3,
     maxRunMs: 0,
@@ -358,6 +385,11 @@ export function parseArgs(argv) {
       i++;
       continue;
     }
+    if (arg === '--provider' && argv[i + 1]) {
+      args.provider = argv[++i];
+      i++;
+      continue;
+    }
     if (arg === '--base-url' && argv[i + 1]) {
       args.baseUrl = argv[++i];
       i++;
@@ -365,6 +397,26 @@ export function parseArgs(argv) {
     }
     if (arg === '--model' && argv[i + 1]) {
       args.model = argv[++i];
+      i++;
+      continue;
+    }
+    if (arg === '--reasoning') {
+      args.reasoning = true;
+      i++;
+      continue;
+    }
+    if (arg === '--openrouter-no-zdr') {
+      args.openrouterNoZdr = true;
+      i++;
+      continue;
+    }
+    if (arg === '--openrouter-allow-data-collection') {
+      args.openrouterAllowDataCollection = true;
+      i++;
+      continue;
+    }
+    if (arg === '--openrouter-provider-only' && argv[i + 1]) {
+      args.openrouterProviderOnly = parseEnvNames(argv[++i]);
       i++;
       continue;
     }
@@ -537,8 +589,28 @@ Usage:
 
 Options:
   --cwd <path>                    Workspace directory (default: .)
-  --base-url <url>                LM Studio URL (default: http://localhost:1234/v1)
-  --model <id>                    Model identifier (or KODR_MODEL; auto-detected from LM Studio if omitted)
+  --provider <name>                lmstudio, openrouter, or ollama (or KODR_PROVIDER; default: lmstudio)
+  --base-url <url>                Provider API URL (default: http://localhost:1234/v1 for
+                                  lmstudio, https://openrouter.ai/api/v1 for openrouter,
+                                  http://localhost:11434/v1 for ollama -- pass
+                                  https://ollama.com/v1 for Ollama's hosted API instead of a
+                                  local install, with OLLAMA_API_KEY set)
+  --model <id>                    Model identifier (or KODR_MODEL; auto-detected from LM Studio
+                                  if omitted -- required with --provider openrouter)
+  --reasoning                     Request reasoning tokens (or KODR_REASONING). Only
+                                  --provider openrouter supports this today -- errors otherwise.
+                                  See specs/provider.yaml.
+  --openrouter-no-zdr             Disable Zero Data Retention routing (or KODR_OPENROUTER_NO_ZDR).
+                                  On by default with --provider openrouter -- only routes to
+                                  providers with a ZDR policy.
+  --openrouter-allow-data-collection
+                                  Allow routing to providers that collect/train on prompt data (or
+                                  KODR_OPENROUTER_ALLOW_DATA_COLLECTION). Denied by default with
+                                  --provider openrouter.
+  --openrouter-provider-only <a,b> Restrict/prioritize OpenRouter's upstream inference providers,
+                                  e.g. "akashml,parasail" (or KODR_OPENROUTER_PROVIDER_ONLY). Maps
+                                  to OpenRouter's provider.order. See
+                                  https://openrouter.ai/docs/features/provider-routing.
   --prompt, -p <text>             Prompt text (compatibility alias)
   --test <command>                First Stop hook (e.g. "npm test"); see .kodr/hooks.json
   --heal-turns <n>                Max repair turns (default: 3)
@@ -597,13 +669,42 @@ Examples:
 }
 
 async function printModels(args) {
-  const client = createClient({ baseUrl: args.baseUrl, model: args.model });
-  const models = await client.richModels();
-  process.stdout.write(`${formatModelsList(models, args.baseUrl)}\n`);
+  let client;
+  try {
+    client = createProvider({
+      provider: args.provider,
+      baseUrl: args.baseUrl,
+      model: args.model,
+    });
+  } catch (err) {
+    process.stderr.write(`Error: ${err.message}\n`);
+    process.exitCode = 1;
+    return;
+  }
+  // richModels() (lmstudio) already catches its own errors and degrades to
+  // [] -- see model.mjs -- but models() (openrouter/ollama) does not; a
+  // connection failure there must not reach the caller as an unhandled
+  // rejection (this command isn't wrapped in the `run` subcommand's own
+  // try/catch, since subcommands return before reaching it).
+  try {
+    if (client.capabilities.contextProbing) {
+      const models = await client.richModels();
+      process.stdout.write(`${formatModelsList(models, args.baseUrl)}\n`);
+      return;
+    }
+    const models = await client.models();
+    process.stdout.write(
+      `${formatSimpleModelsList(models, resolveProviderName(args.provider), args.baseUrl)}\n`,
+    );
+  } catch (err) {
+    process.stderr.write(`Error: ${err.message}\n`);
+    process.exitCode = 1;
+  }
 }
 
 async function printDoctor(args) {
   const report = await runDoctorChecks({
+    provider: args.provider,
     baseUrl: args.baseUrl,
     model: args.model,
   });
@@ -647,8 +748,13 @@ export async function runReplay(args) {
 
   const options = {
     cwd: prior.metadata.cwd || cwd,
+    provider: args.provider || prior.metadata.provider,
     baseUrl: args.baseUrl || prior.metadata.baseUrl,
     model: args.model || prior.metadata.model,
+    reasoning: args.reasoning,
+    noZdr: args.openrouterNoZdr,
+    allowDataCollection: args.openrouterAllowDataCollection,
+    providerOrder: args.openrouterProviderOnly,
     testCommand: prior.metadata.testCommand || undefined,
     maxHealTurns: prior.metadata.maxHealTurns,
     maxRunMs: prior.metadata.maxRunMs,

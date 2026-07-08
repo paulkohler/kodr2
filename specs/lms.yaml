@@ -16,6 +16,12 @@ description: >
   the caller proceeds — rather than trusting that `lms load` exiting 0
   means what was asked for is what's now loaded.
 
+  ensureModelLoaded/unloadAllModels are exposed as loadModel/ejectModel on
+  the LM Studio provider (see specs/provider.yaml); a provider with no
+  model-lifecycle concept (e.g. OpenRouter, where the model is just a
+  per-request field) has no equivalent methods at all, and callers check
+  capabilities.modelLifecycle before touching this module.
+
 inputs:
   model:
     type: string

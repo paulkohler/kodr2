@@ -43,10 +43,13 @@ import {
   runMemoryRetrospective,
 } from './memory.mjs';
 import {
-  createClient,
+  DEFAULT_BASE_URL,
   DEFAULT_MAX_RETRIES,
   hasContextHeadroom,
 } from './model.mjs';
+import { createProvider, resolveProviderName } from './provider.mjs';
+import { DEFAULT_OLLAMA_BASE_URL } from './provider-ollama.mjs';
+import { DEFAULT_OPENROUTER_BASE_URL } from './provider-openrouter.mjs';
 import {
   minReviewToolCalls,
   reviewMaxToolTurns,
@@ -68,8 +71,17 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  * @param {string} prompt - User prompt
  * @param {object} options
  * @param {string} options.cwd - Workspace root (absolute path)
- * @param {string} [options.baseUrl] - LM Studio base URL
+ * @param {string} [options.provider] - "lmstudio", "openrouter", or "ollama" (default lmstudio, or KODR_PROVIDER)
+ * @param {string} [options.baseUrl] - Provider API base URL
  * @param {string} [options.model] - Model identifier
+ * @param {boolean} [options.reasoning] - Request reasoning tokens; only openrouter
+ *   supports this -- errors otherwise (see specs/provider.yaml)
+ * @param {boolean} [options.noZdr] - Disable OpenRouter Zero Data Retention routing
+ *   (on by default with the openrouter provider)
+ * @param {boolean} [options.allowDataCollection] - Allow OpenRouter providers that
+ *   collect/train on prompt data (denied by default with the openrouter provider)
+ * @param {string[]} [options.providerOrder] - OpenRouter upstream provider slugs to
+ *   try in order, e.g. ["akashml", "parasail"] (maps to provider.order)
  * @param {string} [options.testCommand] - Verification command
  * @param {number} [options.maxHealTurns] - Max heal turns (default 3)
  * @param {number} [options.maxRunMs] - Stop between turns after this many ms (0 disables)
@@ -154,44 +166,71 @@ export async function run(prompt, options) {
     });
   }
 
-  const client = createClient({
-    baseUrl: options.baseUrl,
-    model: options.model,
-    timeout: maxRunMs || undefined,
-    maxRetries: modelMaxRetries(options.maxRetries),
-  });
-
-  const modelId = await client.resolveModel();
-  const contextWindow = await resolveContextWindow({
-    option: options.contextWindow,
-    client,
-    modelId,
-    quiet,
-  });
-
-  // A review model means Kodr owns the LM Studio load/unload sequencing
-  // itself, rather than the operator swapping models by hand between
-  // phases -- the incident that motivated this was a run killed by the
-  // model having silently reloaded at the wrong context size, diagnosed
-  // by hand after the fact. With no review model configured (today's
-  // default), none of this runs -- LM Studio's own on-demand loading is
-  // unchanged.
-  if (options.reviewModel) {
-    const loadResult = await ensureModelLoaded({
-      model: modelId,
-      contextWindow,
+  // Provider setup (construction, model resolution, context-window probe,
+  // and the optional review-model load) runs inside its own try/catch so a
+  // failure here -- a bad provider config, an unresolvable model -- still
+  // disposes incident tracking before propagating. Without this,
+  // installIncidentHandlers' heartbeat file above is never cleaned up on a
+  // setup-phase throw, and the *next* run's own sweepOrphanedHeartbeats
+  // reports it as a false orphaned-run incident. Confirmed:
+  // `run({ provider: 'openrouter' })` with no OPENROUTER_API_KEY used to
+  // leak exactly this file.
+  let client;
+  let modelId;
+  let contextWindow;
+  try {
+    client = createProvider({
+      provider: options.provider,
+      baseUrl: options.baseUrl,
+      model: options.model,
+      timeout: maxRunMs || undefined,
+      maxRetries: modelMaxRetries(options.maxRetries),
+      reasoning: options.reasoning,
+      noZdr: options.noZdr,
+      allowDataCollection: options.allowDataCollection,
+      providerOrder: options.providerOrder,
     });
-    if (loadResult.error && !quiet) {
-      process.stderr.write(
-        `${formatNotice(`build model load: ${loadResult.error}`)}\n`,
-      );
+
+    modelId = await client.resolveModel();
+    contextWindow = await resolveContextWindow({
+      option: options.contextWindow,
+      client,
+      modelId,
+      quiet,
+    });
+
+    // A review model means Kodr owns the LM Studio load/unload sequencing
+    // itself, rather than the operator swapping models by hand between
+    // phases -- the incident that motivated this was a run killed by the
+    // model having silently reloaded at the wrong context size, diagnosed
+    // by hand after the fact. With no review model configured (today's
+    // default), none of this runs -- LM Studio's own on-demand loading is
+    // unchanged. A provider with no model-lifecycle concept (e.g.
+    // OpenRouter, where the model is just a per-request field) skips this
+    // too -- there's nothing to load.
+    if (options.reviewModel && client.capabilities.modelLifecycle) {
+      const loadResult = await client.loadModel({
+        model: modelId,
+        contextWindow,
+      });
+      if (loadResult.error && !quiet) {
+        process.stderr.write(
+          `${formatNotice(`build model load: ${loadResult.error}`)}\n`,
+        );
+      }
     }
+  } catch (err) {
+    await disposeIncidentTracking();
+    throw err;
   }
 
   const metadata = {
     cwd,
     prompt,
-    baseUrl: options.baseUrl || 'http://localhost:1234/v1',
+    provider: resolveProviderName(options.provider),
+    baseUrl:
+      options.baseUrl ||
+      defaultBaseUrlFor(resolveProviderName(options.provider)),
     model: modelId,
     testCommand: testCommand || null,
     maxHealTurns,
@@ -464,6 +503,7 @@ export async function run(prompt, options) {
         result.packageCommands = tools.packageCommands();
         totalUsage.prompt += healResult.usage.prompt;
         totalUsage.completion += healResult.usage.completion;
+        totalUsage.cost += healResult.usage.cost || 0;
         totalRetries += healResult.retries || 0;
         result.retries = totalRetries;
 
@@ -541,6 +581,7 @@ export async function run(prompt, options) {
       if (result.review.usage) {
         result.usage.prompt += result.review.usage.prompt;
         result.usage.completion += result.review.usage.completion;
+        result.usage.cost += result.review.usage.cost || 0;
       }
       if (result.review.retries) {
         result.retries = (result.retries || 0) + result.review.retries;
@@ -603,6 +644,7 @@ export async function run(prompt, options) {
       if (result.memory.usage) {
         result.usage.prompt += result.memory.usage.prompt;
         result.usage.completion += result.memory.usage.completion;
+        result.usage.cost += result.memory.usage.cost || 0;
       }
       if (result.memory.retries) {
         result.retries = (result.retries || 0) + result.memory.retries;
@@ -701,7 +743,7 @@ function createErrorResult(params) {
     packageCommands: tools.packageCommands(),
     toolTurns: 0,
     stoppedReason: 'error',
-    usage: { prompt: 0, completion: 0 },
+    usage: { prompt: 0, completion: 0, cost: 0 },
     compactions: 0,
     retries: err.retries ?? 0,
     messages,
@@ -874,7 +916,7 @@ function emptyCompactionResult(metadata, messages, response) {
     filesChanged: [],
     toolTurns: 0,
     stoppedReason: 'complete',
-    usage: { prompt: 0, completion: 0 },
+    usage: { prompt: 0, completion: 0, cost: 0 },
     compactions: 0,
     messages,
   };
@@ -936,17 +978,22 @@ export async function runReviewPass(params) {
     : buildContextWindow;
 
   try {
-    const loadResult = await ensureModelLoadedFn({
-      model: reviewModel,
-      contextWindow,
-    });
-    if (loadResult.error) {
-      if (!quiet) {
-        process.stderr.write(
-          `${formatNotice(`review skipped: ${loadResult.error}`)}\n`,
-        );
+    // A provider with no model-lifecycle concept (e.g. OpenRouter) needs no
+    // load step -- the review model is just a different value in the chat
+    // request's `model` field, not something that has to be loaded first.
+    if (client.capabilities.modelLifecycle) {
+      const loadResult = await ensureModelLoadedFn({
+        model: reviewModel,
+        contextWindow,
+      });
+      if (loadResult.error) {
+        if (!quiet) {
+          process.stderr.write(
+            `${formatNotice(`review skipped: ${loadResult.error}`)}\n`,
+          );
+        }
+        return { skipped: true, error: loadResult.error };
       }
-      return { skipped: true, error: loadResult.error };
     }
 
     const reviewResult = await runReviewFn({
@@ -1031,6 +1078,22 @@ function formatStopReason(stoppedReason, maxToolTurns) {
     return 'stopped after run budget';
   }
   return `stopped after ${maxToolTurns} tool turns`;
+}
+
+/**
+ * The default base URL for a resolved provider name, for recording in run
+ * metadata when no explicit --base-url was given.
+ * @param {string} providerName
+ * @returns {string}
+ */
+function defaultBaseUrlFor(providerName) {
+  if (providerName === 'openrouter') {
+    return DEFAULT_OPENROUTER_BASE_URL;
+  }
+  if (providerName === 'ollama') {
+    return DEFAULT_OLLAMA_BASE_URL;
+  }
+  return DEFAULT_BASE_URL;
 }
 
 /**

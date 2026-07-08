@@ -1,7 +1,8 @@
-import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
 import {
   exitCodeFor,
+  main,
   parseArgs,
   shouldFailProcess,
   summarizeResult,
@@ -33,6 +34,61 @@ describe('parseArgs', () => {
   it('parses --model flag', () => {
     const args = parseArgs(['run', 'hi', '--model', 'qwen/qwen3']);
     assert.equal(args.model, 'qwen/qwen3');
+  });
+
+  it('parses --provider flag', () => {
+    const args = parseArgs(['run', 'hi', '--provider', 'openrouter']);
+    assert.equal(args.provider, 'openrouter');
+  });
+
+  it('defaults --provider to null (createProvider resolves lmstudio)', () => {
+    const args = parseArgs(['run', 'hi']);
+    assert.equal(args.provider, null);
+  });
+
+  it('parses --reasoning as a boolean flag', () => {
+    const args = parseArgs(['run', 'hi', '--reasoning']);
+    assert.equal(args.reasoning, true);
+  });
+
+  it('defaults --reasoning to null so KODR_REASONING can still take effect', () => {
+    const args = parseArgs(['run', 'hi']);
+    assert.equal(args.reasoning, null);
+  });
+
+  it('parses --openrouter-no-zdr as a boolean flag', () => {
+    const args = parseArgs(['run', 'hi', '--openrouter-no-zdr']);
+    assert.equal(args.openrouterNoZdr, true);
+  });
+
+  it('defaults --openrouter-no-zdr to null so KODR_OPENROUTER_NO_ZDR can still take effect', () => {
+    const args = parseArgs(['run', 'hi']);
+    assert.equal(args.openrouterNoZdr, null);
+  });
+
+  it('parses --openrouter-allow-data-collection as a boolean flag', () => {
+    const args = parseArgs(['run', 'hi', '--openrouter-allow-data-collection']);
+    assert.equal(args.openrouterAllowDataCollection, true);
+  });
+
+  it('defaults --openrouter-allow-data-collection to null so KODR_OPENROUTER_ALLOW_DATA_COLLECTION can still take effect', () => {
+    const args = parseArgs(['run', 'hi']);
+    assert.equal(args.openrouterAllowDataCollection, null);
+  });
+
+  it('parses --openrouter-provider-only into a list of provider slugs', () => {
+    const args = parseArgs([
+      'run',
+      'hi',
+      '--openrouter-provider-only',
+      'akashml, parasail',
+    ]);
+    assert.deepEqual(args.openrouterProviderOnly, ['akashml', 'parasail']);
+  });
+
+  it('defaults --openrouter-provider-only to an empty list', () => {
+    const args = parseArgs(['run', 'hi']);
+    assert.deepEqual(args.openrouterProviderOnly, []);
   });
 
   it('parses --test flag', () => {
@@ -324,5 +380,30 @@ describe('shouldFailProcess', () => {
 
   it('fails the CLI process when the run did not complete', () => {
     assert.equal(shouldFailProcess({ stoppedReason: 'budget-exceeded' }), true);
+  });
+});
+
+describe('kodr models', () => {
+  it('reports a clean error instead of an unhandled rejection when the provider is unreachable (non-rich provider)', async () => {
+    const originalExitCode = process.exitCode;
+    process.exitCode = undefined;
+
+    try {
+      // Reproduces the exact repro from review: an unreachable ollama
+      // (non-rich; goes through client.models(), not richModels()) used to
+      // crash with a raw Node stack trace instead of a clean CLI error.
+      await assert.doesNotReject(
+        main([
+          'models',
+          '--provider',
+          'ollama',
+          '--base-url',
+          'http://127.0.0.1:1/v1',
+        ]),
+      );
+      assert.equal(process.exitCode, 1);
+    } finally {
+      process.exitCode = originalExitCode;
+    }
   });
 });

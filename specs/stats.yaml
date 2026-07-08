@@ -61,7 +61,7 @@ outputs:
     description: Average run duration in ms (null when no run recorded a duration)
   totalUsage:
     type: object
-    description: "{ prompt, completion } tokens summed across every run in the set"
+    description: "{ prompt, completion, cost } tokens and USD cost summed across every run in the set"
 
 constraints:
   - loadRunRecords reads every "*.json" file directly in a runs directory (not "*-debug.jsonl"
@@ -94,6 +94,6 @@ tests:
     - computeStats computes verifyAttemptedRate and verifyPassRate
     - computeStats reports verifyPassRate as null when no run in the set was verified
     - computeStats computes avgToolTurns and avgDurationMs across the set
-    - computeStats sums prompt/completion usage across the set
+    - computeStats sums prompt/completion/cost usage across the set
     - formatStats renders total runs, stopped-reason breakdown, and every rate
     - formatStats renders "n/a" for a null rate rather than an empty or NaN value

@@ -115,6 +115,56 @@ describe('runDoctorChecks', () => {
     assert.equal(model.detail, 'qwen/coder');
   });
 
+  it('reports which provider it checked', async () => {
+    const baseUrl = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ data: [{ id: 'a' }] }));
+    });
+
+    const report = await runDoctorChecks({ baseUrl, gitCheckFn: okGitCheck });
+    assert.equal(
+      report.checks.some((c) => c.name === 'LM Studio'),
+      true,
+    );
+  });
+
+  it('reports ollama as reachable with no API key required', async () => {
+    const baseUrl = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ data: [{ id: 'qwen3-coder:30b' }] }));
+    });
+
+    const report = await runDoctorChecks({
+      provider: 'ollama',
+      baseUrl,
+      gitCheckFn: okGitCheck,
+    });
+    const ollama = report.checks.find((c) => c.name === 'Ollama');
+    assert.equal(ollama.status, 'ok');
+    assert.equal(report.ok, true);
+  });
+
+  it('reports a fail (not a crash) for openrouter when OPENROUTER_API_KEY is unset', async () => {
+    const originalApiKey = process.env.OPENROUTER_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
+    try {
+      const report = await runDoctorChecks({
+        provider: 'openrouter',
+        gitCheckFn: okGitCheck,
+      });
+      const openrouter = report.checks.find((c) => c.name === 'OpenRouter');
+      assert.equal(openrouter.status, 'fail');
+      assert.match(openrouter.detail, /OPENROUTER_API_KEY/);
+      assert.equal(report.ok, false);
+    } finally {
+      if (originalApiKey === undefined) {
+        delete process.env.OPENROUTER_API_KEY;
+      } else {
+        process.env.OPENROUTER_API_KEY = originalApiKey;
+      }
+    }
+  });
+
   it('reports git ok when the check function succeeds', async () => {
     const baseUrl = await startServer((_req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });

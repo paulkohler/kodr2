@@ -1,0 +1,356 @@
+name: provider
+status: implemented
+description: >
+  A provider abstraction over three backends -- LM Studio, OpenRouter, and
+  Ollama -- all speaking the same OpenAI-compatible /chat/completions
+  contract (messages, tools, streaming, tool_calls), so model.mjs's
+  HTTP/streaming internals (SSE parsing, chunk assembly, retry-on-5xx) are
+  shared as-is by all three. What differs per provider is: base URL, auth,
+  model-lifecycle management (load/eject), context-window probing, model
+  auto-detection, and reasoning support.
+
+  This exists because LM Studio's /v1/chat/completions has no reasoning
+  control today (tracked upstream: lmstudio-ai/lmstudio-bug-tracker#1250,
+  open, no ETA) and its alternative /api/v1/chat endpoint that does support
+  reasoning has no client-side tool-calling -- only server-side MCP/plugin
+  tool execution, which is incompatible with kodr2's tool-loop (path-jailed
+  execution, run budgets, per-tool hooks, all owned by the harness). Rather
+  than fork kodr2's call shape per turn type, reasoning is added via a second
+  provider -- OpenRouter -- which exposes many reasoning-capable models
+  behind the same OpenAI-compatible contract kodr2 already speaks, so
+  tool-calling is untouched.
+
+inputs:
+  provider:
+    type: string
+    description: >
+      Which provider to use: "lmstudio", "openrouter", or "ollama" (default
+      "lmstudio" -- CLI --provider / KODR_PROVIDER)
+  baseUrl:
+    type: string
+    description: >
+      API base URL. Defaults to the selected provider's default
+      (http://localhost:1234/v1 for lmstudio,
+      https://openrouter.ai/api/v1 for openrouter,
+      http://localhost:11434/v1 for ollama). ollama is the one provider
+      where this single option covers two real deployments: a local
+      install (the default) or Ollama's own hosted API
+      (https://ollama.com/v1, with OLLAMA_API_KEY set) -- there's no
+      separate "ollama-cloud" provider name, just a different baseUrl. A
+      local Ollama install can also transparently offload a
+      ":cloud"-suffixed model (e.g. "kimi-k2.7-code:cloud") through the
+      *local* endpoint without ever changing baseUrl -- see
+      https://docs.ollama.com/cloud
+  model:
+    type: string
+    description: >
+      Model identifier. Required for openrouter (no auto-detect). Optional
+      for lmstudio and ollama (both auto-detect from their model listing
+      when omitted -- lmstudio picks the currently loaded model, ollama
+      picks the first entry in its /v1/models listing, which has no
+      "loaded" concept to prefer)
+  reasoning:
+    type: boolean
+    description: >
+      Request reasoning tokens (CLI --reasoning / KODR_REASONING). A plain
+      boolean, not an effort level -- v1 only sends
+      { reasoning: { enabled: true } }; effort levels (OpenRouter supports
+      none/minimal/low/medium/high/xhigh/max) are a later expansion. Only
+      the openrouter provider can honor this
+  timeout:
+    type: number
+    description: Request timeout in ms (default 600000, same as today)
+  maxRetries:
+    type: number
+    description: Retries for a 5xx chat response (default 1, same as today)
+  noZdr:
+    type: boolean
+    description: >
+      Disable OpenRouter Zero Data Retention routing (CLI --openrouter-no-zdr
+      / KODR_OPENROUTER_NO_ZDR). Only the openrouter provider honors this;
+      lmstudio ignores it. On (zdr: true sent) by default -- opinionated,
+      since this restricts routing to providers with a ZDR policy and that's
+      the safer default for anyone sending code through it
+  allowDataCollection:
+    type: boolean
+    description: >
+      Allow OpenRouter routing to providers that collect/train on prompt
+      data (CLI --openrouter-allow-data-collection /
+      KODR_OPENROUTER_ALLOW_DATA_COLLECTION). Only openrouter honors this.
+      Denied (data_collection: "deny" sent) by default, same reasoning as
+      noZdr
+  providerOrder:
+    type: array
+    description: >
+      OpenRouter upstream provider slugs to try in order, e.g.
+      ["akashml", "parasail"] (CLI --openrouter-provider-only <csv> /
+      KODR_OPENROUTER_PROVIDER_ONLY, comma-separated). Maps directly to
+      OpenRouter's provider.order -- a priority list, not a hard
+      restriction (OpenRouter can still fall back to a provider outside
+      this list; use provider.only for a hard restriction, not exposed by
+      this option). Empty by default (omitted from the request)
+
+outputs:
+  capabilities:
+    type: object
+    description: >
+      { modelLifecycle, contextProbing, autoDetectModel, reasoning } --
+      booleans a caller checks before calling a capability-gated method,
+      instead of every provider implementing every method as a no-op.
+      lmstudio: { modelLifecycle: true, contextProbing: true,
+      autoDetectModel: true, reasoning: false }. openrouter:
+      { modelLifecycle: false, contextProbing: false,
+      autoDetectModel: false, reasoning: true }. ollama:
+      { modelLifecycle: false, contextProbing: false,
+      autoDetectModel: true, reasoning: false }
+  chat:
+    type: function
+    description: >
+      Same shape as today's model.mjs chat(): (messages, tools, onToken,
+      timeoutMs?, heartbeatMs?, onHeartbeat?, onDebug?) →
+      { message, usage: { prompt, completion, cost }, retries }. When
+      reasoning is requested, the response message carries the provider's
+      reasoning fields verbatim (OpenRouter: message.reasoning string,
+      message.reasoning_details array) -- passed through, not parsed or
+      interpreted by kodr2. usage.cost is OpenRouter's own reported USD
+      cost for the call, captured verbatim; always 0 for lmstudio (a local
+      backend genuinely has no cost)
+  models:
+    type: function
+    description: List available models -- () → [{ id }]
+  resolveModel:
+    type: function
+    description: >
+      Resolve model ID. lmstudio auto-detects the loaded model when none is
+      configured; ollama auto-detects the first entry from its /v1/models
+      listing when none is configured (no "loaded" concept, just whatever
+      it returns first); openrouter throws when none is configured (no
+      "loaded" concept to fall back to, and no local listing to default
+      from either)
+  contextInfo:
+    type: function
+    description: >
+      lmstudio probes /api/v0/models for the loaded/max context length.
+      openrouter has no "loaded" state, but its /models listing reports
+      each model's real context_length -- contextInfo looks the resolved
+      model up there and returns { loaded: context_length, max:
+      context_length } (both the same value, since there's no separate max).
+      ollama's /v1/models listing reports no context-length field at all
+      (confirmed: id/object/created/owned_by only), so ollama's contextInfo
+      always returns { loaded: null, max: null } -- capabilities.contextProbing
+      stays false for openrouter and ollama regardless of whether contextInfo
+      can return real data for a given provider; it specifically gates the
+      LM-Studio-style richModels()/headroom-reload display, which neither has
+      an equivalent of. On any failure (network error, model not found in the
+      listing) contextInfo returns { loaded: null, max: null } rather than
+      throwing, so a caller that never checks the capability flag still
+      degrades safely either way
+  loadModel:
+    type: function
+    description: >
+      Only present when capabilities.modelLifecycle is true. lmstudio
+      delegates to lms.mjs's ensureModelLoaded (unload-all, load, verify).
+      Not present on the openrouter or ollama provider objects at all --
+      callers must check capabilities.modelLifecycle before accessing it,
+      not call a no-op. Ollama has no lms-equivalent CLI: it auto-loads a
+      model on first request and unloads it after its own keep_alive
+      window, with no explicit load/unload/verify step for kodr2 to own
+  ejectModel:
+    type: function
+    description: >
+      Only present when capabilities.modelLifecycle is true. lmstudio
+      delegates to lms.mjs's unloadAllModels. Not present on the openrouter
+      or ollama provider objects
+
+provider-routing:
+  description: >
+    OpenRouter-only: see https://openrouter.ai/docs/features/provider-routing.
+    kodr2 sends an opinionated `provider` object in every openrouter chat
+    request body by default -- { zdr: true, data_collection: "deny" } --
+    unless noZdr/allowDataCollection turn either off, plus an optional
+    `order` array when providerOrder is set. The whole `provider` key is
+    omitted from the request body when all three are at their "off" state
+    (no zdr, no data_collection restriction, no order), rather than sent as
+    an empty object.
+  why: >
+    Sending code to a hosted model implies caring about data retention by
+    default, not only when a caller remembered to ask for it -- these
+    defaults exist so a plain `--provider openrouter` run is private by
+    default, with an explicit opt-out rather than an explicit opt-in.
+
+constraints:
+  - >
+    createProvider({ provider, baseUrl, model, timeout, maxRetries }) is the
+    only construction path; CLI, harness, and doctor all go through it
+    instead of instantiating a provider module directly
+  - >
+    Unknown --provider value is a startup error (fail fast, before any
+    network call), not a silent fallback to lmstudio
+  - >
+    --reasoning with a provider whose capabilities.reasoning is false is a
+    startup error naming which provider was resolved and that --reasoning
+    requires --provider openrouter -- never silently ignored (a user
+    expecting reasoning output would otherwise get none without knowing why)
+  - >
+    All three providers reuse model.mjs's existing SSE streaming, chunk
+    assembly, and 5xx/ECONNRESET retry logic unchanged -- no protocol-level
+    reimplementation, only base URL, auth header, and extra body fields
+    (reasoning, provider routing) differ per provider
+  - >
+    noZdr/allowDataCollection/providerOrder are silently no-ops on lmstudio
+    and ollama (neither has such a concept) -- unlike --reasoning, passing
+    them against either is not a startup error, since they're opt-out-style
+    privacy defaults rather than a feature the user explicitly asked to see
+    take effect
+  - >
+    The `provider` routing object omits a key entirely (rather than sending
+    an explicit false/empty value) whenever that setting is at its "off"
+    state -- zdr and data_collection are meaningful only as an opt-in
+    restriction to OpenRouter, not as an explicit "don't restrict" signal
+  - >
+    openrouter's auth token comes only from the OPENROUTER_API_KEY
+    environment variable -- never a CLI flag (avoids landing in shell
+    history or a process listing) and never a config file (no config file
+    exists in kodr2 today; not introduced by this feature)
+  - >
+    Missing OPENROUTER_API_KEY when provider is openrouter is a startup
+    error, not a request-time 401 surfaced after the model already started
+    "working"
+  - >
+    openrouter's chat() sets Authorization: Bearer $OPENROUTER_API_KEY;
+    lmstudio's chat() sends no auth header, matching today's behavior
+  - >
+    ollama's auth token comes from OLLAMA_API_KEY (same env-var-only rule as
+    openrouter) but is optional, not required -- a local install needs no
+    key at all, so ollama never throws at construction over a missing key
+    the way openrouter does. When OLLAMA_API_KEY is set, chat() sends
+    Authorization: Bearer $OLLAMA_API_KEY; when unset, it sends no auth
+    header, same as lmstudio. Whether a key is actually needed depends
+    entirely on baseUrl (unneeded for a local install, required for
+    https://ollama.com/v1) -- kodr2 doesn't try to infer that from the URL
+    and enforce it; a missing key against a URL that needs one surfaces as
+    a normal HTTP 401/403 from Ollama, not a kodr2-side startup error
+  - >
+    reasoning is passed through unmodified in both directions: kodr2 sends
+    { reasoning: { enabled: true } } and forwards whatever reasoning /
+    reasoning_details fields come back on message, without parsing,
+    summarizing, or stripping them -- display/formatting of reasoning
+    content is out of scope for this spec
+  - >
+    resolveModel() on openrouter never calls models() to guess a default --
+    an explicit model is required because, unlike lmstudio, there is no
+    "currently loaded" model to fall back to
+  - >
+    harness.mjs's model-load step (today: unconditional ensureModelLoaded
+    call) becomes conditional on capabilities.modelLifecycle; its
+    context-headroom check (today: unconditional hasContextHeadroom /
+    contextInfo call) becomes conditional on capabilities.contextProbing
+  - >
+    doctor.mjs's reachability check calls the resolved provider's models()
+    generically instead of being LM-Studio-specific; its report names which
+    provider it checked
+
+tests:
+  unit:
+    - createProvider("lmstudio") returns a client with modelLifecycle,
+      contextProbing, and autoDetectModel capabilities true and reasoning
+      false
+    - createProvider("openrouter") returns a client with modelLifecycle,
+      contextProbing, and autoDetectModel capabilities false and reasoning
+      true
+    - createProvider defaults to lmstudio when provider is omitted
+    - createProvider throws on an unknown provider name
+    - KODR_PROVIDER is used when no provider option is provided
+    - explicit provider option takes precedence over KODR_PROVIDER
+    - lmstudio provider defaults baseUrl to http://localhost:1234/v1
+    - openrouter provider defaults baseUrl to https://openrouter.ai/api/v1
+    - openrouter provider sends Authorization Bearer header from
+      OPENROUTER_API_KEY
+    - openrouter provider throws at construction when OPENROUTER_API_KEY is
+      unset
+    - lmstudio provider sends no Authorization header
+    - lmstudio provider's chat() body never includes a reasoning field
+    - openrouter provider's chat() body includes
+      { reasoning: { enabled: true } } when reasoning is requested
+    - openrouter provider's chat() body omits reasoning entirely when not
+      requested
+    - lmstudio provider's resolveModel auto-detects the first loaded model
+      when none configured
+    - openrouter provider's resolveModel throws when no model is configured
+    - lmstudio provider's loadModel/ejectModel delegate to lms.mjs's
+      ensureModelLoaded/unloadAllModels
+    - openrouter provider object has no loadModel/ejectModel methods
+    - lmstudio provider's contextInfo returns real loaded/max values from
+      richModels
+    - openrouter provider's contextInfo returns the real context_length
+      reported by /models for the resolved model, as both loaded and max
+    - openrouter provider's contextInfo returns { loaded: null, max: null }
+      when the model is not in the /models listing
+    - openrouter provider's contextInfo returns { loaded: null, max: null }
+      when the /models request fails
+    - zdrEnabled is on by default, reads KODR_OPENROUTER_NO_ZDR when no
+      option is given, and an explicit true/false option overrides the env
+      var either direction
+    - dataCollectionDenied is denied (restricted) by default, reads
+      KODR_OPENROUTER_ALLOW_DATA_COLLECTION when no option is given, and an
+      explicit true/false option overrides the env var either direction
+    - resolveProviderOrder is empty by default, uses an explicit non-empty
+      option, falls back to KODR_OPENROUTER_PROVIDER_ONLY (comma-separated)
+      when no option is given, and an empty explicit option still falls
+      back to the env var
+    - openrouter provider's chat() body includes
+      provider: { zdr: true, data_collection: "deny" } by default
+    - openrouter provider's chat() body omits provider.zdr when noZdr is set
+    - openrouter provider's chat() body omits provider.data_collection when
+      allowDataCollection is set
+    - openrouter provider's chat() body omits the provider field entirely
+      when noZdr and allowDataCollection are both set and no order is given
+    - openrouter provider's chat() body maps providerOrder to provider.order
+    - createProvider("ollama") returns a client with modelLifecycle and
+      contextProbing false, autoDetectModel true, and reasoning false
+    - ollama provider defaults baseUrl to http://localhost:11434/v1
+    - ollama provider does not throw at construction when OLLAMA_API_KEY is
+      unset (local usage needs no auth)
+    - ollama provider sends no Authorization header when no API key is
+      configured
+    - ollama provider sends an Authorization Bearer header when an API key
+      is configured
+    - ollama provider's resolveModel auto-detects the first model from its
+      /v1/models listing when none is configured
+    - ollama provider's contextInfo always returns { loaded: null, max: null }
+    - ollama provider object has no loadModel/ejectModel methods
+    - doctor's ollama check reports reachable with no API key required
+    - CLI --provider is parsed and defaults to lmstudio
+    - CLI --reasoning is parsed as a boolean flag, off by default
+    - CLI --openrouter-no-zdr is parsed as a boolean flag, off by default
+    - CLI --openrouter-allow-data-collection is parsed as a boolean flag,
+      off by default
+    - CLI --openrouter-provider-only is parsed into a list of provider
+      slugs, empty by default
+    - CLI startup errors when --reasoning is set and the resolved provider's
+      capabilities.reasoning is false, naming the resolved provider
+    - CLI startup errors on an unrecognized --provider value
+    - harness skips the model-load step when capabilities.modelLifecycle is
+      false
+    - harness skips the context-headroom check when capabilities.contextProbing
+      is false
+    - doctor's reachability check reports which provider it checked
+  eval:
+    - lmstudio provider connects to a real LM Studio instance and lists
+      models (existing eval, provider-wrapped)
+    - openrouter provider connects to OpenRouter with a real
+      OPENROUTER_API_KEY and lists models
+    - openrouter provider sends a reasoning-enabled chat request to
+      qwen/qwen3.6-35b-a3b and the response message carries
+      reasoning/reasoning_details fields
+    - openrouter provider sends a tool-enabled chat request and receives
+      tool_calls back, proving reasoning support didn't disturb
+      tool-calling
+    - openrouter provider with providerOrder: ["akashml"] against a real
+      request gets routed to AkashML (response.provider reflects the forced
+      routing)
+    - ollama provider connects to a real local Ollama instance, lists
+      models, and completes a tool-enabled chat request against a local
+      model (e.g. qwen3-coder:30b)
+    - ollama provider against a ":cloud"-suffixed model routes through the
+      local install to Ollama's cloud without changing baseUrl

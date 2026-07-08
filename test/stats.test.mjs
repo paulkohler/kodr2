@@ -174,11 +174,15 @@ describe('computeStats', () => {
     assert.equal(stats.avgDurationMs, 200);
   });
 
-  it('sums prompt/completion usage across the set', () => {
+  it('sums prompt/completion/cost usage across the set', () => {
     const stats = computeStats([
-      record({ usage: { prompt: 10, completion: 5 } }),
-      record({ usage: { prompt: 20, completion: 8 } }),
+      record({ usage: { prompt: 10, completion: 5, cost: 0.001 } }),
+      record({ usage: { prompt: 20, completion: 8, cost: 0.002 } }),
     ]);
-    assert.deepEqual(stats.totalUsage, { prompt: 30, completion: 13 });
+    assert.deepEqual(stats.totalUsage, {
+      prompt: 30,
+      completion: 13,
+      cost: 0.003,
+    });
   });
 });

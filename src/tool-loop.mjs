@@ -10,6 +10,11 @@
  * `tool_name[ARGS]{...}` as assistant text after receiving tool results.
  */
 
+import {
+  COMPACTION_THRESHOLD,
+  compactMessages,
+  needsCompaction,
+} from './compact.mjs';
 import { formatNotice, formatToolCall, formatToolResult } from './format.mjs';
 import { runPostToolHooks, runPreToolHooks } from './hooks.mjs';
 import {
@@ -17,11 +22,6 @@ import {
   recoverToolCalls,
   recoverToolName,
 } from './tool-recovery.mjs';
-import {
-  COMPACTION_THRESHOLD,
-  compactMessages,
-  needsCompaction,
-} from './compact.mjs';
 
 export const MAX_TOOL_TURNS = 20;
 
@@ -58,7 +58,7 @@ export async function runToolLoop(params) {
   const { heartbeatMs = 0, onHeartbeat, onDebug } = params;
   const hookCtx = buildHookCtx(params);
 
-  const usage = { prompt: 0, completion: 0 };
+  const usage = { prompt: 0, completion: 0, cost: 0 };
   let toolTurns = 0;
   let compactions = 0;
   let retries = 0;
@@ -89,6 +89,7 @@ export async function runToolLoop(params) {
 
     usage.prompt += turnUsage.prompt;
     usage.completion += turnUsage.completion;
+    usage.cost += turnUsage.cost || 0;
     retries += turnRetries || 0;
     const lastPromptTokens = turnUsage.prompt;
     messages.push(message);
@@ -192,6 +193,7 @@ async function maybeCompact(params) {
   });
   usage.prompt += result.usage.prompt;
   usage.completion += result.usage.completion;
+  usage.cost += result.usage.cost || 0;
   const retries = result.retries || 0;
 
   if (result.error) {

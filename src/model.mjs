@@ -12,15 +12,22 @@ const DEFAULT_TIMEOUT = 600_000; // 10 minutes
 export const DEFAULT_MAX_RETRIES = 1;
 
 /**
- * Create a model client bound to an LM Studio instance.
+ * Create a model client bound to an OpenAI-compatible chat completions
+ * endpoint. Used directly for LM Studio; wrapped by provider-*.mjs modules
+ * to add per-provider auth headers, extra body fields (e.g. reasoning), and
+ * capability differences (see specs/provider.yaml).
  * @param {object} [options]
- * @param {string} [options.baseUrl] - LM Studio API base URL
+ * @param {string} [options.baseUrl] - API base URL
  * @param {string} [options.model] - Model identifier
  * @param {number} [options.timeout] - Request timeout in ms
  * @param {number} [options.maxRetries] - Retries for a 5xx chat response
  *   (transient local-backend crashes), default 1. 4xx and timeouts are
  *   never retried -- a 4xx would fail identically again, and a timeout
  *   already means the model took the full budget.
+ * @param {object} [options.headers] - Extra HTTP headers sent with every
+ *   request (e.g. an Authorization bearer token for a hosted provider)
+ * @param {object} [options.extraBody] - Extra fields merged into every chat
+ *   request body (e.g. { reasoning: { enabled: true } })
  * @returns {object} Client with `chat` and `models` methods
  */
 export function createClient(options = {}) {
@@ -28,6 +35,8 @@ export function createClient(options = {}) {
   const model = resolveConfiguredModel(options.model);
   const timeout = options.timeout || DEFAULT_TIMEOUT;
   const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
+  const headers = options.headers || {};
+  const extraBody = options.extraBody || {};
 
   return { chat, models, resolveModel, contextInfo, richModels };
 
@@ -63,6 +72,7 @@ export function createClient(options = {}) {
       messages: params.messages,
       stream: true,
       stream_options: { include_usage: true },
+      ...extraBody,
     };
 
     if (params.tools && params.tools.length > 0) {
@@ -85,6 +95,7 @@ export function createClient(options = {}) {
         onDebug: params.onDebug,
       },
       maxRetries,
+      headers,
     );
   }
 
@@ -93,7 +104,7 @@ export function createClient(options = {}) {
    * @returns {Promise<Array<{ id: string }>>}
    */
   async function models() {
-    const data = await jsonRequest(`${baseUrl}/models`, timeout);
+    const data = await jsonRequest(`${baseUrl}/models`, timeout, headers);
     return data.data || [];
   }
 
@@ -198,23 +209,35 @@ function resolveConfiguredModel(model) {
 
 /**
  * Stateful assembler for streamed chat completion chunks.
- * Accumulates content and tool calls, invoking callbacks as deltas arrive.
+ * Accumulates content, reasoning, and tool calls, invoking callbacks as
+ * deltas arrive.
  */
 function createAssembler(onToken, onToolCall) {
   let role = 'assistant';
   let content = '';
+  let reasoning = '';
+  const reasoningDetails = [];
   const toolCalls = [];
-  let usage = { prompt: 0, completion: 0 };
+  let usage = { prompt: 0, completion: 0, cost: 0 };
 
   function push(chunk) {
+    // A provider's final chunk can carry `usage` alongside a (near-empty)
+    // delta rather than in its own delta-less chunk (observed on
+    // OpenRouter) -- check independently of whether delta is present, so
+    // usage isn't silently dropped depending on chunk shape.
+    if (chunk.usage) {
+      usage = {
+        prompt: chunk.usage.prompt_tokens || 0,
+        completion: chunk.usage.completion_tokens || 0,
+        // OpenRouter reports actual USD cost on usage.cost; LM Studio (a
+        // local backend) has none, so this stays 0 -- an accurate "free"
+        // rather than an unknown/null.
+        cost: Number.isFinite(chunk.usage.cost) ? chunk.usage.cost : 0,
+      };
+    }
+
     const delta = chunk.choices?.[0]?.delta;
     if (!delta) {
-      if (chunk.usage) {
-        usage = {
-          prompt: chunk.usage.prompt_tokens || 0,
-          completion: chunk.usage.completion_tokens || 0,
-        };
-      }
       return;
     }
 
@@ -229,6 +252,14 @@ function createAssembler(onToken, onToolCall) {
       }
     }
 
+    if (delta.reasoning) {
+      reasoning += delta.reasoning;
+    }
+
+    if (delta.reasoning_details) {
+      reasoningDetails.push(...delta.reasoning_details);
+    }
+
     if (delta.tool_calls) {
       for (const tc of delta.tool_calls) {
         pushToolCall(toolCalls, tc, onToolCall);
@@ -238,6 +269,12 @@ function createAssembler(onToken, onToolCall) {
 
   function result() {
     const message = { role, content };
+    if (reasoning) {
+      message.reasoning = reasoning;
+    }
+    if (reasoningDetails.length > 0) {
+      message.reasoning_details = reasoningDetails;
+    }
     if (toolCalls.length > 0) {
       message.tool_calls = toolCalls.map((tc) => ({
         id: tc.id || `call_${Math.random().toString(36).slice(2, 10)}`,
@@ -332,11 +369,18 @@ async function streamRequestWithRetry(
   timeout,
   callbacks,
   maxRetries,
+  headers = {},
 ) {
   let lastErr;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const result = await streamRequest(url, body, timeout, callbacks);
+      const result = await streamRequest(
+        url,
+        body,
+        timeout,
+        callbacks,
+        headers,
+      );
       return { ...result, retries: attempt };
     } catch (err) {
       if (attempt === maxRetries || !isRetryableError(err)) {
@@ -380,7 +424,7 @@ export function isRetryableConnectionError(err) {
   return RETRYABLE_CONNECTION_ERROR_CODES.has(err.code);
 }
 
-function streamRequest(url, body, timeout, callbacks) {
+function streamRequest(url, body, timeout, callbacks, headers = {}) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const payload = JSON.stringify(body);
@@ -428,6 +472,7 @@ function streamRequest(url, body, timeout, callbacks) {
         path: parsed.pathname,
         method: 'POST',
         headers: {
+          ...headers,
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(payload),
         },
@@ -486,7 +531,7 @@ function streamRequest(url, body, timeout, callbacks) {
   });
 }
 
-function jsonRequest(url, timeout) {
+function jsonRequest(url, timeout, headers = {}) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     let settled = false;
@@ -513,7 +558,7 @@ function jsonRequest(url, timeout) {
         port: parsed.port,
         path: parsed.pathname,
         method: 'GET',
-        headers: { Accept: 'application/json' },
+        headers: { ...headers, Accept: 'application/json' },
         timeout,
       },
       (res) => {

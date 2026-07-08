@@ -395,6 +395,110 @@ describe('retries telemetry', () => {
   });
 });
 
+describe('cost telemetry', () => {
+  it("carries a provider's usage.cost through to the run result and saved record", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'kodr-cost-'));
+    const server = createServer((req, res) => {
+      if (req.url === '/api/v0/models') {
+        res.writeHead(404);
+        res.end('not found');
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end(
+        'data: {"choices":[{"delta":{"role":"assistant","content":"done"}}],' +
+          '"usage":{"prompt_tokens":10,"completion_tokens":5,"cost":0.00042}}\n\n' +
+          'data: [DONE]\n\n',
+      );
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address();
+
+    try {
+      const result = await run('do work', {
+        cwd,
+        baseUrl: `http://127.0.0.1:${port}`,
+        model: 'test',
+        quiet: true,
+      });
+
+      assert.equal(result.stoppedReason, 'complete');
+      assert.equal(result.usage.cost, 0.00042);
+
+      const runDir = join(cwd, '.kodr', 'runs');
+      const files = await readdir(runDir);
+      const record = JSON.parse(await readFile(join(runDir, files[0]), 'utf8'));
+      assert.equal(record.usage.cost, 0.00042);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('incident tracking cleanup on setup failure', () => {
+  it('disposes the heartbeat file when provider construction throws (e.g. missing OPENROUTER_API_KEY)', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'kodr-setup-fail-'));
+    const originalApiKey = process.env.OPENROUTER_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
+
+    try {
+      await assert.rejects(
+        run('do work', {
+          cwd,
+          provider: 'openrouter',
+          model: 'test',
+          quiet: true,
+        }),
+      );
+
+      const runDir = join(cwd, '.kodr', 'runs');
+      const files = await readdir(runDir).catch(() => []);
+      const heartbeatFiles = files.filter((f) => f.startsWith('.heartbeat-'));
+      assert.deepEqual(
+        heartbeatFiles,
+        [],
+        'a provider-construction failure must not leave a stale heartbeat file for the next run to misreport as an orphaned incident',
+      );
+    } finally {
+      if (originalApiKey === undefined) {
+        delete process.env.OPENROUTER_API_KEY;
+      } else {
+        process.env.OPENROUTER_API_KEY = originalApiKey;
+      }
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('disposes the heartbeat file when resolveModel throws (e.g. openrouter with no --model)', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'kodr-setup-fail-'));
+    const originalApiKey = process.env.OPENROUTER_API_KEY;
+    process.env.OPENROUTER_API_KEY = 'sk-test';
+
+    try {
+      await assert.rejects(
+        run('do work', {
+          cwd,
+          provider: 'openrouter',
+          quiet: true,
+        }),
+      );
+
+      const runDir = join(cwd, '.kodr', 'runs');
+      const files = await readdir(runDir).catch(() => []);
+      const heartbeatFiles = files.filter((f) => f.startsWith('.heartbeat-'));
+      assert.deepEqual(heartbeatFiles, []);
+    } finally {
+      if (originalApiKey === undefined) {
+        delete process.env.OPENROUTER_API_KEY;
+      } else {
+        process.env.OPENROUTER_API_KEY = originalApiKey;
+      }
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('debug logging wiring', () => {
   it('writes a debug sidecar file when --debug is set', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'kodr-debug-on-'));
@@ -553,10 +657,35 @@ describe('review pass wiring', () => {
     }
   });
 
+  it('skips the model-load step entirely for a provider with no model-lifecycle concept (e.g. OpenRouter)', async () => {
+    let loadCalled = false;
+    let reviewCalledWithModel;
+    const result = await runReviewPass({
+      cwd: '/tmp',
+      client: { capabilities: { modelLifecycle: false } },
+      reviewModel: 'reviewer',
+      buildContextWindow: 8192,
+      filesChanged: ['a.mjs'],
+      quiet: true,
+      ensureModelLoadedFn: async () => {
+        loadCalled = true;
+        return { model: { identifier: 'reviewer' } };
+      },
+      runReviewFn: async (params) => {
+        reviewCalledWithModel = params.modelId;
+        return { grounded: true };
+      },
+    });
+
+    assert.equal(loadCalled, false);
+    assert.equal(reviewCalledWithModel, 'reviewer');
+    assert.deepEqual(result, { grounded: true });
+  });
+
   it('returns { skipped: true, error } rather than throwing when the model switch fails', async () => {
     const result = await runReviewPass({
       cwd: '/tmp',
-      client: {},
+      client: { capabilities: { modelLifecycle: true } },
       reviewModel: 'reviewer',
       buildContextWindow: 8192,
       filesChanged: ['a.mjs'],
@@ -576,7 +705,7 @@ describe('review pass wiring', () => {
   it('returns { skipped: true, error } rather than throwing when the review itself fails', async () => {
     const result = await runReviewPass({
       cwd: '/tmp',
-      client: {},
+      client: { capabilities: { modelLifecycle: true } },
       reviewModel: 'reviewer',
       buildContextWindow: 8192,
       filesChanged: ['a.mjs'],
@@ -594,7 +723,7 @@ describe('review pass wiring', () => {
   it("returns { skipped: true, error } from ensureModelLoaded's own error path, without throwing", async () => {
     const result = await runReviewPass({
       cwd: '/tmp',
-      client: {},
+      client: { capabilities: { modelLifecycle: true } },
       reviewModel: 'reviewer',
       buildContextWindow: 8192,
       filesChanged: ['a.mjs'],

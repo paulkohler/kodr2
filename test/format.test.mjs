@@ -1,17 +1,18 @@
-import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
 
 import {
+  formatCost,
+  formatDoctorReport,
+  formatHealTurn,
+  formatHeartbeat,
+  formatModelsList,
+  formatNotice,
+  formatStats,
+  formatSummary,
   formatToolCall,
   formatToolResult,
   formatVerification,
-  formatHealTurn,
-  formatHeartbeat,
-  formatNotice,
-  formatSummary,
-  formatModelsList,
-  formatDoctorReport,
-  formatStats,
 } from '../src/format.mjs';
 
 // Strip ANSI escapes so assertions read against plain text.
@@ -140,6 +141,28 @@ describe('formatSummary', () => {
     const out = formatSummary({ retries: 0 });
     assert.ok(!out.includes('retries'));
   });
+
+  it('includes cost when nonzero', () => {
+    const out = formatSummary({
+      usage: { prompt: 100, completion: 50, cost: 0.0042 },
+    });
+    assert.ok(out.includes('$0.0042'));
+  });
+
+  it('omits cost when zero (e.g. a local backend like LM Studio)', () => {
+    const out = formatSummary({
+      usage: { prompt: 100, completion: 50, cost: 0 },
+    });
+    assert.ok(!out.includes('$'));
+  });
+});
+
+describe('formatCost', () => {
+  it('formats a USD cost to 4 decimal places', () => {
+    assert.equal(formatCost(0.0042), '$0.0042');
+    assert.equal(formatCost(1.5), '$1.5000');
+    assert.equal(formatCost(0), '$0.0000');
+  });
 });
 
 describe('formatModelsList', () => {
@@ -249,6 +272,28 @@ describe('formatStats', () => {
     assert.match(out, /25%/);
     assert.match(out, /1234ms/);
     assert.match(out, /100 in \/ 40 out/);
+  });
+
+  it('includes total cost when nonzero', () => {
+    const out = plain(
+      formatStats({
+        total: 1,
+        stoppedReasonCounts: { complete: 1 },
+        noOpRate: 0,
+        healAttemptedRate: 0,
+        healSuccessRate: null,
+        compactionRate: 0,
+        avgCompactions: 0,
+        retryRate: 0,
+        avgRetries: 0,
+        verifyAttemptedRate: 0,
+        verifyPassRate: null,
+        avgToolTurns: 1,
+        avgDurationMs: null,
+        totalUsage: { prompt: 100, completion: 40, cost: 0.0123 },
+      }),
+    );
+    assert.match(out, /100 in \/ 40 out \(\$0\.0123\)/);
   });
 
   it('renders "n/a" for a null rate rather than an empty or NaN value', () => {
