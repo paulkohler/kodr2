@@ -741,10 +741,13 @@ function createErrorResult(params) {
     },
     filesChanged: tools.filesChanged(),
     packageCommands: tools.packageCommands(),
-    toolTurns: 0,
+    // Work done before the failure is preserved: runToolLoop attaches the
+    // usage/turns it accumulated to the error, so a run that did real
+    // (paid) turns before throwing is not booked as toolTurns: 0, cost: 0.
+    toolTurns: err.toolTurns ?? 0,
     stoppedReason: 'error',
-    usage: { prompt: 0, completion: 0, cost: 0 },
-    compactions: 0,
+    usage: err.usage ?? { prompt: 0, completion: 0, cost: 0 },
+    compactions: err.compactions ?? 0,
     retries: err.retries ?? 0,
     messages,
   };

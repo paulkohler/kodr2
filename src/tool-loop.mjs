@@ -66,84 +66,20 @@ export async function runToolLoop(params) {
   let completed = false;
   let stoppedReason = 'tool-limit';
 
-  while (toolTurns < maxToolTurns) {
-    if (isRunBudgetExceeded(startedAt, maxRunMs)) {
-      stoppedReason = 'budget-exceeded';
-      break;
-    }
-
-    const {
-      message,
-      usage: turnUsage,
-      retries: turnRetries,
-    } = await client.chat({
-      model: modelId,
-      messages,
-      tools: tools.definitions(),
-      onToken: quiet ? undefined : (t) => process.stdout.write(t),
-      timeoutMs: remainingRunBudgetMs(startedAt, maxRunMs),
-      heartbeatMs,
-      onHeartbeat,
-      onDebug,
-    });
-
-    usage.prompt += turnUsage.prompt;
-    usage.completion += turnUsage.completion;
-    usage.cost += turnUsage.cost || 0;
-    retries += turnRetries || 0;
-    const lastPromptTokens = turnUsage.prompt;
-    messages.push(message);
-
-    const nativeCalls = await executeNativeToolCalls(
-      message,
-      tools,
-      messages,
-      quiet,
-      hookCtx,
-    );
-    if (nativeCalls === 0) {
-      const recovered = await executeRecoveredTextToolCall(
-        message,
-        tools,
-        messages,
-        quiet,
-        hookCtx,
-      );
-      if (!recovered) {
-        finalText = message.content || '';
-        completed = true;
-        stoppedReason = 'complete';
-        if (!quiet) {
-          process.stdout.write('\n');
-        }
-        break;
-      }
-    }
-
-    toolTurns++;
-    if (isRunBudgetExceeded(startedAt, maxRunMs)) {
-      stoppedReason = 'budget-exceeded';
-      break;
-    }
-
-    const compacted = await maybeCompact({
-      client,
-      modelId,
-      messages,
-      lastPromptTokens,
-      contextWindow,
-      compactThreshold,
-      quiet,
-      usage,
-      timeoutMs: remainingRunBudgetMs(startedAt, maxRunMs),
-      heartbeatMs,
-      onHeartbeat,
-      onDebug,
-    });
-    if (compacted.compacted) {
-      compactions++;
-    }
-    retries += compacted.retries || 0;
+  try {
+    await runLoopBody();
+  } catch (err) {
+    // Preserve the accounting done before the failure. runToolLoop returns
+    // usage/turns only on the normal path, so an unhandled throw would
+    // otherwise reach the harness catch and be recorded as toolTurns: 0,
+    // cost: 0 -- silently corrupting the exact metrics the harness exists
+    // to produce. Attach what we accumulated (mirroring how err.retries is
+    // already carried) so createErrorResult can report the real numbers.
+    err.usage = usage;
+    err.toolTurns = toolTurns;
+    err.compactions = compactions;
+    err.retries = retries + (err.retries || 0);
+    throw err;
   }
 
   return {
@@ -155,6 +91,88 @@ export async function runToolLoop(params) {
     usage,
     retries,
   };
+
+  async function runLoopBody() {
+    while (toolTurns < maxToolTurns) {
+      if (isRunBudgetExceeded(startedAt, maxRunMs)) {
+        stoppedReason = 'budget-exceeded';
+        break;
+      }
+
+      const {
+        message,
+        usage: turnUsage,
+        retries: turnRetries,
+      } = await client.chat({
+        model: modelId,
+        messages,
+        tools: tools.definitions(),
+        onToken: quiet ? undefined : (t) => process.stdout.write(t),
+        timeoutMs: remainingRunBudgetMs(startedAt, maxRunMs),
+        heartbeatMs,
+        onHeartbeat,
+        onDebug,
+      });
+
+      usage.prompt += turnUsage.prompt;
+      usage.completion += turnUsage.completion;
+      usage.cost += turnUsage.cost || 0;
+      retries += turnRetries || 0;
+      const lastPromptTokens = turnUsage.prompt;
+      messages.push(message);
+
+      const nativeCalls = await executeNativeToolCalls(
+        message,
+        tools,
+        messages,
+        quiet,
+        hookCtx,
+      );
+      if (nativeCalls === 0) {
+        const recovered = await executeRecoveredTextToolCall(
+          message,
+          tools,
+          messages,
+          quiet,
+          hookCtx,
+        );
+        if (!recovered) {
+          finalText = message.content || '';
+          completed = true;
+          stoppedReason = 'complete';
+          if (!quiet) {
+            process.stdout.write('\n');
+          }
+          break;
+        }
+      }
+
+      toolTurns++;
+      if (isRunBudgetExceeded(startedAt, maxRunMs)) {
+        stoppedReason = 'budget-exceeded';
+        break;
+      }
+
+      const compacted = await maybeCompact({
+        client,
+        modelId,
+        messages,
+        lastPromptTokens,
+        contextWindow,
+        compactThreshold,
+        quiet,
+        usage,
+        timeoutMs: remainingRunBudgetMs(startedAt, maxRunMs),
+        heartbeatMs,
+        onHeartbeat,
+        onDebug,
+      });
+      if (compacted.compacted) {
+        compactions++;
+      }
+      retries += compacted.retries || 0;
+    }
+  }
 }
 
 /**

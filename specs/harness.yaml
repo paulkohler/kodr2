@@ -117,6 +117,7 @@ constraints:
   - Hitting the tool-turn ceiling sets stoppedReason "tool-limit" and emits a notice
   - Run transcript saved to .kodr/runs/ after every run; the location is overridable (--runs-dir / KODR_RUNS_DIR) and saving can be disabled (--no-save / KODR_NO_SAVE) so a benchmark/container run keeps the task workspace clean
   - Run transcript saved even when model requests fail after run metadata is available
+  - A model request that fails mid-loop preserves the usage, tool turns, compactions, and retries accumulated in earlier turns on the saved record (they are carried on the thrown error), rather than being booked as toolTurns 0 / cost 0 -- so a run that did real paid work before failing reports it accurately
   - Run transcript includes model, prompt, cwd, baseUrl, test command, env passthrough, start time, finish time, and duration
   - Run transcript records package-manager commands without blocking them
   - System prompt assembled fresh each run from workspace state
@@ -159,6 +160,7 @@ tests:
     - run records include metadata and duration
     - run records include package-manager commands and error metadata
     - failed model requests still save a run record
+    - a mid-loop failure preserves the usage and tool turns done before it
     - workspace file listing skips operator logs and copied kodr artifacts
     - system prompt requires native tool-channel calls
     - recovers text-form tool calls (all framings) through the tool registry

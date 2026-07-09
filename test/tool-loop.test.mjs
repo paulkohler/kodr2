@@ -346,6 +346,47 @@ describe('runToolLoop', () => {
     assert.equal(client.calls[0].heartbeatMs, 5000);
     assert.equal(client.calls[0].onHeartbeat, onHeartbeat);
   });
+
+  it('carries usage/turns/retries accumulated before a mid-loop error onto the thrown error', async () => {
+    // Turn 1 is a real (paid) tool turn; turn 2's chat throws. The accounting
+    // from turn 1 must survive on the error so the run record does not report
+    // toolTurns: 0, cost: 0 for work that actually happened.
+    let call = 0;
+    const client = {
+      calls: [],
+      async chat() {
+        call++;
+        if (call === 1) {
+          return {
+            message: toolCallTurn('list_files', {}).message,
+            usage: { prompt: 100, completion: 10, cost: 0.5 },
+          };
+        }
+        const err = new Error('model offline mid-loop');
+        err.retries = 2;
+        throw err;
+      },
+    };
+
+    await assert.rejects(
+      runToolLoop({
+        client,
+        modelId: 'm',
+        messages: [],
+        tools: stubTools,
+        quiet: true,
+      }),
+      (err) => {
+        assert.equal(err.message, 'model offline mid-loop');
+        assert.equal(err.toolTurns, 1);
+        assert.deepEqual(err.usage, { prompt: 100, completion: 10, cost: 0.5 });
+        assert.equal(err.compactions, 0);
+        // The failing call's own retries (2) add to the accumulated total (0).
+        assert.equal(err.retries, 2);
+        return true;
+      },
+    );
+  });
 });
 
 // Tool calls come straight from the model and are untrusted: argument JSON may

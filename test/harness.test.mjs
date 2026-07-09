@@ -243,6 +243,59 @@ describe('run failure artifacts', () => {
       await rm(cwd, { recursive: true, force: true });
     }
   });
+
+  it('preserves usage and tool turns done before a mid-loop failure', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'kodr-run-partial-'));
+    let chatCalls = 0;
+    const server = createServer((req, res) => {
+      if (req.url === '/api/v0/models') {
+        res.writeHead(404);
+        res.end('not found');
+        return;
+      }
+      chatCalls++;
+      if (chatCalls === 1) {
+        // A real, paid tool turn: the model writes a file, and the provider
+        // reports usage. This work must survive the later failure.
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        res.end(
+          'data: {"choices":[{"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"write_file","arguments":"{\\"path\\":\\"out.txt\\",\\"content\\":\\"hi\\"}"}}]}}]}\n\n' +
+            'data: {"choices":[],"usage":{"prompt_tokens":50,"completion_tokens":8}}\n\n' +
+            'data: [DONE]\n\n',
+        );
+        return;
+      }
+      // Turn 2 fails hard (400 is not retried, so the test stays fast).
+      res.writeHead(400);
+      res.end('bad request');
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address();
+
+    try {
+      const result = await run('do work', {
+        cwd,
+        baseUrl: `http://127.0.0.1:${port}`,
+        model: 'test',
+        quiet: true,
+      });
+
+      assert.equal(result.stoppedReason, 'error');
+      // The bug: these were zeroed on any mid-loop throw.
+      assert.equal(result.toolTurns, 1);
+      assert.equal(result.usage.prompt, 50);
+      assert.equal(result.usage.completion, 8);
+
+      const runDir = join(cwd, '.kodr', 'runs');
+      const files = await readdir(runDir);
+      const record = JSON.parse(await readFile(join(runDir, files[0]), 'utf8'));
+      assert.equal(record.toolTurns, 1);
+      assert.equal(record.usage.prompt, 50);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('no-op completion', () => {
