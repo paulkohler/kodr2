@@ -1,6 +1,6 @@
 {
   "name": "kodr2",
-  "version": "0.2.0",
+  "version": "0.2.94",
   "description": "A one-shot coding harness for local LM Studio models",
   "keywords": [
     "coding-agent",
@@ -29,6 +29,8 @@
   },
   "scripts": {
     "assert:zero-deps": "node scripts/assert-zero-deps.mjs",
+    "version:set": "node scripts/set-version.mjs",
+    "version:check": "node scripts/set-version.mjs --check",
     "pretest": "npm run assert:zero-deps",
     "test": "node --test test/*.test.mjs",
     "eval": "node --test eval/*.eval.mjs",
