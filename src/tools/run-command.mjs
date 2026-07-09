@@ -140,7 +140,7 @@ async function snapshotDir(dir, root, files, cap) {
     }
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
-      await snapshotDir(full, root, files);
+      await snapshotDir(full, root, files, cap);
       continue;
     }
     try {

@@ -611,4 +611,16 @@ describe('run_command', () => {
     const snapshot = await snapshotWorkspace(tmpDir, 5);
     assert.equal(snapshot.size, 5);
   });
+
+  it('honors the cap for files nested in subdirectories', async () => {
+    const sub = join(tmpDir, 'nested');
+    await mkdir(sub);
+    await Promise.all(
+      Array.from({ length: 12 }, (_, index) =>
+        writeFile(join(sub, `snap-${index}.txt`), ''),
+      ),
+    );
+    const snapshot = await snapshotWorkspace(tmpDir, 5);
+    assert.equal(snapshot.size, 5);
+  });
 });

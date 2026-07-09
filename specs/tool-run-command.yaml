@@ -41,6 +41,8 @@ constraints:
   - The snapshot file cap defaults to 1000 but is overridable via the snapshotCap
     registry option or KODR_SNAPSHOT_CAP, so a large workspace isn't silently
     capped (a changed file past the cap would otherwise be dropped from tracking)
+  - The cap bounds the whole recursive walk, not just the workspace root, so a
+    deep tree cannot be walked unbounded on every before/after snapshot
 
 tests:
   unit:
@@ -48,6 +50,7 @@ tests:
     - captures non-zero exit codes
     - tracks files changed by shell commands
     - snapshot cap is overridable via option and KODR_SNAPSHOT_CAP
+    - honors the cap for files nested in subdirectories
     - rejects cd targets outside the workspace
     - allows cd targets inside the workspace
     - does not expose non-allowlisted environment variables by default
