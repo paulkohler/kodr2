@@ -3,38 +3,73 @@
  *
  * Keeps the `major.minor` prefix already in package.json and sets the patch
  * to the number of commits reachable from HEAD, e.g. `0.2` + 94 -> `0.2.94`.
- * Run with `--check` to verify without writing (exit 1 on mismatch).
+ *
+ * Because the patch tracks the commit count, the version is inherently one
+ * behind right after any commit (stamping is itself a commit). So this is
+ * NOT a `pretest` gate -- it would never converge. Instead `version:set`
+ * runs at publish time (prepublishOnly) so the published artifact always
+ * reflects the true count, and `--check` stays available for manual/CI use.
  */
 
 import { execFileSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 
-const pkgUrl = new URL('../package.json', import.meta.url);
-const raw = await readFile(pkgUrl, 'utf8');
-const pkg = JSON.parse(raw);
+/**
+ * Compute the target version from the current version and a commit count.
+ * @param {string} current - e.g. "0.2.0"
+ * @param {string|number} count - commit count for the patch field
+ * @returns {string} e.g. "0.2.94"
+ */
+export function nextVersion(current, count) {
+  const [major, minor] = String(current).split('.');
+  return `${major}.${minor}.${count}`;
+}
 
-const [major, minor] = pkg.version.split('.');
-const count = execFileSync('git', ['rev-list', '--count', 'HEAD'], {
-  encoding: 'utf8',
-}).trim();
-const next = `${major}.${minor}.${count}`;
+/**
+ * Rewrite only the version field in a package.json source string, preserving
+ * all other formatting.
+ * @param {string} raw - package.json file contents
+ * @param {string} version - version to stamp in
+ * @returns {string} updated contents
+ */
+export function stampVersion(raw, version) {
+  return raw.replace(/("version":\s*")[^"]*(")/, `$1${version}$2`);
+}
 
-const check = process.argv.includes('--check');
+function commitCount(run = defaultRun) {
+  return run('git', ['rev-list', '--count', 'HEAD']).trim();
+}
 
-if (check) {
-  if (pkg.version !== next) {
-    process.stderr.write(
-      `package.json version ${pkg.version} does not match commit count ${next}\n`,
-    );
-    process.exitCode = 1;
+function defaultRun(cmd, args) {
+  return execFileSync(cmd, args, { encoding: 'utf8' });
+}
+
+async function main() {
+  const pkgUrl = new URL('../package.json', import.meta.url);
+  const raw = await readFile(pkgUrl, 'utf8');
+  const pkg = JSON.parse(raw);
+  const next = nextVersion(pkg.version, commitCount());
+  const check = process.argv.includes('--check');
+
+  if (check) {
+    if (pkg.version !== next) {
+      process.stderr.write(
+        `package.json version ${pkg.version} does not match commit count ${next}\n`,
+      );
+      process.exitCode = 1;
+    }
+    return;
   }
-} else if (pkg.version === next) {
-  process.stdout.write(`version already ${next}\n`);
-} else {
-  const updated = raw.replace(
-    /("version":\s*")[^"]*(")/,
-    `$1${next}$2`,
-  );
-  await writeFile(pkgUrl, updated);
+
+  if (pkg.version === next) {
+    process.stdout.write(`version already ${next}\n`);
+    return;
+  }
+
+  await writeFile(pkgUrl, stampVersion(raw, next));
   process.stdout.write(`version ${pkg.version} -> ${next}\n`);
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  await main();
 }

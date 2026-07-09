@@ -48,7 +48,7 @@
     "prelint:fix": "npm run check:biome",
     "lint:fix": "biome lint --write bin src test eval",
     "prepack": "npm run assert:zero-deps",
-    "prepublishOnly": "npm run assert:zero-deps"
+    "prepublishOnly": "npm run assert:zero-deps && npm run version:set"
   },
   "engines": {
     "node": ">=22"
