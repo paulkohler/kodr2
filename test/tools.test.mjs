@@ -6,6 +6,7 @@ import {
   mkdir,
   rm,
   readFile,
+  realpath,
   symlink,
 } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -141,6 +142,20 @@ describe('write_file', () => {
     assert.equal(result.written, true);
     const content = await readFile(join(tmpDir, 'a/b/c.txt'), 'utf8');
     assert.equal(content, 'nested');
+  });
+
+  it('accepts an absolute path inside the workspace root', async () => {
+    // The system prompt tells the model it may pass an absolute path within
+    // the root; it must land in the same place as the relative form, not nest
+    // a level deeper. Use the canonical root (as the container's /app is).
+    const root = await realpath(tmpDir);
+    const result = await writeFileTool.execute(
+      { path: join(root, 'abs.txt'), content: 'via absolute' },
+      { ...context, cwd: root },
+    );
+    assert.equal(result.written, true);
+    const content = await readFile(join(root, 'abs.txt'), 'utf8');
+    assert.equal(content, 'via absolute');
   });
 
   it('rejects paths escaping workspace', async () => {

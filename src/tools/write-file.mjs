@@ -16,7 +16,8 @@ export default {
       properties: {
         path: {
           type: 'string',
-          description: 'Relative path from workspace root',
+          description:
+            'Path relative to the workspace root, or an absolute path within it',
         },
         content: {
           type: 'string',

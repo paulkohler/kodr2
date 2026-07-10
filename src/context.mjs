@@ -15,6 +15,24 @@ const INSTRUCTION_FILES = ['KODR.md', 'AGENTS.md'];
 const MAX_FILES = 200;
 
 /**
+ * Disclose the workspace root's absolute path and the path convention. Tool
+ * paths are relative to the root, but the model is never otherwise told what
+ * that root *is* -- so when a task refers to an absolute path that happens to
+ * live under the root (e.g. write to "/app/out.txt" when the root is "/app"),
+ * the model can't relativize it correctly and may strip only the leading slash
+ * ("app/out.txt"), which then nests a level too deep. Stating the root, and
+ * that an absolute path inside it is accepted, removes that trap.
+ * @param {string} cwd - Workspace root (absolute path)
+ * @returns {string}
+ */
+function workspaceRootNote(cwd) {
+  return [
+    `The workspace root is the absolute path: ${cwd}`,
+    `Tool paths are relative to this root ("src/app.js" means "${join(cwd, 'src/app.js')}"). You may also pass an absolute path as long as it is inside the workspace root -- so if a task names an absolute path under the root, pass it exactly as given rather than trying to relativize it.`,
+  ].join('\n');
+}
+
+/**
  * Assemble the system prompt for a workspace.
  * @param {string} cwd - Workspace root
  * @param {object} [options]
@@ -25,7 +43,7 @@ const MAX_FILES = 200;
  * @returns {Promise<string>}
  */
 export async function buildSystemPrompt(cwd, options = {}) {
-  const parts = [BASE_PROMPT];
+  const parts = [BASE_PROMPT, workspaceRootNote(cwd)];
 
   const instructions = await readInstructions(cwd);
   if (instructions) {

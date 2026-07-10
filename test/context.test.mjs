@@ -131,6 +131,14 @@ describe('buildSystemPrompt', () => {
     assert.ok(prompt.includes('tool_name[ARGS]'));
   });
 
+  it('discloses the workspace root path and that absolute paths within it are accepted', async () => {
+    const prompt = await buildSystemPrompt(tmpDir);
+    assert.ok(
+      prompt.includes(`The workspace root is the absolute path: ${tmpDir}`),
+    );
+    assert.ok(prompt.includes('absolute path as long as it is inside'));
+  });
+
   it('includes workspace instructions when present', async () => {
     await writeFile(join(tmpDir, 'KODR.md'), 'custom rules');
     const prompt = await buildSystemPrompt(tmpDir);

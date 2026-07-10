@@ -122,6 +122,7 @@ constraints:
   - Run transcript includes model, prompt, cwd, baseUrl, test command, env passthrough, start time, finish time, and duration
   - Run transcript records package-manager commands without blocking them
   - System prompt assembled fresh each run from workspace state
+  - System prompt discloses the workspace root's absolute path and states that tool paths are relative to it, and that an absolute path inside the root is also accepted -- otherwise a model told only "paths are relative to the workspace root" cannot map a task's absolute path (e.g. write to /app/out.txt when the root is /app) and may strip just the leading slash to "app/out.txt", nesting a level too deep. The path jail resolves an absolute path within the (canonical) root to the same location as its relative form
   - System prompt file listing skips operator logs, copied kodr artifacts, and common build/dependency dirs (node_modules, target, dist, build, .next, __pycache__, .venv, venv, .gradle) so a build can't flood the prompt; ignored paths are still readable directly
   - System prompt requires tools to be called through the provided tool channel, not text-form pseudo calls
   - Verification runs when a test command is set and the workspace was touched (files written or a command run)
@@ -165,6 +166,8 @@ tests:
     - a non-SSE 200 response records an error, not a false completion
     - workspace file listing skips operator logs and copied kodr artifacts
     - system prompt requires native tool-channel calls
+    - system prompt discloses the workspace root path and that absolute paths within it are accepted
+    - write_file accepts an absolute path inside the workspace root
     - recovers text-form tool calls (all framings) through the tool registry
     - shared tool loop completes, exhausts turns, and stops on budget
     - a timeout at the run deadline is reported as budget-exceeded, not an error
