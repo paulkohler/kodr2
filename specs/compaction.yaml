@@ -83,6 +83,11 @@ constraints:
     so no assistant tool_call is left without its matching tool result
   - Auto-compaction is checked between tool turns, after the turn's results
     are appended, using the most recent request's prompt-token count
+  - When the provider does not report prompt-token usage (e.g. Ollama's /v1
+    endpoint reports none), the turn falls back to a chars/token estimate of
+    the message history (estimateTokens, ratio overridable) so compaction can
+    still trigger instead of the context growing unbounded until the backend
+    truncates or errors
   - needsCompaction is true when promptTokens >= contextWindow * threshold,
     and always false when the context window is 0 or unknown
   - The summary model call adds its token usage, and any retries it used, to the run total
@@ -115,7 +120,9 @@ tests:
     - compactMessages is a no-op when there is no history to compact
     - compactMessages forwards timeoutMs to the summary chat call
     - compactMessages forwards heartbeatMs and onHeartbeat to the summary chat call
+    - estimateTokens approximates prompt tokens from content and tool-call length
     - tool loop compacts in place when a turn crosses the threshold
+    - tool loop compacts using an estimate when the provider reports no prompt usage
     - tool loop caps the compaction summary call to the remaining run budget
     - tool loop adds the compaction summary call's retries to the run total
     - tool loop forwards heartbeatMs and onHeartbeat to the compaction summary call

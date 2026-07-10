@@ -2,11 +2,13 @@ import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  CHARS_PER_TOKEN,
   COMPACTION_THRESHOLD,
   compactMessageChars,
   compactMessages,
   configuredContextWindow,
   DEFAULT_COMPACT_MESSAGE_CHARS,
+  estimateTokens,
   isCompactCommand,
   needsCompaction,
   renderTranscript,
@@ -80,6 +82,36 @@ describe('needsCompaction', () => {
   it('honors a custom threshold', () => {
     assert.equal(needsCompaction(500, 1000, 0.5), true);
     assert.equal(needsCompaction(499, 1000, 0.5), false);
+  });
+});
+
+describe('estimateTokens', () => {
+  it('estimates from content length at the default ratio', () => {
+    const messages = [{ role: 'user', content: 'x'.repeat(40) }];
+    assert.equal(estimateTokens(messages), 40 / CHARS_PER_TOKEN);
+  });
+
+  it('counts assistant tool-call names and arguments', () => {
+    const messages = [
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          { function: { name: 'read_file', arguments: '{"path":"a.mjs"}' } },
+        ],
+      },
+    ];
+    // 'read_file' (9) + '{"path":"a.mjs"}' (16) = 25 chars.
+    assert.equal(estimateTokens(messages), Math.ceil(25 / CHARS_PER_TOKEN));
+  });
+
+  it('honors an overridable chars-per-token ratio', () => {
+    const messages = [{ role: 'user', content: 'x'.repeat(40) }];
+    assert.equal(estimateTokens(messages, 8), 5);
+  });
+
+  it('ignores messages with non-string content', () => {
+    assert.equal(estimateTokens([{ role: 'tool', content: null }]), 0);
   });
 });
 
@@ -443,6 +475,36 @@ describe('runToolLoop compaction', () => {
       messages.some((m) => m.role === 'tool'),
       false,
     );
+  });
+
+  it('compacts using an estimate when the provider reports no prompt usage', async () => {
+    // A provider like Ollama reports prompt: 0. Without an estimate fallback,
+    // needsCompaction(0, ...) is always false and the session never compacts.
+    // Turn 1 is a tool call with zero usage but a large conversation, so the
+    // estimated size crosses the threshold and compaction fires.
+    const client = scriptedClient([
+      toolCallTurn('list_files', {}, 0),
+      finalTurn('COMPACTED SUMMARY', 0),
+      finalTurn('all done', 0),
+    ]);
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      // ~2000 chars / 4 = ~500 estimated tokens, over 0.8 * 500 = 400.
+      { role: 'user', content: 'x'.repeat(2000) },
+    ];
+
+    const loop = await runToolLoop({
+      client,
+      modelId: 'm',
+      messages,
+      tools: stubTools,
+      quiet: true,
+      contextWindow: 500,
+    });
+
+    assert.equal(loop.completed, true);
+    assert.equal(loop.compactions, 1);
+    assert.match(messages[1].content, /COMPACTED SUMMARY/);
   });
 
   it("adds the compaction summary call's retries to the run total", async () => {

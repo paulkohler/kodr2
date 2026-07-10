@@ -13,6 +13,7 @@
 import {
   COMPACTION_THRESHOLD,
   compactMessages,
+  estimateTokens,
   needsCompaction,
 } from './compact.mjs';
 import { formatNotice, formatToolCall, formatToolResult } from './format.mjs';
@@ -118,7 +119,10 @@ export async function runToolLoop(params) {
       usage.completion += turnUsage.completion;
       usage.cost += turnUsage.cost || 0;
       retries += turnRetries || 0;
-      const lastPromptTokens = turnUsage.prompt;
+      // Fall back to an estimate when the provider omits prompt-token usage
+      // (e.g. Ollama), so compaction can still trigger instead of letting the
+      // context grow unbounded until the backend errors.
+      const lastPromptTokens = turnUsage.prompt || estimateTokens(messages);
       messages.push(message);
 
       const nativeCalls = await executeNativeToolCalls(
