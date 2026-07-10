@@ -74,6 +74,50 @@ describe('assembleResponse', () => {
     assert.equal(call.function.arguments, '{"path":"a"}');
   });
 
+  it('densifies tool calls when a provider skips a stream index', () => {
+    // Deltas arrive for index 0 and index 2, with no index 1 -- a sparse
+    // array. The result must be dense so a for..of over tool_calls never
+    // yields undefined (which would crash the loop on tc.function).
+    const result = assembleResponse([
+      {
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                { index: 0, function: { name: 'read_file', arguments: '{}' } },
+              ],
+            },
+          },
+        ],
+      },
+      {
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 2,
+                  function: { name: 'list_files', arguments: '{}' },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ]);
+
+    assert.equal(result.message.tool_calls.length, 2);
+    assert.ok(result.message.tool_calls.every((tc) => tc && tc.function));
+    assert.deepEqual(
+      result.message.tool_calls.map((tc) => tc.function.name),
+      ['read_file', 'list_files'],
+    );
+    // The sparse hole must not survive as an undefined entry.
+    for (const tc of result.message.tool_calls) {
+      assert.ok(tc.function.name);
+    }
+  });
+
   it('accumulates reasoning content and reasoning_details across chunks', () => {
     const result = assembleResponse([
       {

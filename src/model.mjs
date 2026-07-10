@@ -275,8 +275,14 @@ function createAssembler(onToken, onToolCall) {
     if (reasoningDetails.length > 0) {
       message.reasoning_details = reasoningDetails;
     }
-    if (toolCalls.length > 0) {
-      message.tool_calls = toolCalls.map((tc) => ({
+    // A provider can stream tool-call deltas with a gap in `index` (0 then 2),
+    // which leaves a hole in this sparse array. `.map` preserves holes and a
+    // later `for..of` over message.tool_calls would yield `undefined` for
+    // them, crashing the tool loop on `tc.function`. Drop holes so the array
+    // is dense and every entry is a real call.
+    const dense = toolCalls.filter((tc) => tc);
+    if (dense.length > 0) {
+      message.tool_calls = dense.map((tc) => ({
         id: tc.id || `call_${Math.random().toString(36).slice(2, 10)}`,
         type: 'function',
         function: { name: tc.name, arguments: tc.arguments },

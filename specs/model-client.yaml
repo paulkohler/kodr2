@@ -69,6 +69,9 @@ constraints:
   - Supports http and https base URLs (transport selected by URL protocol)
   - Accumulates tool call deltas across chunks
   - Generates synthetic tool_call IDs when server omits them
+  - Resolves tool calls into a dense array even when a provider streams deltas
+    with a gap in `index` (0 then 2), so a for..of over message.tool_calls
+    never yields an undefined entry that would crash the tool loop
   - KODR_MODEL configures the model when no model option is provided
   - Explicit model option takes precedence over KODR_MODEL
   - HTTP errors surface as thrown exceptions
@@ -91,6 +94,7 @@ tests:
     - assembleResponse builds complete message from chunks
     - assembleResponse accumulates tool call arguments
     - assembleResponse generates IDs for tool calls without them
+    - assembleResponse densifies tool calls when a provider skips a stream index
     - assembleResponse accumulates reasoning content and reasoning_details across chunks
     - assembleResponse omits reasoning fields entirely when no reasoning deltas arrive
     - assembleResponse captures usage from a chunk whose delta is present but near-empty
