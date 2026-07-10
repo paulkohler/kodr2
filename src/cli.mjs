@@ -17,6 +17,7 @@ import { DEFAULT_HEARTBEAT_MS, resolveRunsDir, run } from './harness.mjs';
 import { DEFAULT_INCIDENT_HEARTBEAT_MS } from './incident.mjs';
 import { DEFAULT_MAX_RETRIES } from './model.mjs';
 import { createProvider, resolveProviderName } from './provider.mjs';
+import { createJsonReporter } from './reporter.mjs';
 import {
   DEFAULT_MIN_REVIEW_TOOL_CALLS,
   DEFAULT_REVIEW_MAX_TOOL_TURNS,
@@ -181,6 +182,9 @@ export async function main(argv) {
     reviewMinToolCalls: args.reviewMinToolCalls,
     reviewMaxToolTurns: args.reviewMaxToolTurns,
     quiet: args.quiet || args.json,
+    // --events streams the run as NDJSON on stdout (specs/reporter.yaml); left
+    // undefined otherwise so the harness picks the terminal/null reporter.
+    reporter: args.events ? createJsonReporter() : undefined,
     envPassthrough: args.env,
     runsDir: args.runsDir,
     noSave: args.noSave,
@@ -373,6 +377,7 @@ export function parseArgs(argv) {
     debug: false,
     commitTimeoutMs: DEFAULT_COMMIT_TIMEOUT_MS,
     json: false,
+    events: false,
     noFail: false,
     help: false,
     version: false,
@@ -552,6 +557,11 @@ export function parseArgs(argv) {
       i++;
       continue;
     }
+    if (arg === '--events') {
+      args.events = true;
+      i++;
+      continue;
+    }
     if (arg === '--no-fail') {
       args.noFail = true;
       i++;
@@ -674,6 +684,8 @@ Options:
                                   directly; opt-in only, for a pipeline that has already
                                   decided to trust the loop.
   --json                          Print a machine-readable run summary to stdout
+  --events                        Stream the run as newline-delimited JSON events on stdout
+                                  (specs/reporter.yaml); can be combined with --json
   --no-fail                       Always exit 0 (or KODR_NO_FAIL); for external-verifier runs
   --debug                         Write every model request's raw request/response to a
                                   JSONL sidecar next to the run transcript (or KODR_DEBUG).
@@ -788,6 +800,7 @@ export async function runReplay(args) {
     envPassthrough: prior.metadata.envPassthrough,
     contextWindow: prior.metadata.contextWindow,
     quiet: args.quiet || args.json,
+    reporter: args.events ? createJsonReporter() : undefined,
     runsDir: args.runsDir,
     noSave: args.noSave,
     debug: args.debug,

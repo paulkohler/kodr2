@@ -4,7 +4,7 @@
  * re-verifies. Stops on: pass, turn limit, or no-progress.
  */
 
-import { formatHealTurn } from './format.mjs';
+import { createNullReporter } from './reporter.mjs';
 import { runToolLoop } from './tool-loop.mjs';
 
 const DEFAULT_MAX_TURNS = 3;
@@ -19,7 +19,8 @@ const DEFAULT_MAX_TURNS = 3;
  * @param {function} params.verifyFn - Verification function () => result
  * @param {{ passed: boolean, output: string }} params.failure - Initial failure
  * @param {number} [params.maxTurns] - Max repair turns
- * @param {boolean} [params.quiet] - Suppress terminal output
+ * @param {object} [params.reporter] - Output channel (see specs/reporter.yaml);
+ *   defaults to a null (silent) reporter
  * @param {Date} [params.startedAt] - Run start, for the budget check
  * @param {number} [params.maxRunMs] - Stop between turns after this many ms (0 disables)
  * @param {number} [params.maxToolTurns] - Tool-turn ceiling per heal turn (default MAX_TOOL_TURNS)
@@ -42,7 +43,7 @@ export async function heal(params) {
     verifyFn,
     failure,
     maxTurns = DEFAULT_MAX_TURNS,
-    quiet = false,
+    reporter = createNullReporter(),
     startedAt,
     maxRunMs = 0,
     maxToolTurns,
@@ -63,9 +64,7 @@ export async function heal(params) {
   const totalUsage = { prompt: 0, completion: 0, cost: 0 };
 
   for (let turn = 1; turn <= maxTurns; turn++) {
-    if (!quiet) {
-      process.stderr.write(`${formatHealTurn(turn, maxTurns)}\n`);
-    }
+    reporter.healTurn({ turn, max: maxTurns });
 
     // Add failure context
     messages.push({
@@ -87,7 +86,7 @@ ${lastOutput}
       modelId,
       messages,
       tools,
-      quiet,
+      reporter,
       startedAt,
       maxRunMs,
       maxToolTurns,

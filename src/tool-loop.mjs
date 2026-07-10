@@ -16,8 +16,8 @@ import {
   estimateTokens,
   needsCompaction,
 } from './compact.mjs';
-import { formatNotice, formatToolCall, formatToolResult } from './format.mjs';
 import { runPostToolHooks, runPreToolHooks } from './hooks.mjs';
+import { createNullReporter } from './reporter.mjs';
 import { isTimeoutError } from './model.mjs';
 import {
   isUnparseableArgs,
@@ -35,7 +35,8 @@ export const MAX_TOOL_TURNS = 20;
  * @param {string} params.modelId - Model to use
  * @param {Array} params.messages - Conversation so far (mutated in place)
  * @param {object} params.tools - Tool registry
- * @param {boolean} [params.quiet] - Suppress streamed output
+ * @param {object} [params.reporter] - Output channel (see specs/reporter.yaml);
+ *   defaults to a null (silent) reporter
  * @param {Date} [params.startedAt] - Run start, for the budget check
  * @param {number} [params.maxRunMs] - Stop between turns after this many ms (0 disables)
  * @param {number} [params.maxToolTurns] - Tool-turn ceiling (default MAX_TOOL_TURNS)
@@ -54,7 +55,8 @@ export const MAX_TOOL_TURNS = 20;
  * @returns {Promise<{ finalText: string, completed: boolean, stoppedReason: string, toolTurns: number, compactions: number, usage: { prompt: number, completion: number }, retries: number }>}
  */
 export async function runToolLoop(params) {
-  const { client, modelId, messages, tools, quiet = false } = params;
+  const { client, modelId, messages, tools } = params;
+  const { reporter = createNullReporter() } = params;
   const { startedAt, maxRunMs = 0, maxToolTurns = MAX_TOOL_TURNS } = params;
   const { contextWindow = 0, compactThreshold = COMPACTION_THRESHOLD } = params;
   const { heartbeatMs = 0, onHeartbeat, onDebug } = params;
@@ -117,7 +119,8 @@ export async function runToolLoop(params) {
         model: modelId,
         messages,
         tools: tools.definitions(),
-        onToken: quiet ? undefined : (t) => process.stdout.write(t),
+        onToken: (t) => reporter.token(t),
+        onToolCall: (name) => reporter.toolActivity(name),
         timeoutMs: remainingRunBudgetMs(startedAt, maxRunMs),
         heartbeatMs,
         onHeartbeat,
@@ -138,7 +141,7 @@ export async function runToolLoop(params) {
         message,
         tools,
         messages,
-        quiet,
+        reporter,
         hookCtx,
       );
       if (nativeCalls === 0) {
@@ -146,16 +149,14 @@ export async function runToolLoop(params) {
           message,
           tools,
           messages,
-          quiet,
+          reporter,
           hookCtx,
         );
         if (!recovered) {
           finalText = message.content || '';
           completed = true;
           stoppedReason = 'complete';
-          if (!quiet) {
-            process.stdout.write('\n');
-          }
+          reporter.turnEnd({ completed: true, finalText });
           break;
         }
       }
@@ -173,7 +174,7 @@ export async function runToolLoop(params) {
         lastPromptTokens,
         contextWindow,
         compactThreshold,
-        quiet,
+        reporter,
         usage,
         timeoutMs: remainingRunBudgetMs(startedAt, maxRunMs),
         heartbeatMs,
@@ -197,7 +198,8 @@ export async function runToolLoop(params) {
  *   conversation was compacted, and retries the summary chat call used
  */
 async function maybeCompact(params) {
-  const { client, modelId, messages, lastPromptTokens, usage, quiet } = params;
+  const { client, modelId, messages, lastPromptTokens, usage, reporter } =
+    params;
   const { contextWindow, compactThreshold, timeoutMs } = params;
   const { heartbeatMs, onHeartbeat, onDebug } = params;
 
@@ -205,18 +207,14 @@ async function maybeCompact(params) {
     return { compacted: false, retries: 0 };
   }
 
-  if (!quiet) {
-    const limit = Math.round(contextWindow * compactThreshold);
-    process.stderr.write(
-      `${formatNotice(`compacting context (${lastPromptTokens} >= ${limit} tokens)`)}\n`,
-    );
-  }
+  const limit = Math.round(contextWindow * compactThreshold);
+  reporter.compaction({ promptTokens: lastPromptTokens, limit });
 
   const result = await compactMessages({
     client,
     modelId,
     messages,
-    quiet,
+    reporter,
     timeoutMs,
     heartbeatMs,
     onHeartbeat,
@@ -228,11 +226,7 @@ async function maybeCompact(params) {
   const retries = result.retries || 0;
 
   if (result.error) {
-    if (!quiet) {
-      process.stderr.write(
-        `${formatNotice(`compaction skipped: ${result.error}`)}\n`,
-      );
-    }
+    reporter.notice(`compaction skipped: ${result.error}`);
     return { compacted: false, retries };
   }
 
@@ -275,14 +269,14 @@ export function remainingRunBudgetMs(startedAt, maxRunMs) {
  * @param {object} message
  * @param {object} tools
  * @param {Array} messages
- * @param {boolean} quiet
+ * @param {object} reporter
  * @returns {Promise<number>} Number of executed calls
  */
 export async function executeNativeToolCalls(
   message,
   tools,
   messages,
-  quiet,
+  reporter,
   hookCtx,
 ) {
   if (!message.tool_calls || message.tool_calls.length === 0) {
@@ -291,7 +285,7 @@ export async function executeNativeToolCalls(
 
   let executed = 0;
   for (const tc of message.tool_calls) {
-    const result = await executeOneNativeCall(tc, tools, quiet, hookCtx);
+    const result = await executeOneNativeCall(tc, tools, reporter, hookCtx);
     appendToolResult(messages, tc.id, result);
     executed++;
   }
@@ -345,14 +339,12 @@ function appendToolResult(messages, toolCallId, result) {
  * the model to resend a valid call, rather than dispatching garbage.
  * @returns {Promise<object>} The tool result (or a repair error)
  */
-async function executeOneNativeCall(tc, tools, quiet, hookCtx) {
+async function executeOneNativeCall(tc, tools, reporter, hookCtx) {
   if (isUnparseableArgs(tc.function.arguments)) {
     tc.function.arguments = '{}';
-    if (!quiet) {
-      process.stderr.write(
-        `${formatNotice(`repaired malformed arguments for tool call ${recoverToolName(tc.function.name)}`)}\n`,
-      );
-    }
+    reporter.notice(
+      `repaired malformed arguments for tool call ${recoverToolName(tc.function.name)}`,
+    );
     return {
       error:
         'tool-call arguments were not valid JSON; resend the call with the arguments as a single valid JSON object',
@@ -361,7 +353,7 @@ async function executeOneNativeCall(tc, tools, quiet, hookCtx) {
 
   const name = recoverToolName(tc.function.name);
   const args = parseToolArguments(tc.function.arguments);
-  return dispatchTool({ name, args }, tools, quiet, hookCtx);
+  return dispatchTool({ name, args }, tools, reporter, hookCtx);
 }
 
 /**
@@ -371,7 +363,7 @@ async function executeOneNativeCall(tc, tools, quiet, hookCtx) {
  * @param {object} message
  * @param {object} tools
  * @param {Array} messages
- * @param {boolean} quiet
+ * @param {object} reporter
  * @param {object} [hookCtx]
  * @returns {Promise<boolean>}
  */
@@ -379,7 +371,7 @@ export async function executeRecoveredTextToolCall(
   message,
   tools,
   messages,
-  quiet,
+  reporter,
   hookCtx,
 ) {
   if (message.tool_calls && message.tool_calls.length > 0) {
@@ -391,7 +383,7 @@ export async function executeRecoveredTextToolCall(
   }
 
   for (const call of calls) {
-    const result = await dispatchTool(call, tools, quiet, hookCtx);
+    const result = await dispatchTool(call, tools, reporter, hookCtx);
     messages.push({
       role: 'user',
       content: `Recovered text-form tool call ${call.name}. Result:\n${JSON.stringify(result)}`,
@@ -414,25 +406,19 @@ function parseToolArguments(value) {
   }
 }
 
-async function dispatchTool(call, tools, quiet, hookCtx) {
-  if (!quiet) {
-    process.stderr.write(`${formatToolCall(call.name, call.args)}\n`);
-  }
+async function dispatchTool(call, tools, reporter, hookCtx) {
+  reporter.toolCall({ name: call.name, args: call.args });
 
   const denial = await denyByPreToolHooks(call, hookCtx);
   if (denial) {
-    if (!quiet) {
-      process.stderr.write(`${formatToolResult(call.name, denial)}\n`);
-    }
+    reporter.toolResult({ name: call.name, result: denial });
     return denial;
   }
 
   const result = await tools.dispatch(call.name, call.args);
   const finalResult = await applyPostToolHooks(call, result, hookCtx);
 
-  if (!quiet) {
-    process.stderr.write(`${formatToolResult(call.name, finalResult)}\n`);
-  }
+  reporter.toolResult({ name: call.name, result: finalResult });
 
   return finalResult;
 }

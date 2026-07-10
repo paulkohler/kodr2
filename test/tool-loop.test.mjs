@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
+import { createNullReporter } from '../src/reporter.mjs';
+import { createCaptureReporter } from './capture-reporter.mjs';
 import {
   executeNativeToolCalls,
   executeRecoveredTextToolCall,
@@ -59,7 +61,7 @@ describe('executeRecoveredTextToolCall', () => {
       },
       registry,
       messages,
-      true,
+      createNullReporter(),
     );
 
     assert.equal(recovered, true);
@@ -88,7 +90,7 @@ describe('executeRecoveredTextToolCall', () => {
       },
       registry,
       messages,
-      true,
+      createNullReporter(),
     );
 
     assert.equal(recovered, true);
@@ -110,7 +112,7 @@ describe('executeRecoveredTextToolCall', () => {
       },
       registry,
       messages,
-      true,
+      createNullReporter(),
     );
 
     assert.equal(recovered, true);
@@ -198,6 +200,30 @@ describe('runToolLoop', () => {
     assert.ok(imageMsg, 'expected an injected user image message');
     const imagePart = imageMsg.content.find((p) => p.type === 'image_url');
     assert.equal(imagePart.image_url.url, 'data:image/png;base64,AAAA');
+  });
+
+  it('routes tool calls, tool results, and the completing turn through the reporter', async () => {
+    const client = scriptedClient([
+      toolCallTurn('list_files', {}),
+      finalTurn('done'),
+    ]);
+    const { reporter, events } = createCaptureReporter();
+    await runToolLoop({
+      client,
+      modelId: 'm',
+      messages: [],
+      tools: stubTools,
+      reporter,
+    });
+
+    const types = events.map((e) => e.type);
+    assert.ok(types.includes('toolCall'), 'expected a toolCall event');
+    assert.ok(types.includes('toolResult'), 'expected a toolResult event');
+    const toolCall = events.find((e) => e.type === 'toolCall');
+    assert.equal(toolCall.payload.name, 'list_files');
+    const turnEnd = events.find((e) => e.type === 'turnEnd');
+    assert.ok(turnEnd, 'expected a turnEnd event');
+    assert.equal(turnEnd.payload.completed, true);
   });
 
   it('completes when the model answers with no tool call', async () => {
@@ -511,7 +537,7 @@ describe('executeNativeToolCalls (untrusted model output)', () => {
       ]),
       registry,
       messages,
-      true,
+      createNullReporter(),
     );
 
     assert.equal(executed, 2);
@@ -533,7 +559,7 @@ describe('executeNativeToolCalls (untrusted model output)', () => {
       nativeToolMessage([{ name: 'read_file', arguments: 'not json{' }]),
       registry,
       messages,
-      true,
+      createNullReporter(),
     );
 
     assert.equal(executed, 1);
@@ -551,7 +577,7 @@ describe('executeNativeToolCalls (untrusted model output)', () => {
       ]),
       registry,
       messages,
-      true,
+      createNullReporter(),
     );
 
     assert.equal(executed, 2);
@@ -567,7 +593,7 @@ describe('executeNativeToolCalls (untrusted model output)', () => {
       nativeToolMessage([{ name: 'destroy_everything', arguments: '{}' }]),
       registry,
       messages,
-      true,
+      createNullReporter(),
     );
 
     assert.equal(executed, 1);
@@ -591,7 +617,7 @@ describe('executeNativeToolCalls (untrusted model output)', () => {
       message,
       tools,
       messages,
-      true,
+      createNullReporter(),
     );
 
     assert.equal(executed, 1);
@@ -615,7 +641,7 @@ describe('executeNativeToolCalls (untrusted model output)', () => {
       ]),
       registry,
       messages,
-      true,
+      createNullReporter(),
     );
 
     assert.equal(executed, 1);
@@ -633,13 +659,13 @@ describe('executeNativeToolCalls (untrusted model output)', () => {
       { role: 'assistant', content: 'done', tool_calls: [] },
       registry,
       messages,
-      true,
+      createNullReporter(),
     );
     const missing = await executeNativeToolCalls(
       { role: 'assistant', content: 'done' },
       registry,
       messages,
-      true,
+      createNullReporter(),
     );
 
     assert.equal(empty, 0);
@@ -679,7 +705,7 @@ describe('tool hooks in dispatch', () => {
       ]),
       tools,
       messages,
-      true,
+      createNullReporter(),
       hookCtx,
     );
 
@@ -700,7 +726,7 @@ describe('tool hooks in dispatch', () => {
       nativeToolMessage([{ name: 'list_files', arguments: '{}' }]),
       tools,
       messages,
-      true,
+      createNullReporter(),
       hookCtx,
     );
 
@@ -723,7 +749,7 @@ describe('tool hooks in dispatch', () => {
       ]),
       tools,
       messages,
-      true,
+      createNullReporter(),
       hookCtx,
     );
 

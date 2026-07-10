@@ -1,0 +1,98 @@
+name: reporter
+status: implemented
+description: >
+  The run's one-way output channel. Every terminal write the harness makes
+  during a run goes through a reporter object rather than a bare
+  process.stdout/stderr.write, decoupling presentation from orchestration.
+  This is the "channel" the interactive TUI (specs/tui.yaml) consumes; the
+  command line is just one more consumer of it.
+
+  A reporter is a plain object of named callback methods (not a class, not an
+  EventEmitter), following the debug-log precedent (src/debug-log.mjs): one
+  factory per sink, threaded through the run. It is total -- every method
+  always exists as a function -- so call sites never guard with `if (reporter)`.
+  Output suppression (--quiet, --json) is expressed by selecting the null
+  reporter, which subsumes what the down-stack `quiet` flag used to gate. The
+  top-level `quiet` boolean survives only at the CLI/harness boundary, where it
+  selects the reporter (and still gates whether the model/Stop-hook heartbeat
+  timers are scheduled at all).
+
+  Deliberately one-way (output only). Interactive input -- command approval,
+  the TUI prompt -- is a separate injected channel, not part of the reporter,
+  so a fire-and-forget sink never has to become an async request/response
+  object.
+
+inputs:
+  streams:
+    type: object
+    description: >
+      createTerminalReporter({ stdout, stderr }) -- injectable writable streams
+      (default process.stdout/process.stderr) so tests can assert exact bytes.
+  out:
+    type: object
+    description: >
+      createJsonReporter({ out }) -- injectable writable stream (default
+      process.stdout) for the NDJSON event stream.
+
+outputs:
+  reporter:
+    type: object
+    description: >
+      An object exposing the full method set (token, turnEnd, toolActivity,
+      toolCall, toolResult, notice, heartbeat, compaction, verification,
+      healTurn, summary, phase). REPORTER_METHODS is the exported source of
+      truth for that set.
+
+constraints:
+  - The interface is total -- createNullReporter, createTerminalReporter, and
+    createJsonReporter each expose every REPORTER_METHODS name as a function.
+  - The null reporter's every method is a no-op returning undefined; it is
+    selected by --quiet and by --json, and is the default a run-path function
+    uses when called without a reporter.
+  - The terminal reporter reproduces the harness's historical output exactly --
+    streamed model text (token) to stdout, every other producing method to
+    stderr as the matching format.mjs string plus one trailing newline;
+    turnEnd writes a single newline to stdout only when completed is true, and
+    nothing otherwise; compaction writes the same string the old inline notice
+    produced.
+  - phase and toolActivity produce no terminal bytes -- they had no historical
+    terminal representation. phase is a new structured signal (build, verify,
+    heal, review, memory, compact) that drives the TUI header and the JSON
+    stream; toolActivity wires model.mjs's previously-unused onToolCall hook.
+  - The JSON reporter emits exactly one NDJSON object per event, tagged with an
+    `event` field. Streamed tokens are coalesced -- consecutive token() deltas
+    accumulate and flush as a single { event: "assistant_text", text } line on
+    the next non-token event -- since one line per token would be unusable.
+  - The reporter is constructed once at the harness boundary
+    (options.reporter ?? (quiet ? null : terminal)) and threaded through the
+    same call sites as heartbeatMs/onHeartbeat -- the main tool loop,
+    compaction, heal, and the review pass -- but not the memory retrospective
+    (src/memory.mjs), consistent with debug-log's scoping.
+  - --events selects the JSON reporter and does not imply --quiet; --json keeps
+    its existing contract (null reporter for the run plus a single
+    summarizeResult line to stdout at the end) and is not rebuilt on the event
+    stream, since arena/Terminal-Bench adapters parse that summary object.
+    --events and --json may be combined (event stream then final summary line).
+  - Byte-identity carve-out preserved for phase 1: the review pass's inner tool
+    loop streams to the terminal regardless of --quiet (runReview never
+    forwarded quiet), so runReview passes an explicit terminal reporter while
+    runReviewPass's own notices honor the (possibly null) harness reporter --
+    matching historical behavior exactly rather than silently changing it.
+
+tests:
+  unit:
+    - createNullReporter exposes every REPORTER_METHODS name as a no-op returning undefined
+    - createTerminalReporter token writes the raw text to stdout, unformatted
+    - createTerminalReporter turnEnd writes exactly one newline to stdout when completed, nothing when not
+    - createTerminalReporter toolCall/toolResult/notice/heartbeat/verification/healTurn/summary each write formatX(...)+newline to stderr
+    - createTerminalReporter phase and toolActivity write nothing to either stream
+    - createTerminalReporter compaction writes the same notice string the inline compaction message produced
+    - createJsonReporter emits one NDJSON object per event tagged with event
+    - createJsonReporter coalesces consecutive tokens into a single assistant_text line flushed on the next non-token event
+    - createJsonReporter summary emits stoppedReason, filesChanged, and usage
+    - the tool loop routes tokens, the completing newline, tool calls, tool results, and the compaction/repaired-arg notices through the reporter
+    - heal routes its turn header through the reporter and forwards the reporter into the tool loop
+    - compactMessages streams its summary through the reporter
+    - resolveContextWindow routes its context-window notices through the reporter
+    - the harness selects a null reporter under --quiet and under --json, and the JSON reporter under --events
+    - a capturing reporter records events in order for a scripted run

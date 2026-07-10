@@ -14,13 +14,8 @@ import {
 import { buildSystemPrompt } from './context.mjs';
 import { createDebugLogger, debugLogEnabled } from './debug-log.mjs';
 import { buildEnv } from './env.mjs';
-import {
-  formatHeartbeat,
-  formatNotice,
-  formatSummary,
-  formatVerification,
-} from './format.mjs';
 import { heal } from './heal.mjs';
+import { createNullReporter, createTerminalReporter } from './reporter.mjs';
 import {
   loadHooks,
   runSessionHooks,
@@ -86,6 +81,9 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  * @param {number} [options.maxHealTurns] - Max heal turns (default 3)
  * @param {number} [options.maxRunMs] - Stop between turns after this many ms (0 disables)
  * @param {boolean} [options.quiet] - Suppress terminal output
+ * @param {object} [options.reporter] - Output channel (see specs/reporter.yaml).
+ *   Defaults to a terminal reporter, or a null (silent) reporter when quiet.
+ *   The CLI passes a JSON reporter for --events.
  * @param {Array} [options.priorMessages] - Continuation from previous run
  * @param {string[]} [options.priorFilesChanged] - The continued run's own
  *   filesChanged, from its saved transcript -- seeds this session's tool
@@ -152,6 +150,13 @@ export async function run(prompt, options) {
   const runsDir = resolveRunsDir(cwd, options.runsDir);
   const rawThenFixCommits = rawThenFixCommitsEnabled(options.rawThenFixCommits);
   const noSave = isSaveDisabled(options.noSave);
+  // The run's one-way output channel (specs/reporter.yaml). Constructed once
+  // here at the harness boundary and threaded down; quiet just selects the
+  // silent reporter. The CLI may inject its own (e.g. the --events JSON
+  // reporter) via options.reporter.
+  const reporter =
+    options.reporter ??
+    (quiet ? createNullReporter() : createTerminalReporter());
 
   // A previous run's leftover heartbeat is the only evidence of a true
   // SIGKILL or host crash, since nothing runs in-process at the moment
@@ -196,7 +201,7 @@ export async function run(prompt, options) {
       option: options.contextWindow,
       client,
       modelId,
-      quiet,
+      reporter,
     });
 
     // A review model means Kodr owns the LM Studio load/unload sequencing
@@ -213,10 +218,8 @@ export async function run(prompt, options) {
         model: modelId,
         contextWindow,
       });
-      if (loadResult.error && !quiet) {
-        process.stderr.write(
-          `${formatNotice(`build model load: ${loadResult.error}`)}\n`,
-        );
+      if (loadResult.error) {
+        reporter.notice(`build model load: ${loadResult.error}`);
       }
     }
   } catch (err) {
@@ -262,8 +265,8 @@ export async function run(prompt, options) {
     memoryContent,
     memorySizeCap(options.memorySizeCap),
   );
-  if (sizeNotice && !quiet) {
-    process.stderr.write(`${formatNotice(sizeNotice)}\n`);
+  if (sizeNotice) {
+    reporter.notice(sizeNotice);
   }
 
   // Build messages
@@ -280,13 +283,11 @@ export async function run(prompt, options) {
   }
 
   const heartbeatMs = heartbeatIntervalMs(options.heartbeatMs);
+  // Kept gated on quiet (not folded into the reporter) so the heartbeat timer
+  // in model.mjs isn't even scheduled when there's nothing to render.
   const onModelHeartbeat = quiet
     ? undefined
-    : (elapsedMs) => {
-        process.stderr.write(
-          `${formatHeartbeat('model response', elapsedMs)}\n`,
-        );
-      };
+    : (elapsedMs) => reporter.heartbeat({ label: 'model response', elapsedMs });
   // --debug (or KODR_DEBUG) writes every model request's raw request/response
   // to a JSONL sidecar next to the run transcript -- not gated by noSave,
   // since --debug is itself an explicit request for on-disk output.
@@ -297,13 +298,14 @@ export async function run(prompt, options) {
   // On-demand compaction: "/compact" compresses the prior conversation
   // instead of running a new task.
   if (isCompactCommand(prompt)) {
+    reporter.phase('compact');
     const compactionResult = await runManualCompaction({
       client,
       modelId,
       cwd,
       messages,
       metadata,
-      quiet,
+      reporter,
       startedAt,
       maxRunMs,
       runsDir,
@@ -320,8 +322,8 @@ export async function run(prompt, options) {
   // gate completion, tool hooks fire inside the loop (and during heal), and
   // SessionEnd runs as the session closes.
   const { config: hooksConfig, error: hooksError } = await loadHooks(cwd);
-  if (hooksError && !quiet) {
-    process.stderr.write(`${formatNotice(hooksError)}\n`);
+  if (hooksError) {
+    reporter.notice(hooksError);
   }
   const stops = stopHooks(hooksConfig, testCommand);
   const toolHookSets = {
@@ -339,7 +341,7 @@ export async function run(prompt, options) {
     messages,
     startedAt,
     maxRunMs,
-    quiet,
+    reporter,
   });
 
   messages.push({ role: 'user', content: prompt });
@@ -347,12 +349,13 @@ export async function run(prompt, options) {
   let result;
   try {
     // Run the tool loop
+    reporter.phase('build');
     const loop = await runToolLoop({
       client,
       modelId,
       messages,
       tools,
-      quiet,
+      reporter,
       startedAt,
       maxRunMs,
       maxToolTurns,
@@ -370,10 +373,8 @@ export async function run(prompt, options) {
     let totalRetries = loop.retries || 0;
 
     // The model never produced a final response — it ran out of turns or budget.
-    if (!completed && !quiet) {
-      process.stderr.write(
-        `${formatNotice(formatStopReason(stoppedReason, maxToolTurns))}\n`,
-      );
+    if (!completed) {
+      reporter.notice(formatStopReason(stoppedReason, maxToolTurns));
     }
 
     // Build result
@@ -403,11 +404,7 @@ export async function run(prompt, options) {
         timeoutMs: commitTimeoutMs(options.commitTimeoutMs),
       });
       if (!isRepo) {
-        if (!quiet) {
-          process.stderr.write(
-            `${formatNotice('raw-then-fix commits skipped: not a git repository')}\n`,
-          );
-        }
+        reporter.notice('raw-then-fix commits skipped: not a git repository');
       } else {
         result.commits.raw = await commitFiles({
           cwd,
@@ -416,10 +413,8 @@ export async function run(prompt, options) {
           env: commandEnv,
           timeoutMs: commitTimeoutMs(options.commitTimeoutMs),
         });
-        if (result.commits.raw.error && !quiet) {
-          process.stderr.write(
-            `${formatNotice(`raw commit failed: ${result.commits.raw.error}`)}\n`,
-          );
+        if (result.commits.raw.error) {
+          reporter.notice(`raw commit failed: ${result.commits.raw.error}`);
         }
       }
     }
@@ -436,9 +431,9 @@ export async function run(prompt, options) {
       // to a quiet real success unless called out, which let a compaction-
       // derailed run report a normal "complete" stop with nothing done.
       result.noOpCompletion = !touchedWorkspace;
-      if (!touchedWorkspace && !quiet) {
-        process.stderr.write(
-          `${formatNotice('agent finished with no files changed and no commands run')}\n`,
+      if (!touchedWorkspace) {
+        reporter.notice(
+          'agent finished with no files changed and no commands run',
         );
       }
       // The initial verify is capped to leave a heal reserve, so a hook that
@@ -450,23 +445,22 @@ export async function run(prompt, options) {
           budgetMs,
           touchedWorkspace,
           heartbeatMs,
+          // Gated on quiet (like the model heartbeat) so no timer is scheduled
+          // when there's nothing to render.
           onHeartbeat: quiet
             ? undefined
-            : (name, elapsedMs) => {
-                process.stderr.write(`${formatHeartbeat(name, elapsedMs)}\n`);
-              },
+            : (name, elapsedMs) =>
+                reporter.heartbeat({ label: name, elapsedMs }),
         });
 
+      reporter.phase('verify');
       const hookResult = await runHooks(
         stopVerifyBudgetMs(startedAt, maxRunMs, reserveFraction),
       );
       // Only treat hooks as verification when at least one actually ran.
       if (hookResult.results.length > 0) {
         result.verification = hookResult;
-
-        if (!quiet) {
-          process.stderr.write(`${formatVerification(hookResult)}\n`);
-        }
+        reporter.verification(hookResult);
       }
 
       // Heal if a blocking hook failed
@@ -475,6 +469,7 @@ export async function run(prompt, options) {
         !hookResult.passed &&
         !isRunBudgetExceeded(startedAt, maxRunMs)
       ) {
+        reporter.phase('heal');
         const healResult = await heal({
           client,
           modelId,
@@ -483,7 +478,7 @@ export async function run(prompt, options) {
           verifyFn: () => runHooks(remainingRunBudgetMs(startedAt, maxRunMs)),
           failure: hookResult,
           maxTurns: maxHealTurns,
-          quiet,
+          reporter,
           startedAt,
           maxRunMs,
           maxToolTurns,
@@ -522,10 +517,8 @@ export async function run(prompt, options) {
             env: commandEnv,
             timeoutMs: commitTimeoutMs(options.commitTimeoutMs),
           });
-          if (result.commits.fix.error && !quiet) {
-            process.stderr.write(
-              `${formatNotice(`fix commit failed: ${result.commits.fix.error}`)}\n`,
-            );
+          if (result.commits.fix.error) {
+            reporter.notice(`fix commit failed: ${result.commits.fix.error}`);
           }
         }
       }
@@ -544,9 +537,7 @@ export async function run(prompt, options) {
     if (commitsBeforeError) {
       result.commits = commitsBeforeError;
     }
-    if (!quiet) {
-      process.stderr.write(`${formatNotice(`run failed: ${err.message}`)}\n`);
-    }
+    reporter.notice(`run failed: ${err.message}`);
   }
 
   // Both post-build steps below (review pass, memory retrospective)
@@ -562,6 +553,7 @@ export async function run(prompt, options) {
     // failure overwrite an otherwise-successful build result -- it's an
     // added opinion, not part of the outcome the run is judged on.
     if (options.reviewModel && result.stoppedReason === 'complete') {
+      reporter.phase('review');
       result.review = await runReviewPass({
         cwd,
         client,
@@ -577,7 +569,7 @@ export async function run(prompt, options) {
         envPassthrough,
         minToolCalls: options.reviewMinToolCalls,
         maxToolTurns: options.reviewMaxToolTurns,
-        quiet,
+        reporter,
       });
       if (result.review.usage) {
         result.usage.prompt += result.review.usage.prompt;
@@ -607,6 +599,7 @@ export async function run(prompt, options) {
     // MEMORY.md at the workspace root, unrelated to runsDir hygiene, and
     // must keep working under --no-save.
     if (isMemoryEnabled(options.memory)) {
+      reporter.phase('memory');
       try {
         result.memory = await runMemoryRetrospective({
           client,
@@ -626,20 +619,14 @@ export async function run(prompt, options) {
         result.memory = { proposed: false, error: err.message };
       }
 
-      if (!quiet) {
-        if (result.memory.error) {
-          process.stderr.write(
-            `${formatNotice(`memory retrospective failed: ${result.memory.error}`)}\n`,
-          );
-        } else if (result.memory.proposalPath) {
-          process.stderr.write(
-            `${formatNotice(`memory proposal written: ${result.memory.proposalPath}`)}\n`,
-          );
-        } else if (result.memory.applied) {
-          process.stderr.write(
-            `${formatNotice('memory notes applied to MEMORY.md')}\n`,
-          );
-        }
+      if (result.memory.error) {
+        reporter.notice(`memory retrospective failed: ${result.memory.error}`);
+      } else if (result.memory.proposalPath) {
+        reporter.notice(
+          `memory proposal written: ${result.memory.proposalPath}`,
+        );
+      } else if (result.memory.applied) {
+        reporter.notice('memory notes applied to MEMORY.md');
       }
 
       if (result.memory.usage) {
@@ -652,11 +639,7 @@ export async function run(prompt, options) {
       }
     }
   } catch (err) {
-    if (!quiet) {
-      process.stderr.write(
-        `${formatNotice(`post-build step failed: ${err.message}`)}\n`,
-      );
-    }
+    reporter.notice(`post-build step failed: ${err.message}`);
   }
 
   // Save run transcript (unless disabled — e.g. running inside a benchmark
@@ -667,11 +650,9 @@ export async function run(prompt, options) {
 
   // SessionEnd: cleanup as the session closes. Non-blocking, runs even on
   // error, and is not capped by the run budget (cleanup should still happen).
-  await runSessionEnd({ hooks: endHooks, cwd, commandEnv, quiet });
+  await runSessionEnd({ hooks: endHooks, cwd, commandEnv, reporter });
 
-  if (!quiet) {
-    process.stderr.write(`${formatSummary(result)}\n`);
-  }
+  reporter.summary(result);
 
   await disposeIncidentTracking();
   return result;
@@ -683,7 +664,7 @@ export async function run(prompt, options) {
  * @param {object} params
  */
 async function runSessionStart(params) {
-  const { hooks, cwd, commandEnv, messages, startedAt, maxRunMs, quiet } =
+  const { hooks, cwd, commandEnv, messages, startedAt, maxRunMs, reporter } =
     params;
   if (hooks.length === 0) {
     return;
@@ -700,12 +681,10 @@ async function runSessionStart(params) {
       content: `SessionStart hook "${item.name}" output:\n${item.output}`,
     });
   }
-  if (!quiet) {
-    for (const failure of failures) {
-      process.stderr.write(
-        `${formatNotice(`SessionStart hook "${failure.name}" failed: ${failure.output}`)}\n`,
-      );
-    }
+  for (const failure of failures) {
+    reporter.notice(
+      `SessionStart hook "${failure.name}" failed: ${failure.output}`,
+    );
   }
 }
 
@@ -715,18 +694,16 @@ async function runSessionStart(params) {
  * @param {object} params
  */
 async function runSessionEnd(params) {
-  const { hooks, cwd, commandEnv, quiet } = params;
+  const { hooks, cwd, commandEnv, reporter } = params;
   if (hooks.length === 0) {
     return;
   }
 
   const { failures } = await runSessionHooks(hooks, cwd, { env: commandEnv });
-  if (!quiet) {
-    for (const failure of failures) {
-      process.stderr.write(
-        `${formatNotice(`SessionEnd hook "${failure.name}" failed: ${failure.output}`)}\n`,
-      );
-    }
+  for (const failure of failures) {
+    reporter.notice(
+      `SessionEnd hook "${failure.name}" failed: ${failure.output}`,
+    );
   }
 }
 
@@ -855,7 +832,7 @@ export function stopVerifyBudgetMs(startedAt, maxRunMs, reserveFraction) {
  * @returns {Promise<object>} Run result
  */
 async function runManualCompaction(params) {
-  const { client, modelId, messages, metadata, quiet, startedAt } = params;
+  const { client, modelId, messages, metadata, reporter, startedAt } = params;
   const { runsDir, noSave, maxRunMs = 0, heartbeatMs, onHeartbeat } = params;
   const { onDebug } = params;
 
@@ -870,9 +847,7 @@ async function runManualCompaction(params) {
     if (!noSave) {
       await saveRun(runsDir, result, startedAt);
     }
-    if (!quiet) {
-      process.stderr.write(`${formatNotice(result.response)}\n`);
-    }
+    reporter.notice(result.response);
     return result;
   }
 
@@ -880,7 +855,7 @@ async function runManualCompaction(params) {
     client,
     modelId,
     messages,
-    quiet,
+    reporter,
     timeoutMs: remainingRunBudgetMs(startedAt, maxRunMs),
     heartbeatMs,
     onHeartbeat,
@@ -907,9 +882,7 @@ async function runManualCompaction(params) {
   if (!noSave) {
     await saveRun(runsDir, result, startedAt);
   }
-  if (!quiet) {
-    process.stderr.write(`${formatSummary(result)}\n`);
-  }
+  reporter.summary(result);
   return result;
 }
 
@@ -970,7 +943,7 @@ export async function runReviewPass(params) {
     envPassthrough,
     minToolCalls,
     maxToolTurns,
-    quiet,
+    reporter = createNullReporter(),
     ensureModelLoadedFn = ensureModelLoaded,
     runReviewFn = runReview,
   } = params;
@@ -991,11 +964,7 @@ export async function runReviewPass(params) {
         contextWindow,
       });
       if (loadResult.error) {
-        if (!quiet) {
-          process.stderr.write(
-            `${formatNotice(`review skipped: ${loadResult.error}`)}\n`,
-          );
-        }
+        reporter.notice(`review skipped: ${loadResult.error}`);
         return { skipped: true, error: loadResult.error };
       }
     }
@@ -1016,19 +985,15 @@ export async function runReviewPass(params) {
       maxToolTurns: reviewMaxToolTurns(maxToolTurns),
     });
 
-    if (!quiet && !reviewResult.skipped) {
+    if (!reviewResult.skipped) {
       const status = reviewResult.grounded
         ? 'review complete'
         : 'review complete (ungrounded -- treat with caution)';
-      process.stderr.write(`${formatNotice(status)}\n`);
+      reporter.notice(status);
     }
     return reviewResult;
   } catch (err) {
-    if (!quiet) {
-      process.stderr.write(
-        `${formatNotice(`review failed: ${err.message}`)}\n`,
-      );
-    }
+    reporter.notice(`review failed: ${err.message}`);
     return { skipped: true, error: err.message };
   }
 }
@@ -1042,11 +1007,12 @@ export async function runReviewPass(params) {
  * @param {number} [params.option] - Explicit --context-window value
  * @param {object} params.client - Model client (for probing)
  * @param {string} params.modelId - Resolved model id
- * @param {boolean} [params.quiet] - Suppress the startup notice
+ * @param {object} [params.reporter] - Output channel for the startup notice
+ *   (see specs/reporter.yaml); defaults to a null (silent) reporter
  * @returns {Promise<number>}
  */
 export async function resolveContextWindow(params) {
-  const { option, client, modelId, quiet = false } = params;
+  const { option, client, modelId, reporter = createNullReporter() } = params;
 
   const configured = configuredContextWindow(option);
   if (configured !== null) {
@@ -1055,25 +1021,19 @@ export async function resolveContextWindow(params) {
 
   const { loaded, max } = await client.contextInfo(modelId);
   if (Number.isInteger(loaded) && loaded > 0) {
-    if (!quiet) {
-      process.stderr.write(
-        `${formatNotice(`context window ${loaded} tokens (loaded for ${modelId})`)}\n`,
+    reporter.notice(`context window ${loaded} tokens (loaded for ${modelId})`);
+    if (hasContextHeadroom(loaded, max)) {
+      const factor = Math.floor(max / loaded);
+      reporter.notice(
+        `${modelId} supports up to ${max} tokens (${factor}× more) — reload it with a larger context in LM Studio for longer sessions and fewer compactions. Costs more memory.`,
       );
-      if (hasContextHeadroom(loaded, max)) {
-        const factor = Math.floor(max / loaded);
-        process.stderr.write(
-          `${formatNotice(`${modelId} supports up to ${max} tokens (${factor}× more) — reload it with a larger context in LM Studio for longer sessions and fewer compactions. Costs more memory.`)}\n`,
-        );
-      }
     }
     return loaded;
   }
 
-  if (!quiet) {
-    process.stderr.write(
-      `${formatNotice(`context window ${DEFAULT_CONTEXT_WINDOW} tokens (default; probe unavailable)`)}\n`,
-    );
-  }
+  reporter.notice(
+    `context window ${DEFAULT_CONTEXT_WINDOW} tokens (default; probe unavailable)`,
+  );
   return DEFAULT_CONTEXT_WINDOW;
 }
 

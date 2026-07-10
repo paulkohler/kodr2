@@ -5,6 +5,7 @@
  * lms.mjs for the load/verify sequencing that makes that safe).
  */
 
+import { createTerminalReporter } from './reporter.mjs';
 import { runShell } from './shell.mjs';
 import { runToolLoop } from './tool-loop.mjs';
 import { createToolRegistry } from './tools/index.mjs';
@@ -164,6 +165,11 @@ export async function runReview(params) {
     onHeartbeat,
     onDebug,
     envPassthrough = [],
+    // The review pass has always streamed its inner tool loop straight to the
+    // terminal, even under --quiet (runReview never forwarded quiet). Preserve
+    // that exactly: default to a terminal reporter so the streaming is
+    // unchanged, while runReviewPass's own notices honor the harness reporter.
+    reporter = createTerminalReporter(),
   } = params;
 
   if (filesChanged.length === 0) {
@@ -184,6 +190,7 @@ export async function runReview(params) {
     client,
     modelId,
     tools,
+    reporter,
     startedAt,
     maxRunMs,
     contextWindow,

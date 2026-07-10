@@ -209,7 +209,8 @@ export function renderTranscript(
  * @param {object} params.client - Model client
  * @param {string} params.modelId - Model to summarize with
  * @param {Array} params.messages - Conversation so far
- * @param {boolean} [params.quiet] - Suppress streamed summary output
+ * @param {object} [params.reporter] - Output channel for the streamed summary
+ *   (see specs/reporter.yaml); defaults to a null (silent) reporter
  * @param {number} [params.timeoutMs] - Per-call timeout override (e.g. the run's remaining budget)
  * @param {number} [params.heartbeatMs] - Interval for onHeartbeat "still waiting" notices (0 disables)
  * @param {function} [params.onHeartbeat] - Called with elapsed ms on each heartbeat tick
@@ -223,7 +224,7 @@ export function renderTranscript(
  * @returns {Promise<{ messages: Array, summary: string, usage: { prompt: number, completion: number }, retries: number, error?: string }>}
  */
 export async function compactMessages(params) {
-  const { client, modelId, messages, quiet = false, timeoutMs } = params;
+  const { client, modelId, messages, reporter, timeoutMs } = params;
   const { heartbeatMs, onHeartbeat, onDebug } = params;
   const system = messages.find((message) => message.role === 'system') || null;
   const history = messages.filter((message) => message.role !== 'system');
@@ -253,7 +254,7 @@ export async function compactMessages(params) {
           content: `Summarize this coding session:\n\n${transcript}`,
         },
       ],
-      onToken: quiet ? undefined : (token) => process.stdout.write(token),
+      onToken: (token) => reporter?.token(token),
       timeoutMs,
       heartbeatMs,
       onHeartbeat,
