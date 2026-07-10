@@ -18,6 +18,7 @@ import {
 } from './compact.mjs';
 import { formatNotice, formatToolCall, formatToolResult } from './format.mjs';
 import { runPostToolHooks, runPreToolHooks } from './hooks.mjs';
+import { isTimeoutError } from './model.mjs';
 import {
   isUnparseableArgs,
   recoverToolCalls,
@@ -70,17 +71,25 @@ export async function runToolLoop(params) {
   try {
     await runLoopBody();
   } catch (err) {
-    // Preserve the accounting done before the failure. runToolLoop returns
-    // usage/turns only on the normal path, so an unhandled throw would
-    // otherwise reach the harness catch and be recorded as toolTurns: 0,
-    // cost: 0 -- silently corrupting the exact metrics the harness exists
-    // to produce. Attach what we accumulated (mirroring how err.retries is
-    // already carried) so createErrorResult can report the real numbers.
-    err.usage = usage;
-    err.toolTurns = toolTurns;
-    err.compactions = compactions;
-    err.retries = retries + (err.retries || 0);
-    throw err;
+    // A request capped to the last of the run budget times out precisely
+    // because the budget is spent -- that is a clean budget-exceeded stop, not
+    // a crash. Relabel it rather than reporting a hard error for what is just
+    // the run running out of wall-clock.
+    if (isTimeoutError(err) && isRunBudgetExceeded(startedAt, maxRunMs)) {
+      stoppedReason = 'budget-exceeded';
+    } else {
+      // Preserve the accounting done before the failure. runToolLoop returns
+      // usage/turns only on the normal path, so an unhandled throw would
+      // otherwise reach the harness catch and be recorded as toolTurns: 0,
+      // cost: 0 -- silently corrupting the exact metrics the harness exists
+      // to produce. Attach what we accumulated (mirroring how err.retries is
+      // already carried) so createErrorResult can report the real numbers.
+      err.usage = usage;
+      err.toolTurns = toolTurns;
+      err.compactions = compactions;
+      err.retries = retries + (err.retries || 0);
+      throw err;
+    }
   }
 
   return {

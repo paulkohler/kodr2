@@ -417,6 +417,27 @@ function isRetryableError(err) {
 }
 
 /**
+ * A request-timeout error, tagged with a stable code so callers can tell a
+ * timeout from any other failure without matching on the message text.
+ * @param {number} timeout - The elapsed budget in ms
+ * @returns {Error}
+ */
+function timeoutError(timeout) {
+  return Object.assign(new Error(`Request timed out after ${timeout}ms`), {
+    code: 'ETIMEDOUT',
+  });
+}
+
+/**
+ * Whether an error is a request timeout raised by this client.
+ * @param {Error} err
+ * @returns {boolean}
+ */
+export function isTimeoutError(err) {
+  return err?.code === 'ETIMEDOUT';
+}
+
+/**
  * Whether an error from streamRequest is a 5xx HTTP status -- the class of
  * failure a local backend crash produces, as opposed to a 4xx (a bad request
  * that would fail the same way again) or a timeout.
@@ -480,7 +501,7 @@ function streamRequest(url, body, timeout, callbacks, headers = {}) {
       if (req) {
         req.destroy();
       }
-      finish(reject, new Error(`Request timed out after ${timeout}ms`));
+      finish(reject, timeoutError(timeout));
     }, timeout);
 
     req = transportFor(parsed)(
@@ -558,7 +579,7 @@ function streamRequest(url, body, timeout, callbacks, headers = {}) {
 
     req.on('timeout', () => {
       req.destroy();
-      finish(reject, new Error(`Request timed out after ${timeout}ms`));
+      finish(reject, timeoutError(timeout));
     });
 
     req.on('error', (err) => {
@@ -580,7 +601,7 @@ function jsonRequest(url, timeout, headers = {}) {
       if (req) {
         req.destroy();
       }
-      reject(new Error(`Request timed out after ${timeout}ms`));
+      reject(timeoutError(timeout));
     }, timeout);
 
     function finish(fn, value) {
@@ -620,7 +641,7 @@ function jsonRequest(url, timeout, headers = {}) {
 
     req.on('timeout', () => {
       req.destroy();
-      finish(reject, new Error(`Request timed out after ${timeout}ms`));
+      finish(reject, timeoutError(timeout));
     });
 
     req.on('error', (err) => {

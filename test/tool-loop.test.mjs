@@ -347,6 +347,63 @@ describe('runToolLoop', () => {
     assert.equal(client.calls[0].onHeartbeat, onHeartbeat);
   });
 
+  it('reports a timeout at the run deadline as budget-exceeded, not an error', async () => {
+    // The chat is capped to the last of the run budget and times out because
+    // that budget is spent. It must be a clean budget-exceeded stop, not a
+    // thrown error. maxRunMs is small and the chat takes longer than the
+    // remaining budget, so by the time it throws the budget is exceeded.
+    const client = {
+      calls: [],
+      async chat(params) {
+        this.calls.push(params);
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        throw Object.assign(new Error('Request timed out after 5ms'), {
+          code: 'ETIMEDOUT',
+        });
+      },
+    };
+
+    const loop = await runToolLoop({
+      client,
+      modelId: 'm',
+      messages: [],
+      tools: stubTools,
+      quiet: true,
+      startedAt: new Date(Date.now() - 15),
+      maxRunMs: 20,
+    });
+
+    assert.equal(loop.completed, false);
+    assert.equal(loop.stoppedReason, 'budget-exceeded');
+  });
+
+  it('still throws a timeout that is not at the run deadline (no budget)', async () => {
+    // Same timeout error, but with no run budget: isRunBudgetExceeded is false,
+    // so this is a genuine failure and must surface as an error, not a clean
+    // budget-exceeded stop.
+    const client = {
+      async chat() {
+        throw Object.assign(new Error('Request timed out after 30000ms'), {
+          code: 'ETIMEDOUT',
+        });
+      },
+    };
+
+    await assert.rejects(
+      runToolLoop({
+        client,
+        modelId: 'm',
+        messages: [],
+        tools: stubTools,
+        quiet: true,
+      }),
+      (err) => {
+        assert.equal(err.code, 'ETIMEDOUT');
+        return true;
+      },
+    );
+  });
+
   it('carries usage/turns/retries accumulated before a mid-loop error onto the thrown error', async () => {
     // Turn 1 is a real (paid) tool turn; turn 2's chat throws. The accounting
     // from turn 1 must survive on the error so the run record does not report

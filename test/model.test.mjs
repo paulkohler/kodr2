@@ -8,6 +8,7 @@ import {
   hasContextHeadroom,
   isRetryableConnectionError,
   isRetryableServerError,
+  isTimeoutError,
   pickContextInfo,
 } from '../src/model.mjs';
 
@@ -500,6 +501,16 @@ describe('model HTTP client', () => {
     await assert.rejects(client.chat({ messages: [] }), /timed out/i);
   });
 
+  it('tags a chat timeout with a code isTimeoutError recognizes', async () => {
+    const baseUrl = await startServer(() => {});
+    const client = createClient({ baseUrl, model: 'test', timeout: 20 });
+    await assert.rejects(client.chat({ messages: [] }), (err) => {
+      assert.equal(err.code, 'ETIMEDOUT');
+      assert.equal(isTimeoutError(err), true);
+      return true;
+    });
+  });
+
   it('honors a per-call timeoutMs tighter than the client default', async () => {
     const baseUrl = await startServer(() => {});
     const client = createClient({ baseUrl, model: 'test', timeout: 60_000 });
@@ -627,6 +638,24 @@ describe('model HTTP client', () => {
     });
     const client = createClient({ baseUrl, model: 'test' });
     assert.deepEqual(await client.richModels(), []);
+  });
+});
+
+describe('isTimeoutError', () => {
+  it('is true for an error tagged with the ETIMEDOUT code', () => {
+    assert.equal(
+      isTimeoutError(Object.assign(new Error('slow'), { code: 'ETIMEDOUT' })),
+      true,
+    );
+  });
+
+  it('is false for any other error (or none)', () => {
+    assert.equal(isTimeoutError(new Error('HTTP 500: boom')), false);
+    assert.equal(
+      isTimeoutError(Object.assign(new Error('x'), { code: 'ECONNRESET' })),
+      false,
+    );
+    assert.equal(isTimeoutError(undefined), false);
   });
 });
 
