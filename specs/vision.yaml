@@ -1,0 +1,72 @@
+name: vision
+status: proposed
+description: >
+  Let a vision-capable model see image files in the workspace. A `view_image`
+  tool reads a jailed image, and the tool loop feeds it to the model as an
+  OpenAI-style image content part so the model can actually look at it (read a
+  scanned invoice, inspect a screenshot, classify a photo).
+
+  Gated behind an explicit `--vision` flag (KODR_VISION), off by default: the
+  standard /v1/models capability listing does not reliably report vision
+  support (LM Studio reports only tool_use even for a vision model), so vision
+  cannot be auto-detected -- the operator enables it when pointing Kodr at a
+  vision model. A text-only model is unaffected because the tool is simply not
+  offered.
+
+  Mechanism (verified against LM Studio + gemma-4): an image cannot live in a
+  `tool`-role message (the server rejects it), so view_image returns a short
+  text acknowledgement as its tool result, and the loop then appends a
+  `user`-role message whose content is [ {type:text}, {type:image_url,
+  image_url:{ url: "data:<mediaType>;base64,<data>" }} ]. That user turn is how
+  the model receives the pixels.
+
+inputs:
+  vision:
+    type: boolean
+    required: false
+    description: >
+      Enable the view_image tool. From --vision or KODR_VISION. Default false.
+  view_image.path:
+    type: string
+    required: true
+    description: >
+      Path to an image, relative to the workspace root or an absolute path
+      within it. Jailed like every other file path.
+
+outputs:
+  tool_result:
+    description: >
+      On success, view_image returns { image: { path, mediaType, dataBase64 } }.
+      The tool loop recognizes the `image` field, stores a compact ack as the
+      tool message, and injects the image as a following user message. On
+      failure it returns { error } like any other tool.
+
+behavior:
+  - view_image is only present in the tool registry when vision is enabled.
+  - Supported types: jpg/jpeg, png, gif, webp (by extension -> media type).
+  - The image is size-capped (KODR_MAX_IMAGE_BYTES, default 10MB) so one huge
+    file can't blow the request; an oversize or unreadable file returns an error.
+  - Paths are jailed exactly like read_file (resolveExistingPath); an escaping
+    path returns an error, never image bytes.
+  - The tool message content is a compact JSON ack ({ viewing: <path> }), never
+    the base64, so the transcript and any re-send stay small.
+  - The injected user message carries a text label plus the image_url data URI.
+  - renderTranscript (compaction) renders an image user message as a short
+    "[image: <path>]" placeholder rather than trying to truncate array content.
+
+constraints:
+  - Zero runtime dependencies; base64 via Buffer, no image libraries.
+  - Off by default; enabling it adds exactly one tool and no other behavior.
+  - Model output is untrusted: the path is validated and jailed before any read.
+
+tests:
+  unit:
+    - view_image returns image data for a supported type inside the workspace
+    - view_image rejects an unsupported extension
+    - view_image rejects a path escaping the workspace
+    - view_image rejects an image over the size cap
+    - the registry includes view_image only when vision is enabled
+    - the tool loop injects a user image message after a view_image call
+    - renderTranscript renders an image user message as a placeholder
+  eval:
+    - a vision model reads text from an image via view_image

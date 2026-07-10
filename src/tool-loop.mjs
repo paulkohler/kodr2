@@ -292,15 +292,49 @@ export async function executeNativeToolCalls(
   let executed = 0;
   for (const tc of message.tool_calls) {
     const result = await executeOneNativeCall(tc, tools, quiet, hookCtx);
-    messages.push({
-      role: 'tool',
-      tool_call_id: tc.id,
-      content: JSON.stringify(result),
-    });
+    appendToolResult(messages, tc.id, result);
     executed++;
   }
 
   return executed;
+}
+
+/**
+ * Append a tool result to the conversation. A normal result becomes one
+ * `tool` message. An image result (from view_image) can't ride in a tool
+ * message -- the server rejects image content there -- so it becomes a compact
+ * tool ack followed by a `user` message carrying the image as an OpenAI image
+ * content part, which is how the model actually sees the pixels. See
+ * specs/vision.yaml.
+ * @param {Array} messages
+ * @param {string} toolCallId
+ * @param {object} result
+ */
+function appendToolResult(messages, toolCallId, result) {
+  if (result.image) {
+    const { path, mediaType, dataBase64 } = result.image;
+    messages.push({
+      role: 'tool',
+      tool_call_id: toolCallId,
+      content: JSON.stringify({ viewing: path }),
+    });
+    messages.push({
+      role: 'user',
+      content: [
+        { type: 'text', text: `Image ${path}:` },
+        {
+          type: 'image_url',
+          image_url: { url: `data:${mediaType};base64,${dataBase64}` },
+        },
+      ],
+    });
+    return;
+  }
+  messages.push({
+    role: 'tool',
+    tool_call_id: toolCallId,
+    content: JSON.stringify(result),
+  });
 }
 
 /**

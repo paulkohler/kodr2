@@ -380,5 +380,8 @@ function summariseResult(name, result) {
     const code = result.exitCode === 0 ? 'exit 0' : `exit ${result.exitCode}`;
     return DIM + code + RESET;
   }
+  if (name === 'view_image' && result.image) {
+    return `${DIM}viewing ${result.image.path}${RESET}`;
+  }
   return '';
 }

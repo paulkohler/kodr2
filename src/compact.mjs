@@ -170,6 +170,13 @@ export function renderTranscript(
       continue;
     }
     if (message.role === 'user') {
+      // An image user message (from view_image) has array content, not a
+      // string -- render a compact placeholder instead of truncating it.
+      if (Array.isArray(message.content)) {
+        lines.push(`User:\n${imagePlaceholder(message.content)}`);
+        taskSeen = true;
+        continue;
+      }
       const content = message.content || '';
       let rendered;
       if (taskSeen) {
@@ -298,6 +305,24 @@ function truncate(text, maxChars) {
     return text;
   }
   return `${text.slice(0, maxChars)}… [truncated]`;
+}
+
+/**
+ * Render an image user message (array content) as a short placeholder: the
+ * text label, if any, plus an [image] marker -- never the base64 data URI.
+ * @param {Array} parts - OpenAI-style content parts
+ * @returns {string}
+ */
+function imagePlaceholder(parts) {
+  const labels = [];
+  for (const part of parts) {
+    if (part.type === 'text' && part.text) {
+      labels.push(part.text);
+    } else if (part.type === 'image_url') {
+      labels.push('[image]');
+    }
+  }
+  return labels.join(' ') || '[image]';
 }
 
 function zeroUsage() {

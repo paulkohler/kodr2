@@ -166,6 +166,7 @@ export async function main(argv) {
     baseUrl: args.baseUrl,
     model: args.model,
     reasoning: args.reasoning,
+    vision: visionEnabled(args),
     noZdr: args.openrouterNoZdr,
     allowDataCollection: args.openrouterAllowDataCollection,
     providerOrder: args.openrouterProviderOnly,
@@ -273,6 +274,21 @@ function noFailEnabled(args) {
 }
 
 /**
+ * Whether the view_image tool should be offered, from --vision or KODR_VISION.
+ * Off by default; vision can't be auto-detected (LM Studio reports only
+ * tool_use even for a vision model), so the operator enables it explicitly.
+ * @param {object} args
+ * @returns {boolean}
+ */
+export function visionEnabled(args) {
+  if (args.vision) {
+    return true;
+  }
+  const env = process.env.KODR_VISION;
+  return env === '1' || env === 'true';
+}
+
+/**
  * A compact, machine-readable summary of a run for --json mode. Lets an external
  * harness/adapter read what Kodr did (outcome and cost) without scraping output.
  * @param {object} result
@@ -330,6 +346,7 @@ export function parseArgs(argv) {
     // those env vars permanently unreachable through the CLI (see
     // specs/provider.yaml).
     reasoning: null,
+    vision: false,
     openrouterNoZdr: null,
     openrouterAllowDataCollection: null,
     openrouterProviderOnly: [],
@@ -402,6 +419,11 @@ export function parseArgs(argv) {
     }
     if (arg === '--reasoning') {
       args.reasoning = true;
+      i++;
+      continue;
+    }
+    if (arg === '--vision') {
+      args.vision = true;
       i++;
       continue;
     }
@@ -600,6 +622,9 @@ Options:
   --reasoning                     Request reasoning tokens (or KODR_REASONING). Only
                                   --provider openrouter supports this today -- errors otherwise.
                                   See specs/provider.yaml.
+  --vision                        Offer the view_image tool so a vision-capable model can see
+                                  image files (or KODR_VISION). Off by default; enable it when
+                                  pointing Kodr at a vision model. See specs/vision.yaml.
   --openrouter-no-zdr             Disable Zero Data Retention routing (or KODR_OPENROUTER_NO_ZDR).
                                   On by default with --provider openrouter -- only routes to
                                   providers with a ZDR policy.
@@ -752,6 +777,7 @@ export async function runReplay(args) {
     baseUrl: args.baseUrl || prior.metadata.baseUrl,
     model: args.model || prior.metadata.model,
     reasoning: args.reasoning,
+    vision: visionEnabled(args),
     noZdr: args.openrouterNoZdr,
     allowDataCollection: args.openrouterAllowDataCollection,
     providerOrder: args.openrouterProviderOnly,

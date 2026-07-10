@@ -8,6 +8,7 @@ import loadSkill from './load-skill.mjs';
 import readFile from './read-file.mjs';
 import runCommand from './run-command.mjs';
 import search from './search.mjs';
+import viewImage from './view-image.mjs';
 import writeFile from './write-file.mjs';
 
 const ALL_TOOLS = [
@@ -19,6 +20,10 @@ const ALL_TOOLS = [
   runCommand,
   loadSkill,
 ];
+
+// Only offered when vision is enabled (--vision / KODR_VISION); see
+// specs/vision.yaml. Kept out of ALL_TOOLS so a text-only model never sees it.
+const VISION_TOOLS = [viewImage];
 
 /**
  * Create a tool registry bound to a workspace.
@@ -52,6 +57,7 @@ export function createToolRegistry(cwd, options = {}) {
     snapshotCap: options.snapshotCap,
     startedAt: options.startedAt,
     maxRunMs: options.maxRunMs ?? 0,
+    maxImageBytes: options.maxImageBytes,
     trackWrite(path) {
       if (!filesChanged.includes(path)) {
         filesChanged.push(path);
@@ -65,11 +71,10 @@ export function createToolRegistry(cwd, options = {}) {
     },
   };
 
+  const pool = options.vision ? [...ALL_TOOLS, ...VISION_TOOLS] : ALL_TOOLS;
   const activeTools = options.allowedTools
-    ? ALL_TOOLS.filter((tool) =>
-        options.allowedTools.includes(tool.definition.name),
-      )
-    : ALL_TOOLS;
+    ? pool.filter((tool) => options.allowedTools.includes(tool.definition.name))
+    : pool;
 
   const toolMap = new Map();
   for (const tool of activeTools) {

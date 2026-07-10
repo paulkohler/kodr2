@@ -34,6 +34,18 @@ describe('createToolRegistry', () => {
     assert.ok(names.includes('load_skill'));
   });
 
+  it('offers view_image only when vision is enabled', () => {
+    const off = createToolRegistry(tmpDir)
+      .definitions()
+      .map((d) => d.name);
+    assert.ok(!off.includes('view_image'));
+
+    const on = createToolRegistry(tmpDir, { vision: true })
+      .definitions()
+      .map((d) => d.name);
+    assert.ok(on.includes('view_image'));
+  });
+
   it('dispatches known tools', async () => {
     await writeFile(join(tmpDir, 'test.txt'), 'hello');
     const registry = createToolRegistry(tmpDir);

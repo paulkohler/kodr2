@@ -166,6 +166,40 @@ const stubTools = {
 };
 
 describe('runToolLoop', () => {
+  it('injects a user image message after a view_image tool call', async () => {
+    // view_image returns an image result; the loop must append a compact tool
+    // ack plus a user message carrying the image content part (an image can't
+    // ride in a tool message). Then the model answers.
+    const client = scriptedClient([
+      toolCallTurn('view_image', { path: 'pic.png' }),
+      finalTurn('I see it'),
+    ]);
+    const tools = {
+      definitions: () => [],
+      dispatch: async () => ({
+        image: { path: 'pic.png', mediaType: 'image/png', dataBase64: 'AAAA' },
+      }),
+    };
+    const messages = [];
+    const loop = await runToolLoop({
+      client,
+      modelId: 'm',
+      messages,
+      tools,
+      quiet: true,
+    });
+
+    assert.equal(loop.completed, true);
+    const toolMsg = messages.find((m) => m.role === 'tool');
+    assert.equal(toolMsg.content, JSON.stringify({ viewing: 'pic.png' }));
+    const imageMsg = messages.find(
+      (m) => m.role === 'user' && Array.isArray(m.content),
+    );
+    assert.ok(imageMsg, 'expected an injected user image message');
+    const imagePart = imageMsg.content.find((p) => p.type === 'image_url');
+    assert.equal(imagePart.image_url.url, 'data:image/png;base64,AAAA');
+  });
+
   it('completes when the model answers with no tool call', async () => {
     const client = scriptedClient([finalTurn('done')]);
     const messages = [];

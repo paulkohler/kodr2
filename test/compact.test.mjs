@@ -225,6 +225,24 @@ describe('renderTranscript', () => {
     assert.ok(text.includes(`TASK ${'t'.repeat(150)}`));
   });
 
+  it('renders an image user message as a placeholder, not array content', () => {
+    const text = renderTranscript([
+      { role: 'user', content: 'the task' },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Image scan.png:' },
+          {
+            type: 'image_url',
+            image_url: { url: 'data:image/png;base64,BIGBLOB' },
+          },
+        ],
+      },
+    ]);
+    assert.match(text, /Image scan\.png: \[image\]/);
+    assert.doesNotMatch(text, /BIGBLOB/);
+  });
+
   it('truncates a huge tool_call argument blob', () => {
     const text = renderTranscript(
       [

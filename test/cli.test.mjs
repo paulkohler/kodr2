@@ -6,6 +6,7 @@ import {
   parseArgs,
   shouldFailProcess,
   summarizeResult,
+  visionEnabled,
 } from '../src/cli.mjs';
 
 describe('parseArgs', () => {
@@ -39,6 +40,32 @@ describe('parseArgs', () => {
   it('parses --provider flag', () => {
     const args = parseArgs(['run', 'hi', '--provider', 'openrouter']);
     assert.equal(args.provider, 'openrouter');
+  });
+
+  it('parses --vision flag (default off)', () => {
+    assert.equal(parseArgs(['run', 'hi']).vision, false);
+    assert.equal(parseArgs(['run', 'hi', '--vision']).vision, true);
+  });
+
+  it('visionEnabled honors the flag then KODR_VISION', () => {
+    const original = process.env.KODR_VISION;
+    try {
+      delete process.env.KODR_VISION;
+      assert.equal(visionEnabled({ vision: true }), true);
+      assert.equal(visionEnabled({ vision: false }), false);
+      process.env.KODR_VISION = '1';
+      assert.equal(visionEnabled({ vision: false }), true);
+      process.env.KODR_VISION = 'true';
+      assert.equal(visionEnabled({ vision: false }), true);
+      process.env.KODR_VISION = '0';
+      assert.equal(visionEnabled({ vision: false }), false);
+    } finally {
+      if (original === undefined) {
+        delete process.env.KODR_VISION;
+      } else {
+        process.env.KODR_VISION = original;
+      }
+    }
   });
 
   it('defaults --provider to null (createProvider resolves lmstudio)', () => {

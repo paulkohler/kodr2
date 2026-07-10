@@ -244,6 +244,7 @@ export async function run(prompt, options) {
     envPassthrough,
     startedAt,
     maxRunMs,
+    vision: options.vision,
     initialFilesChanged: priorFilesChanged,
   });
   const commandEnv = buildEnv(envPassthrough);
