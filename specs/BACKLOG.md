@@ -19,7 +19,7 @@ None — every finding from the 2026-07-10 audit is fixed. New issues go here.
 - **#4** non-SSE 200 swallowed as a successful empty completion — `66fb29c`
 - **#5** compaction never fired when the provider omitted usage (Ollama) — `90cc232`
 - **#6** sparse `tool_calls` (skipped stream index) crashed the loop — `424deb7`
-- **#7** huge first user message defeated compaction (task now capped) — `HEAD`
+- **#7** huge first user message defeated compaction (task now capped) — `9a44a75`
 
 ## Audited and found solid (no action)
 
