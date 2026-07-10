@@ -9,14 +9,7 @@ Line references are approximate — treat them as anchors, not addresses.
 
 ## Open
 
-### #7 — [LOW] A huge first user message defeats compaction
-- **Where:** `src/compact.mjs` `renderTranscript` keeps the first user (task)
-  message verbatim while every other message is capped.
-- **Repro:** A task with a very large embedded prompt makes the summarize request
-  itself exceed the window, so compaction fails and the loop keeps running
-  over-window while the backend errors.
-- **Fix direction:** Cap the task message too (at a larger bound), or detect an
-  over-window transcript and truncate the task with a marker.
+None — every finding from the 2026-07-10 audit is fixed. New issues go here.
 
 ## Fixed
 
@@ -26,6 +19,7 @@ Line references are approximate — treat them as anchors, not addresses.
 - **#4** non-SSE 200 swallowed as a successful empty completion — `66fb29c`
 - **#5** compaction never fired when the provider omitted usage (Ollama) — `90cc232`
 - **#6** sparse `tool_calls` (skipped stream index) crashed the loop — `424deb7`
+- **#7** huge first user message defeated compaction (task now capped) — `HEAD`
 
 ## Audited and found solid (no action)
 

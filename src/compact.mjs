@@ -10,6 +10,7 @@
 export const COMPACTION_THRESHOLD = 0.8;
 export const DEFAULT_CONTEXT_WINDOW = 8192;
 export const DEFAULT_COMPACT_MESSAGE_CHARS = 2000;
+export const DEFAULT_COMPACT_TASK_CHARS = 8000;
 export const CHARS_PER_TOKEN = 4;
 
 /**
@@ -60,6 +61,31 @@ export function compactMessageChars(option) {
     return fromEnv;
   }
   return DEFAULT_COMPACT_MESSAGE_CHARS;
+}
+
+/**
+ * Per-message character cap for the first user (task) message. The task is kept
+ * at a larger bound than other messages because the summary is required to
+ * preserve the original goal -- but it is still bounded, so a pathologically
+ * large task prompt cannot by itself push the summarize request back over the
+ * window that triggered compaction (which would leave the run stuck
+ * over-window, unable to compact). Overridable via an option, then
+ * KODR_COMPACT_TASK_CHARS, then the default.
+ * @param {number} [option]
+ * @returns {number}
+ */
+export function compactTaskChars(option) {
+  if (Number.isInteger(option) && option > 0) {
+    return option;
+  }
+  const fromEnv = Number.parseInt(
+    process.env.KODR_COMPACT_TASK_CHARS || '',
+    10,
+  );
+  if (Number.isInteger(fromEnv) && fromEnv > 0) {
+    return fromEnv;
+  }
+  return DEFAULT_COMPACT_TASK_CHARS;
 }
 
 const SUMMARY_SYSTEM = `You are compacting a long coding session so it can continue with a smaller context window. Produce a dense, factual summary of the work so far. Preserve, in order:
@@ -122,16 +148,21 @@ export function isCompactCommand(prompt) {
 /**
  * Flatten a message history into plain text for summarization. The system
  * message is skipped (it is preserved separately). The first user message (the
- * original task/goal) is kept verbatim because the summary is required to
- * preserve it; every other message -- later user turns, assistant text, tool
- * call arguments, and tool results -- is truncated to `maxChars`, so no single
- * huge message can push the summarize request back over the window that
- * triggered compaction.
+ * original task/goal) is truncated to `taskMaxChars` -- a larger bound than
+ * other content, since the summary must preserve the goal, but still bounded so
+ * a pathologically large task prompt can't alone push the summarize request
+ * back over the window. Every other message -- later user turns, assistant
+ * text, tool call arguments, and tool results -- is truncated to `maxChars`.
  * @param {Array} messages
  * @param {number} [maxChars] - Per-message cap for non-task content
+ * @param {number} [taskMaxChars] - Cap for the first user (task) message
  * @returns {string}
  */
-export function renderTranscript(messages, maxChars = compactMessageChars()) {
+export function renderTranscript(
+  messages,
+  maxChars = compactMessageChars(),
+  taskMaxChars = compactTaskChars(),
+) {
   const lines = [];
   let taskSeen = false;
   for (const message of messages) {
@@ -140,7 +171,13 @@ export function renderTranscript(messages, maxChars = compactMessageChars()) {
     }
     if (message.role === 'user') {
       const content = message.content || '';
-      lines.push(`User:\n${taskSeen ? truncate(content, maxChars) : content}`);
+      let rendered;
+      if (taskSeen) {
+        rendered = truncate(content, maxChars);
+      } else {
+        rendered = truncate(content, taskMaxChars);
+      }
+      lines.push(`User:\n${rendered}`);
       taskSeen = true;
     } else if (message.role === 'assistant') {
       if (message.content) {
@@ -173,6 +210,9 @@ export function renderTranscript(messages, maxChars = compactMessageChars()) {
  * @param {number} [params.maxMessageChars] - Per-message cap for the rendered transcript
  *   (also KODR_COMPACT_MESSAGE_CHARS; default 2000), so the summarize request stays
  *   smaller than the conversation that triggered compaction
+ * @param {number} [params.maxTaskChars] - Cap for the first user (task) message
+ *   (also KODR_COMPACT_TASK_CHARS; default 8000), a larger bound than other
+ *   messages but still bounded so a huge task prompt can't overflow the request
  * @returns {Promise<{ messages: Array, summary: string, usage: { prompt: number, completion: number }, retries: number, error?: string }>}
  */
 export async function compactMessages(params) {
@@ -193,6 +233,7 @@ export async function compactMessages(params) {
   const transcript = renderTranscript(
     history,
     compactMessageChars(params.maxMessageChars),
+    compactTaskChars(params.maxTaskChars),
   );
   let response;
   try {

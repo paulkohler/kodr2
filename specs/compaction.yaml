@@ -72,10 +72,15 @@ constraints:
   - Compaction is out of band: a separate summarize call whose result replaces
     only the history, leaving the system prompt and fresh tool definitions intact
   - The summarize request is bounded so it stays smaller than the conversation
-    that triggered compaction: the first user message (the task/goal) is rendered
-    verbatim, and every other message — later user turns, assistant text, tool
-    call arguments, and tool results — is truncated to a per-message character
-    cap (default 2000, overridable via maxMessageChars / KODR_COMPACT_MESSAGE_CHARS)
+    that triggered compaction: the first user message (the task/goal) is truncated
+    to a larger task cap (default 8000, overridable via maxTaskChars /
+    KODR_COMPACT_TASK_CHARS), and every other message — later user turns,
+    assistant text, tool call arguments, and tool results — is truncated to a
+    per-message character cap (default 2000, overridable via maxMessageChars /
+    KODR_COMPACT_MESSAGE_CHARS). The task keeps more room since the summary must
+    preserve the goal, but is still bounded so a pathologically large task prompt
+    cannot alone push the summarize request back over the window (which would
+    leave the run stuck over-window, unable to compact)
   - Tool definitions are not part of the message history; they are supplied
     fresh on every model call, so compaction always keeps full tool access
   - Only the non-system messages (the history) are compressed
@@ -111,8 +116,10 @@ tests:
     - needsCompaction is true at or above the threshold
     - renderTranscript flattens user, assistant, tool-call, and tool messages
     - renderTranscript skips the system message
-    - renderTranscript keeps the first user (task) message verbatim but bounds later ones
+    - renderTranscript keeps the first user (task) message in full when under the task cap, bounding later ones
+    - renderTranscript bounds a pathologically large task message at the task cap
     - renderTranscript truncates a huge tool_call argument blob
+    - compactTaskChars uses an explicit option, then the env var, then the default
     - compactMessages bounds the summarize request so a huge message cannot overflow it
     - compactMessageChars uses an explicit option, then the env var, then the default
     - compactMessages keeps the system message and replaces history with a summary

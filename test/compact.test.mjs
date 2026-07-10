@@ -6,8 +6,10 @@ import {
   COMPACTION_THRESHOLD,
   compactMessageChars,
   compactMessages,
+  compactTaskChars,
   configuredContextWindow,
   DEFAULT_COMPACT_MESSAGE_CHARS,
+  DEFAULT_COMPACT_TASK_CHARS,
   estimateTokens,
   isCompactCommand,
   needsCompaction,
@@ -186,7 +188,7 @@ describe('renderTranscript', () => {
     assert.doesNotMatch(text, /SECRET SYSTEM PROMPT/);
   });
 
-  it('keeps the first user (task) message verbatim but bounds later ones', () => {
+  it('keeps the first user (task) message in full when under the task cap, bounding later ones', () => {
     const task = `TASK ${'t'.repeat(5000)}`;
     const laterUser = `FOLLOWUP ${'u'.repeat(5000)}`;
     const text = renderTranscript(
@@ -204,6 +206,23 @@ describe('renderTranscript', () => {
     assert.doesNotMatch(text, /r{5000}/);
     assert.doesNotMatch(text, /u{5000}/);
     assert.match(text, /… \[truncated\]/);
+  });
+
+  it('bounds a pathologically large task message at the task cap', () => {
+    // The task is kept at a larger bound than other messages, but still
+    // bounded -- so a huge task prompt cannot alone overflow the summarize
+    // request and leave the run stuck over-window.
+    const task = `TASK ${'t'.repeat(5000)}`;
+    const text = renderTranscript(
+      [{ role: 'user', content: task }],
+      100, // other-message cap
+      200, // task cap
+    );
+    assert.doesNotMatch(text, /t{5000}/);
+    assert.match(text, /… \[truncated\]/);
+    // The task cap is larger than the other-message cap: the kept prefix is
+    // longer than 100 chars.
+    assert.ok(text.includes(`TASK ${'t'.repeat(150)}`));
   });
 
   it('truncates a huge tool_call argument blob', () => {
@@ -247,6 +266,26 @@ describe('compactMessageChars', () => {
     process.env.KODR_COMPACT_MESSAGE_CHARS = '1234';
     assert.equal(compactMessageChars(undefined), 1234);
     assert.equal(compactMessageChars(500), 500);
+  });
+});
+
+describe('compactTaskChars', () => {
+  const original = process.env.KODR_COMPACT_TASK_CHARS;
+  afterEach(() => {
+    if (original === undefined) {
+      delete process.env.KODR_COMPACT_TASK_CHARS;
+    } else {
+      process.env.KODR_COMPACT_TASK_CHARS = original;
+    }
+  });
+
+  it('uses an explicit option, then the env var, then the default', () => {
+    delete process.env.KODR_COMPACT_TASK_CHARS;
+    assert.equal(compactTaskChars(9000), 9000);
+    assert.equal(compactTaskChars(undefined), DEFAULT_COMPACT_TASK_CHARS);
+    process.env.KODR_COMPACT_TASK_CHARS = '5678';
+    assert.equal(compactTaskChars(undefined), 5678);
+    assert.equal(compactTaskChars(9000), 9000);
   });
 });
 
