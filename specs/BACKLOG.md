@@ -34,7 +34,7 @@ Line references are approximate — treat them as anchors, not addresses.
 
 - **#1** mid-loop failure zeroed run metrics — `8535040`
 - **#3** snapshot cap ignored below the workspace root — `2d4e318`
-- **#4** non-SSE 200 swallowed as a successful empty completion — `HEAD`
+- **#4** non-SSE 200 swallowed as a successful empty completion — `66fb29c`
 - **#5** compaction never fired when the provider omitted usage (Ollama) — `90cc232`
 - **#6** sparse `tool_calls` (skipped stream index) crashed the loop — `424deb7`
 
