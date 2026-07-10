@@ -161,6 +161,7 @@ tests:
     - run records include package-manager commands and error metadata
     - failed model requests still save a run record
     - a mid-loop failure preserves the usage and tool turns done before it
+    - a non-SSE 200 response records an error, not a false completion
     - workspace file listing skips operator logs and copied kodr artifacts
     - system prompt requires native tool-channel calls
     - recovers text-form tool calls (all framings) through the tool registry

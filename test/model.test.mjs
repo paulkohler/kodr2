@@ -280,6 +280,30 @@ describe('model HTTP client', () => {
     assert.equal(result.message.content, 'ok');
   });
 
+  it('rejects a 200 response that is not an SSE stream', async () => {
+    // A proxy/provider returns HTTP 200 with a plain-JSON (non-streaming) body.
+    // It has no `data:` framing, so it assembles into an empty message that the
+    // loop would report as a successful no-op -- it must surface as an error.
+    const baseUrl = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end('{"choices":[{"message":{"content":"hi"}}]}');
+    });
+    const client = createClient({ baseUrl, model: 'test', maxRetries: 0 });
+    await assert.rejects(client.chat({ messages: [] }), /Non-SSE response/);
+  });
+
+  it('resolves an SSE stream that only sends [DONE]', async () => {
+    // A real (if empty) event stream: it has `data:` framing, so it is not
+    // treated as a non-SSE body even though it produces no content.
+    const baseUrl = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end('data: [DONE]\n\n');
+    });
+    const client = createClient({ baseUrl, model: 'test' });
+    const result = await client.chat({ messages: [] });
+    assert.equal(result.message.content, '');
+  });
+
   it('does not retry a 4xx from chat', async () => {
     let calls = 0;
     const baseUrl = await startServer((_req, res) => {

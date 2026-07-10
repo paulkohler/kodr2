@@ -336,6 +336,18 @@ function transportFor(url) {
   return url.protocol === 'https:' ? httpsRequest : httpRequest;
 }
 
+/**
+ * Whether a line is SSE framing (a `data:` field), regardless of payload.
+ * Used to tell a real event stream from a non-SSE 200 body (a plain-JSON
+ * completion or a 200-wrapped error), which otherwise assembles into an empty
+ * message and is silently reported as a successful no-op completion.
+ * @param {string} line
+ * @returns {boolean}
+ */
+function isSseDataLine(line) {
+  return line.trim().startsWith('data:');
+}
+
 function parseSseLine(line) {
   const trimmed = line.trim();
   if (!trimmed?.startsWith('data: ')) {
@@ -496,6 +508,7 @@ function streamRequest(url, body, timeout, callbacks, headers = {}) {
         }
 
         let buffer = '';
+        let sawSseData = false;
 
         res.setEncoding('utf8');
         res.on('data', (text) => {
@@ -505,6 +518,9 @@ function streamRequest(url, body, timeout, callbacks, headers = {}) {
           buffer = lines.pop() || '';
 
           for (const line of lines) {
+            if (isSseDataLine(line)) {
+              sawSseData = true;
+            }
             const chunk = parseSseLine(line);
             if (chunk) {
               assembler.push(chunk);
@@ -513,9 +529,25 @@ function streamRequest(url, body, timeout, callbacks, headers = {}) {
         });
 
         res.on('end', () => {
+          if (isSseDataLine(buffer)) {
+            sawSseData = true;
+          }
           const chunk = parseSseLine(buffer);
           if (chunk) {
             assembler.push(chunk);
+          }
+          // A 2xx body with no SSE framing at all is not a stream we can read
+          // (a non-streaming JSON completion, or a 200-wrapped error). Assembling
+          // it yields an empty message that the loop would report as a
+          // successful no-op -- surface it as an error instead.
+          if (!sawSseData) {
+            finish(
+              reject,
+              new Error(
+                `Non-SSE response from ${url} (HTTP ${res.statusCode}): ${rawResponse}`,
+              ),
+            );
+            return;
           }
           finish(resolve, assembler.result());
         });

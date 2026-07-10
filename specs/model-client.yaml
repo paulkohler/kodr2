@@ -75,6 +75,11 @@ constraints:
   - KODR_MODEL configures the model when no model option is provided
   - Explicit model option takes precedence over KODR_MODEL
   - HTTP errors surface as thrown exceptions
+  - A 2xx response with no SSE framing (a non-streaming JSON body or a
+    200-wrapped error) is rejected as a "Non-SSE response" error rather than
+    assembled into an empty message, which the tool loop would otherwise report
+    as a successful no-op completion. A real event stream (>=1 `data:` line,
+    even one that only sends `[DONE]`) is unaffected
   - Timeout applies to the full request lifecycle, even when streaming chunks keep arriving
   - chat() accepts a per-call timeoutMs that overrides the client's configured default timeout, so a caller tracking a wall-clock budget (e.g. the harness's maxRunMs) can cap each request to the time actually remaining
   - chat() retries a 5xx response, or an ECONNRESET/EPIPE connection error, up to maxRetries times (default 1) before surfacing the error; a 4xx, ECONNREFUSED, or a timeout is never retried
@@ -95,6 +100,8 @@ tests:
     - assembleResponse accumulates tool call arguments
     - assembleResponse generates IDs for tool calls without them
     - assembleResponse densifies tool calls when a provider skips a stream index
+    - chat rejects a 200 response that is not an SSE stream
+    - chat resolves an SSE stream that only sends [DONE]
     - assembleResponse accumulates reasoning content and reasoning_details across chunks
     - assembleResponse omits reasoning fields entirely when no reasoning deltas arrive
     - assembleResponse captures usage from a chunk whose delta is present but near-empty

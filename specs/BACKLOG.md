@@ -21,17 +21,6 @@ Line references are approximate — treat them as anchors, not addresses.
   (treat sub-threshold as `budget-exceeded`), or map a timeout-at-deadline to
   `budget-exceeded`.
 
-### #4 — [MED] A 200 response that isn't SSE is swallowed as a successful empty completion
-- **Where:** `src/model.mjs` streaming parse (`parseSseLine` returns null for any
-  non-`data:` line; a 200 with a plain-JSON body yields zero chunks).
-- **Repro:** A provider/proxy returns HTTP 200 with a non-streaming JSON body (or
-  a 200-wrapped error). No chunks assemble, so the message is empty with usage
-  `{0,0,0}`; the loop sees no tool calls or text and reports `stoppedReason:
-  'complete'` — a "successful" run that did nothing. Partly masked by the
-  `noOpCompletion` notice.
-- **Fix direction:** If a 200 stream produced no parseable chunks and no
-  `[DONE]`, treat it as a malformed-response error.
-
 ### #7 — [LOW] A huge first user message defeats compaction
 - **Where:** `src/compact.mjs` `renderTranscript` keeps the first user (task)
   message verbatim while every other message is capped.
@@ -45,6 +34,7 @@ Line references are approximate — treat them as anchors, not addresses.
 
 - **#1** mid-loop failure zeroed run metrics — `8535040`
 - **#3** snapshot cap ignored below the workspace root — `2d4e318`
+- **#4** non-SSE 200 swallowed as a successful empty completion — `HEAD`
 - **#5** compaction never fired when the provider omitted usage (Ollama) — `90cc232`
 - **#6** sparse `tool_calls` (skipped stream index) crashed the loop — `424deb7`
 

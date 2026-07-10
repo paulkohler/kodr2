@@ -244,6 +244,38 @@ describe('run failure artifacts', () => {
     }
   });
 
+  it('records an error, not a false completion, for a non-SSE 200 response', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'kodr-run-nonsse-'));
+    const server = createServer((req, res) => {
+      if (req.url === '/api/v0/models') {
+        res.writeHead(404);
+        res.end('not found');
+        return;
+      }
+      // HTTP 200 but a plain-JSON (non-streaming) body -- previously assembled
+      // into an empty message and reported as a successful no-op run.
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end('{"choices":[{"message":{"content":"hi"}}]}');
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address();
+
+    try {
+      const result = await run('do work', {
+        cwd,
+        baseUrl: `http://127.0.0.1:${port}`,
+        model: 'test',
+        quiet: true,
+      });
+
+      assert.equal(result.stoppedReason, 'error');
+      assert.match(result.error.message, /Non-SSE response/);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
   it('preserves usage and tool turns done before a mid-loop failure', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'kodr-run-partial-'));
     let chatCalls = 0;
