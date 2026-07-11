@@ -303,6 +303,64 @@ describe('parseArgs', () => {
     const args = parseArgs(['run', 'hi']);
     assert.equal(args.quiet, false);
   });
+
+  it('defaults plan off with every plan limit unset', () => {
+    const args = parseArgs(['run', 'hi']);
+    assert.equal(args.plan, false);
+    assert.equal(args.planMaxSteps, null);
+    assert.equal(args.planTimeoutMs, null);
+    assert.equal(args.planStepMaxToolTurns, null);
+    assert.equal(args.planStepMinMs, null);
+    assert.equal(args.planSummaryCap, null);
+  });
+
+  it('parses --plan and every plan limit flag', () => {
+    const args = parseArgs([
+      'run',
+      'hi',
+      '--plan',
+      '--plan-max-steps',
+      '5',
+      '--plan-timeout-ms',
+      '30000',
+      '--plan-step-max-tool-turns',
+      '10',
+      '--plan-step-min-ms',
+      '15000',
+      '--plan-summary-cap',
+      '800',
+    ]);
+    assert.equal(args.plan, true);
+    assert.equal(args.planMaxSteps, 5);
+    assert.equal(args.planTimeoutMs, 30000);
+    assert.equal(args.planStepMaxToolTurns, 10);
+    assert.equal(args.planStepMinMs, 15000);
+    assert.equal(args.planSummaryCap, 800);
+  });
+});
+
+describe('--plan validation', () => {
+  it('rejects --plan combined with --continue', async () => {
+    const originalExitCode = process.exitCode;
+    process.exitCode = undefined;
+    try {
+      await main(['run', 'hi', '--plan', '--continue', 'last']);
+      assert.equal(process.exitCode, 1);
+    } finally {
+      process.exitCode = originalExitCode;
+    }
+  });
+
+  it('rejects a non-integer plan limit', async () => {
+    const originalExitCode = process.exitCode;
+    process.exitCode = undefined;
+    try {
+      await main(['run', 'hi', '--plan-max-steps', 'lots']);
+      assert.equal(process.exitCode, 1);
+    } finally {
+      process.exitCode = originalExitCode;
+    }
+  });
 });
 
 /**
@@ -326,6 +384,7 @@ describe('parseArgs', () => {
  * @property {string|null} error
  * @property {{ raw?: object, fix?: object }|null} commits
  * @property {import('../src/review.mjs').ReviewResult|{skipped:true,reason:string}|null} review
+ * @property {import('../src/plan.mjs').Plan|null} plan
  */
 
 /**
@@ -386,6 +445,16 @@ describe('summarizeResult', () => {
   it('defaults review to null when absent', () => {
     const summary = summarize({ stoppedReason: 'complete' });
     assert.equal(summary.review, null);
+  });
+
+  it('surfaces the plan when present, null otherwise', () => {
+    assert.equal(summarize({ stoppedReason: 'complete' }).plan, null);
+    const plan = /** @type {import('../src/plan.mjs').Plan} */ ({
+      createdAt: 't',
+      degraded: false,
+      steps: [],
+    });
+    assert.equal(summarize({ stoppedReason: 'complete', plan }).plan, plan);
   });
 
   it('surfaces a completed review pass', () => {

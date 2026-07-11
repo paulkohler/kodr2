@@ -16,6 +16,7 @@ import {
 import { DEFAULT_HEARTBEAT_MS, resolveRunsDir, run } from './harness.mjs';
 import { DEFAULT_INCIDENT_HEARTBEAT_MS } from './incident.mjs';
 import { DEFAULT_MAX_RETRIES } from './model.mjs';
+import { planEnabled } from './plan.mjs';
 import { createProvider, resolveProviderName } from './provider.mjs';
 import { createJsonReporter } from './reporter.mjs';
 import {
@@ -65,6 +66,12 @@ import { MAX_TOOL_TURNS } from './tool-loop.mjs';
  * @property {boolean} tui
  * @property {boolean} approveCommands
  * @property {boolean} noFail
+ * @property {boolean} plan
+ * @property {number|null} planMaxSteps
+ * @property {number|null} planTimeoutMs
+ * @property {number|null} planStepMaxToolTurns
+ * @property {number|null} planStepMinMs
+ * @property {number|null} planSummaryCap
  * @property {boolean} help
  * @property {boolean} version
  */
@@ -204,6 +211,60 @@ export async function main(argv) {
     process.exitCode = 1;
     return;
   }
+  if (
+    args.planMaxSteps !== null &&
+    (!Number.isInteger(args.planMaxSteps) || args.planMaxSteps < 1)
+  ) {
+    process.stderr.write('--plan-max-steps must be a positive integer.\n');
+    process.exitCode = 1;
+    return;
+  }
+  if (
+    args.planTimeoutMs !== null &&
+    (!Number.isInteger(args.planTimeoutMs) || args.planTimeoutMs < 0)
+  ) {
+    process.stderr.write('--plan-timeout-ms must be a non-negative integer.\n');
+    process.exitCode = 1;
+    return;
+  }
+  if (
+    args.planStepMaxToolTurns !== null &&
+    (!Number.isInteger(args.planStepMaxToolTurns) ||
+      args.planStepMaxToolTurns < 1)
+  ) {
+    process.stderr.write(
+      '--plan-step-max-tool-turns must be a positive integer.\n',
+    );
+    process.exitCode = 1;
+    return;
+  }
+  if (
+    args.planStepMinMs !== null &&
+    (!Number.isInteger(args.planStepMinMs) || args.planStepMinMs < 0)
+  ) {
+    process.stderr.write(
+      '--plan-step-min-ms must be a non-negative integer.\n',
+    );
+    process.exitCode = 1;
+    return;
+  }
+  if (
+    args.planSummaryCap !== null &&
+    (!Number.isInteger(args.planSummaryCap) || args.planSummaryCap < 1)
+  ) {
+    process.stderr.write('--plan-summary-cap must be a positive integer.\n');
+    process.exitCode = 1;
+    return;
+  }
+  // A continuation is one prior conversation; a planned build is N fresh
+  // sub-agent conversations. Injecting the prior messages into every step
+  // bloats each one, and injecting them nowhere silently discards them --
+  // both worse than an honest error (see specs/planning.yaml).
+  if (planEnabled(args.plan) && args.continue) {
+    process.stderr.write('--plan cannot be combined with --continue.\n');
+    process.exitCode = 1;
+    return;
+  }
   const providerName = resolveProviderName(args.provider);
   if (!['lmstudio', 'openrouter', 'ollama'].includes(providerName)) {
     process.stderr.write(
@@ -234,6 +295,13 @@ export async function main(argv) {
     reviewModel: args.reviewModel,
     reviewMinToolCalls: args.reviewMinToolCalls,
     reviewMaxToolTurns: args.reviewMaxToolTurns,
+    plan: args.plan,
+    // null (unset) falls through to the plan.mjs resolvers' env/defaults.
+    planMaxSteps: args.planMaxSteps ?? undefined,
+    planTimeoutMs: args.planTimeoutMs ?? undefined,
+    planStepMaxToolTurns: args.planStepMaxToolTurns ?? undefined,
+    planStepMinMs: args.planStepMinMs ?? undefined,
+    planSummaryCap: args.planSummaryCap ?? undefined,
     quiet: args.quiet || args.json,
     // --events streams the run as NDJSON on stdout (specs/reporter.yaml); left
     // undefined otherwise so the harness picks the terminal/null reporter.
@@ -408,6 +476,7 @@ export function summarizeResult(result) {
     error: result.error?.message ?? null,
     commits: result.commits ?? null,
     review: result.review ?? null,
+    plan: result.plan ?? null,
   };
 }
 
@@ -474,6 +543,14 @@ export function parseArgs(argv) {
     tui: false,
     approveCommands: false,
     noFail: false,
+    plan: false,
+    // null (unset) so the plan.mjs resolvers' env vars still apply when the
+    // flag isn't passed (the visionEnabled/contextWindow pattern).
+    planMaxSteps: null,
+    planTimeoutMs: null,
+    planStepMaxToolTurns: null,
+    planStepMinMs: null,
+    planSummaryCap: null,
     help: false,
     version: false,
   };
@@ -672,6 +749,36 @@ export function parseArgs(argv) {
       i++;
       continue;
     }
+    if (arg === '--plan') {
+      args.plan = true;
+      i++;
+      continue;
+    }
+    if (arg === '--plan-max-steps' && argv[i + 1]) {
+      args.planMaxSteps = parseInt(argv[++i], 10);
+      i++;
+      continue;
+    }
+    if (arg === '--plan-timeout-ms' && argv[i + 1]) {
+      args.planTimeoutMs = parseInt(argv[++i], 10);
+      i++;
+      continue;
+    }
+    if (arg === '--plan-step-max-tool-turns' && argv[i + 1]) {
+      args.planStepMaxToolTurns = parseInt(argv[++i], 10);
+      i++;
+      continue;
+    }
+    if (arg === '--plan-step-min-ms' && argv[i + 1]) {
+      args.planStepMinMs = parseInt(argv[++i], 10);
+      i++;
+      continue;
+    }
+    if (arg === '--plan-summary-cap' && argv[i + 1]) {
+      args.planSummaryCap = parseInt(argv[++i], 10);
+      i++;
+      continue;
+    }
     if (arg === '--debug') {
       args.debug = true;
       i++;
@@ -775,6 +882,19 @@ Options:
   --review-min-tool-calls <n>     Tool-call floor before a review counts as grounded (or
                                   KODR_REVIEW_MIN_TOOL_CALLS; default: 2, 0 disables the floor)
   --review-max-tool-turns <n>     Tool-turn ceiling per review attempt (or KODR_REVIEW_MAX_TOOL_TURNS; default: 12)
+  --plan                          Decompose the prompt into a fixed plan of steps first, each
+                                  executed as a fresh sub-agent conversation (or KODR_PLAN).
+                                  Off by default; cannot be combined with --continue.
+                                  See specs/planning.yaml.
+  --plan-max-steps <n>            Upper bound on plan length (or KODR_PLAN_MAX_STEPS; default: 8)
+  --plan-timeout-ms <n>           Cap on the planner call itself (or KODR_PLAN_TIMEOUT_MS;
+                                  default: 120000, 0 disables the extra cap)
+  --plan-step-max-tool-turns <n>  Tool-turn ceiling per plan step (or
+                                  KODR_PLAN_STEP_MAX_TOOL_TURNS; default: the run's --max-tool-turns)
+  --plan-step-min-ms <n>          Wall-clock floor for each step's share of the remaining run
+                                  budget (or KODR_PLAN_STEP_MIN_MS; default: 60000)
+  --plan-summary-cap <n>          Character cap on each step's handoff summary (or
+                                  KODR_PLAN_SUMMARY_CAP; default: 2000)
   --env <a,b,c>                   Extra env vars to expose to commands (CSV of names)
   --continue <last|path>          Continue from a prior run
   --runs-dir <path>               Where to write run transcripts (or KODR_RUNS_DIR)
