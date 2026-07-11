@@ -71,7 +71,13 @@ describe('tui-state', () => {
   it('applyUsage adds tokens and cost from a summary', () => {
     const state = createTuiState();
     applyUsage(state, { prompt: 10, completion: 5, cost: 0.01 });
-    applyUsage(state, { prompt: 3, completion: 2 });
+    applyUsage(
+      state,
+      /** @type {{ prompt: number, completion: number, cost: number }} */ ({
+        prompt: 3,
+        completion: 2,
+      }),
+    );
     assert.equal(state.tokensIn, 13);
     assert.equal(state.tokensOut, 7);
     assert.equal(state.cost, 0.01);

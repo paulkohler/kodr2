@@ -78,7 +78,11 @@ describe('formatRunRecord', () => {
       durationMs: 1200,
       filesChanged: [],
       packageCommands: [],
-      usage: { prompt: 10, completion: 5 },
+      usage:
+        /** @type {{ prompt: number, completion: number, cost: number }} */ ({
+          prompt: 10,
+          completion: 5,
+        }),
       error: null,
     });
 
