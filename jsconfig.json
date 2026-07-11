@@ -7,6 +7,12 @@
     "strict": false,
     "types": ["node"]
   },
-  "include": ["bin/**/*.mjs", "src/**/*.mjs", "test/**/*.mjs", "eval/**/*.mjs", "scripts/**/*.mjs"],
+  "include": [
+    "bin/**/*.mjs",
+    "src/**/*.mjs",
+    "test/**/*.mjs",
+    "eval/**/*.mjs",
+    "scripts/**/*.mjs"
+  ],
   "exclude": ["node_modules"]
 }
