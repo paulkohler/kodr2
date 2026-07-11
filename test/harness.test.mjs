@@ -16,10 +16,12 @@ import {
   remainingRunBudgetMs,
   reviewSkippedForIncompleteBuild,
   run,
+  runPlannedBuild,
   runReviewPass,
   stopVerifyBudgetMs,
 } from '../src/harness.mjs';
 import { DEFAULT_MAX_RETRIES } from '../src/model.mjs';
+import { createCaptureReporter } from './capture-reporter.mjs';
 
 describe('createRunRecord', () => {
   it('includes run metadata and duration', () => {
@@ -72,6 +74,19 @@ describe('createRunRecord', () => {
       {},
     );
     assert.equal(record.retries, 0);
+  });
+
+  it('persists the plan when present, null otherwise', () => {
+    const base = {
+      metadata: {},
+      filesChanged: [],
+      toolTurns: 0,
+      usage: {},
+      messages: [],
+    };
+    assert.equal(createRunRecord(base, {}).plan, null);
+    const plan = { createdAt: 't', degraded: false, steps: [] };
+    assert.equal(createRunRecord({ ...base, plan }, {}).plan, plan);
   });
 });
 
@@ -934,5 +949,249 @@ describe('memory retrospective wiring', () => {
       await model.close();
       await rm(cwd, { recursive: true, force: true });
     }
+  });
+});
+
+describe('runPlannedBuild', () => {
+  /** A plan with `titles.length` pending steps, as createPlan would build it. */
+  function makePlan(titles) {
+    return {
+      createdAt: '2026-07-11T00:00:00.000Z',
+      degraded: false,
+      steps: titles.map((title, index) => ({
+        id: index + 1,
+        title,
+        description: `do: ${title}`,
+        status: 'pending',
+        stoppedReason: null,
+        summary: '',
+        toolTurns: 0,
+      })),
+    };
+  }
+
+  function fakeCreatePlan(plan, extra = {}) {
+    return async () => ({
+      plan,
+      usage: { prompt: 5, completion: 5, cost: 0 },
+      retries: 1,
+      ...extra,
+    });
+  }
+
+  /** A step outcome as runStep returns it. */
+  function outcome(overrides = {}) {
+    return {
+      status: 'done',
+      stoppedReason: 'complete',
+      summary: 'did it',
+      toolTurns: 2,
+      compactions: 0,
+      usage: { prompt: 10, completion: 4, cost: 0 },
+      retries: 0,
+      messages: [
+        { role: 'system', content: 'step system prompt' },
+        { role: 'user', content: 'step task' },
+        { role: 'assistant', content: 'did it' },
+      ],
+      ...overrides,
+    };
+  }
+
+  const baseParams = {
+    client: /** @type {any} */ ({}),
+    modelId: 'm',
+    tools: /** @type {any} */ ({}),
+    prompt: 'the goal',
+    systemPrompt: 'sys',
+  };
+
+  it('sequences steps in order and completes when every step is done', async () => {
+    const plan = makePlan(['one', 'two']);
+    const executed = [];
+    const messages = [{ role: 'system', content: 'sys' }];
+    const result = await runPlannedBuild({
+      ...baseParams,
+      messages,
+      createPlanFn: fakeCreatePlan(plan),
+      runStepFn: async ({ step }) => {
+        executed.push(step.id);
+        return outcome({ summary: `handoff ${step.id}` });
+      },
+    });
+
+    assert.deepEqual(executed, [1, 2]);
+    assert.equal(result.completed, true);
+    assert.equal(result.stoppedReason, 'complete');
+    assert.deepEqual(
+      plan.steps.map((s) => s.status),
+      ['done', 'done'],
+    );
+    assert.equal(result.finalText, 'handoff 2');
+    // planner (5/5) + two steps (10/4 each)
+    assert.deepEqual(result.usage, { prompt: 25, completion: 13, cost: 0 });
+    assert.equal(result.toolTurns, 4);
+    assert.equal(result.retries, 1);
+    assert.equal(result.plan, plan);
+  });
+
+  it('continues to the next step after a failed one, reporting its stop reason', async () => {
+    const plan = makePlan(['one', 'two', 'three']);
+    const result = await runPlannedBuild({
+      ...baseParams,
+      messages: [],
+      createPlanFn: fakeCreatePlan(plan),
+      runStepFn: async ({ step }) => {
+        if (step.id === 2) {
+          return outcome({
+            status: 'failed',
+            stoppedReason: 'tool-limit',
+            summary: 'ran out of turns',
+          });
+        }
+        return outcome();
+      },
+    });
+
+    assert.deepEqual(
+      plan.steps.map((s) => s.status),
+      ['done', 'failed', 'done'],
+    );
+    assert.equal(result.completed, false);
+    assert.equal(result.stoppedReason, 'tool-limit');
+  });
+
+  it('leaves unexecuted steps pending when the run budget is already spent', async () => {
+    const plan = makePlan(['one', 'two']);
+    const result = await runPlannedBuild({
+      ...baseParams,
+      messages: [],
+      startedAt: new Date(Date.now() - 1_000),
+      maxRunMs: 500,
+      createPlanFn: fakeCreatePlan(plan),
+      runStepFn: async () => {
+        throw new Error('should not run -- budget already spent');
+      },
+    });
+
+    assert.deepEqual(
+      plan.steps.map((s) => s.status),
+      ['pending', 'pending'],
+    );
+    assert.equal(result.completed, false);
+    assert.equal(result.stoppedReason, 'budget-exceeded');
+  });
+
+  it('extends the run messages with a step marker plus non-system step messages', async () => {
+    const plan = makePlan(['one']);
+    const messages = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'the goal' },
+    ];
+    await runPlannedBuild({
+      ...baseParams,
+      messages,
+      createPlanFn: fakeCreatePlan(plan),
+      runStepFn: async () => outcome(),
+    });
+
+    assert.equal(messages.length, 5);
+    assert.equal(messages[2].role, 'user');
+    assert.match(
+      messages[2].content,
+      /\[plan step 1\/1: one\] \(status: done\)/,
+    );
+    assert.deepEqual(messages[3], { role: 'user', content: 'step task' });
+    assert.deepEqual(messages[4], { role: 'assistant', content: 'did it' });
+    assert.ok(
+      messages.every((m, i) => i === 0 || m.role !== 'system'),
+      'step system prompts never enter the merged transcript',
+    );
+  });
+
+  it('emits phase, plan, and stepUpdate events in order', async () => {
+    const plan = makePlan(['one']);
+    const { reporter, events } = createCaptureReporter();
+    await runPlannedBuild({
+      ...baseParams,
+      messages: [],
+      reporter,
+      createPlanFn: fakeCreatePlan(plan),
+      runStepFn: async () => outcome(),
+    });
+
+    const sequence = events.map((e) => e.type);
+    assert.deepEqual(sequence, [
+      'phase', // plan
+      'plan',
+      'phase', // build
+      'stepUpdate', // running
+      'stepUpdate', // done
+    ]);
+    const payloads = events.map((e) => /** @type {any} */ (e.payload));
+    assert.equal(payloads[0], 'plan');
+    assert.equal(payloads[2], 'build');
+    assert.equal(payloads[3].status, 'running');
+    assert.equal(payloads[4].status, 'done');
+    assert.equal(payloads[4].summary, 'did it');
+  });
+
+  it('notices a degraded plan and still runs its single step', async () => {
+    const plan = makePlan(['whole task']);
+    plan.degraded = true;
+    const { reporter, events } = createCaptureReporter();
+    const result = await runPlannedBuild({
+      ...baseParams,
+      messages: [],
+      reporter,
+      createPlanFn: fakeCreatePlan(plan, {
+        error: 'planner reply is not valid JSON',
+      }),
+      runStepFn: async () => outcome(),
+    });
+
+    const notice = events.find((e) => e.type === 'notice');
+    assert.match(
+      /** @type {any} */ (notice).payload,
+      /planning degraded to a single step/,
+    );
+    const planEvent = events.find((e) => e.type === 'plan');
+    assert.equal(/** @type {any} */ (planEvent).payload.degraded, true);
+    assert.equal(result.completed, true);
+  });
+
+  it('attaches accumulated accounting and the plan to a thrown step error', async () => {
+    const plan = makePlan(['one', 'two']);
+    let err;
+    try {
+      await runPlannedBuild({
+        ...baseParams,
+        messages: [],
+        createPlanFn: fakeCreatePlan(plan),
+        runStepFn: async ({ step }) => {
+          if (step.id === 2) {
+            const boom = Object.assign(new Error('provider down'), {
+              usage: { prompt: 3, completion: 1, cost: 0 },
+              toolTurns: 1,
+              retries: 1,
+            });
+            throw boom;
+          }
+          return outcome();
+        },
+      });
+      assert.fail('expected a throw');
+    } catch (e) {
+      err = e;
+    }
+
+    // planner (5/5) + step one (10/4) + the failing step's own partial (3/1)
+    assert.deepEqual(err.usage, { prompt: 18, completion: 10, cost: 0 });
+    assert.equal(err.toolTurns, 3);
+    assert.equal(err.retries, 2); // planner 1 + step one 0 + the error's own 1
+    assert.equal(err.plan, plan);
+    assert.equal(plan.steps[1].status, 'failed');
+    assert.equal(plan.steps[1].stoppedReason, 'error');
+    assert.equal(plan.steps[1].summary, 'provider down');
   });
 });

@@ -42,6 +42,16 @@ import {
   DEFAULT_MAX_RETRIES,
   hasContextHeadroom,
 } from './model.mjs';
+import {
+  createPlan,
+  planEnabled,
+  planMaxSteps,
+  planTimeoutMs,
+  runStep,
+  stepMaxToolTurns,
+  stepMinMs,
+  stepRunMs,
+} from './plan.mjs';
 import { createProvider, resolveProviderName } from './provider.mjs';
 import { DEFAULT_OLLAMA_BASE_URL } from './provider-ollama.mjs';
 import { DEFAULT_OPENROUTER_BASE_URL } from './provider-openrouter.mjs';
@@ -76,6 +86,7 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  * @property {number} maxToolTurns
  * @property {string[]} envPassthrough
  * @property {number} contextWindow
+ * @property {boolean} plan
  * @property {string} startedAt
  */
 
@@ -99,6 +110,7 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  * @property {number} [healTurns]
  * @property {import('./review.mjs').ReviewResult|{ skipped: true, reason: string }} [review]
  * @property {import('./memory.mjs').MemoryRetrospective} [memory]
+ * @property {import('./plan.mjs').Plan} [plan]
  */
 
 /**
@@ -178,6 +190,19 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  *   run_command tool call (see specs/tui.yaml). Off by default.
  * @param {function} [options.confirm] - (call) => Promise<{ approved }>; the approval
  *   channel used when approveCommands is on (the TUI supplies this)
+ * @param {boolean} [options.plan] - Run the planning phase: decompose the prompt into a
+ *   fixed plan of steps, each executed as a fresh sub-agent conversation (also
+ *   KODR_PLAN). Off by default -- see specs/planning.yaml.
+ * @param {number} [options.planMaxSteps] - Upper bound on plan length (default 8 —
+ *   KODR_PLAN_MAX_STEPS)
+ * @param {number} [options.planTimeoutMs] - Cap on the planner call itself (default
+ *   120000 — KODR_PLAN_TIMEOUT_MS; 0 disables the extra cap)
+ * @param {number} [options.planStepMaxToolTurns] - Tool-turn ceiling per step (default:
+ *   the run's own maxToolTurns — KODR_PLAN_STEP_MAX_TOOL_TURNS)
+ * @param {number} [options.planStepMinMs] - Wall-clock floor for each step's share of
+ *   the remaining run budget (default 60000 — KODR_PLAN_STEP_MIN_MS)
+ * @param {number} [options.planSummaryCap] - Character cap on each step's handoff
+ *   summary (default 2000 — KODR_PLAN_SUMMARY_CAP)
  * @returns {Promise<RunResult>}
  */
 export async function run(prompt, options) {
@@ -287,6 +312,7 @@ export async function run(prompt, options) {
     maxToolTurns,
     envPassthrough,
     contextWindow,
+    plan: planEnabled(options.plan),
     startedAt: startedAt.toISOString(),
   };
   const tools = createToolRegistry(cwd, {
@@ -393,12 +419,11 @@ export async function run(prompt, options) {
 
   let result;
   try {
-    // Run the tool loop
-    reporter.phase('build');
-    const loop = await runToolLoop({
+    // Run the tool loop. Shared params between the unplanned single loop and
+    // the planned build's per-step loops -- the two paths must not drift.
+    const loopParams = {
       client,
       modelId,
-      messages,
       tools,
       reporter,
       startedAt,
@@ -413,7 +438,24 @@ export async function run(prompt, options) {
       onDebug: onModelDebug,
       approveCommands: options.approveCommands,
       confirm: options.confirm,
-    });
+    };
+    let loop;
+    if (metadata.plan) {
+      loop = await runPlannedBuild({
+        ...loopParams,
+        prompt,
+        systemPrompt,
+        messages,
+        planMaxSteps: options.planMaxSteps,
+        planTimeoutMs: options.planTimeoutMs,
+        planStepMaxToolTurns: options.planStepMaxToolTurns,
+        planStepMinMs: options.planStepMinMs,
+        planSummaryCap: options.planSummaryCap,
+      });
+    } else {
+      reporter.phase('build');
+      loop = await runToolLoop({ ...loopParams, messages });
+    }
     const totalUsage = loop.usage;
     const { completed, stoppedReason, toolTurns } = loop;
     let compactions = loop.compactions;
@@ -437,6 +479,9 @@ export async function run(prompt, options) {
       retries: totalRetries,
       messages,
     };
+    if (loop.plan) {
+      result.plan = loop.plan;
+    }
 
     // Raw-then-fix commit mode: commit exactly what the model just
     // produced, before any heal pass has a chance to touch the same
@@ -769,7 +814,7 @@ async function runSessionEnd(params) {
 
 function createErrorResult(params) {
   const { metadata, err, messages, tools } = params;
-  return {
+  const result = {
     metadata,
     response: '',
     error: {
@@ -789,6 +834,12 @@ function createErrorResult(params) {
     retries: err.retries ?? 0,
     messages,
   };
+  // A planned build attaches its plan to the error the same way (see
+  // runPlannedBuild), so the record shows which step died.
+  if (err.plan) {
+    result.plan = err.plan;
+  }
+  return result;
 }
 
 export const DEFAULT_HEARTBEAT_MS = 30_000; // 30 seconds
@@ -1086,6 +1137,221 @@ export async function runReviewPass(params) {
 }
 
 /**
+ * The planned build (specs/planning.yaml): plan the prompt, then execute each
+ * step as a fresh sub-agent conversation, sequenced and tracked here -- the
+ * harness owns the todo list. Returns the same shape as a single runToolLoop
+ * call (plus the plan itself), so everything downstream of the build site is
+ * untouched. Planner and step model calls are injectable (createPlanFn /
+ * runStepFn) so orchestration is unit-testable without a model, mirroring
+ * runReviewPass.
+ *
+ * After each step, the run-level messages array is extended in place with a
+ * user-role step marker plus the step's non-system messages -- one merged,
+ * valid conversation that saveRun/--continue/heal/memory consume unchanged.
+ *
+ * @param {object} params
+ * @param {import('./provider.mjs').Provider} params.client
+ * @param {string} params.modelId
+ * @param {import('./tools/index.mjs').ToolRegistry} params.tools - The run's shared registry
+ * @param {string} params.prompt - The user's task prompt (the overall goal)
+ * @param {string} params.systemPrompt - The run's build system prompt
+ * @param {Array} params.messages - Run-level conversation (extended in place)
+ * @param {import('./reporter.mjs').Reporter} [params.reporter]
+ * @param {Date} [params.startedAt]
+ * @param {number} [params.maxRunMs]
+ * @param {number} [params.maxToolTurns]
+ * @param {number} [params.contextWindow]
+ * @param {{ PreToolUse: Array, PostToolUse: Array }} [params.toolHooks]
+ * @param {string} [params.cwd]
+ * @param {Record<string, string>} [params.commandEnv]
+ * @param {number} [params.heartbeatMs]
+ * @param {function} [params.onHeartbeat]
+ * @param {function} [params.onDebug]
+ * @param {boolean} [params.approveCommands]
+ * @param {function} [params.confirm]
+ * @param {number} [params.planMaxSteps]
+ * @param {number} [params.planTimeoutMs]
+ * @param {number} [params.planStepMaxToolTurns]
+ * @param {number} [params.planStepMinMs]
+ * @param {number} [params.planSummaryCap]
+ * @param {function} [params.createPlanFn]
+ * @param {function} [params.runStepFn]
+ * @returns {Promise<{ finalText: string, completed: boolean, stoppedReason: string, toolTurns: number, compactions: number, usage: { prompt: number, completion: number, cost: number }, retries: number, plan: import('./plan.mjs').Plan }>}
+ */
+export async function runPlannedBuild(params) {
+  const {
+    client,
+    modelId,
+    tools,
+    prompt,
+    systemPrompt,
+    messages,
+    reporter = createNullReporter(),
+    startedAt,
+    maxRunMs = 0,
+    maxToolTurns = MAX_TOOL_TURNS,
+    createPlanFn = createPlan,
+    runStepFn = runStep,
+  } = params;
+
+  reporter.phase('plan');
+  const created = await createPlanFn({
+    client,
+    modelId,
+    prompt,
+    maxSteps: planMaxSteps(params.planMaxSteps),
+    timeoutMs: planTimeoutMs(params.planTimeoutMs),
+    startedAt,
+    maxRunMs,
+    heartbeatMs: params.heartbeatMs,
+    onHeartbeat: params.onHeartbeat,
+    onDebug: params.onDebug,
+  });
+  const { plan } = created;
+  if (created.error) {
+    reporter.notice(`planning degraded to a single step: ${created.error}`);
+  }
+  reporter.plan({ steps: plan.steps, degraded: plan.degraded });
+  reporter.phase('build');
+
+  const usage = { ...created.usage };
+  let retries = created.retries || 0;
+  let toolTurns = 0;
+  let compactions = 0;
+  let finalText = '';
+  const total = plan.steps.length;
+  const floorMs = stepMinMs(params.planStepMinMs);
+  const stepTurns = stepMaxToolTurns(params.planStepMaxToolTurns, maxToolTurns);
+
+  try {
+    for (const step of plan.steps) {
+      // Budget spent before this step started: leave it (and the rest)
+      // pending -- visible in the checklist and the run record.
+      if (isRunBudgetExceeded(startedAt, maxRunMs)) {
+        break;
+      }
+
+      step.status = 'running';
+      reporter.stepUpdate({
+        id: step.id,
+        total,
+        title: step.title,
+        status: 'running',
+      });
+
+      const outcome = await runStepFn({
+        client,
+        modelId,
+        tools,
+        systemPrompt,
+        goal: prompt,
+        plan,
+        step,
+        reporter,
+        startedAt,
+        maxRunMs: stepRunMs({
+          startedAt,
+          maxRunMs,
+          stepsRemaining: total - step.id + 1,
+          floorMs,
+        }),
+        maxToolTurns: stepTurns,
+        contextWindow: params.contextWindow,
+        toolHooks: params.toolHooks,
+        cwd: params.cwd,
+        commandEnv: params.commandEnv,
+        heartbeatMs: params.heartbeatMs,
+        onHeartbeat: params.onHeartbeat,
+        onDebug: params.onDebug,
+        approveCommands: params.approveCommands,
+        confirm: params.confirm,
+        summaryCap: params.planSummaryCap,
+      });
+
+      step.status = outcome.status;
+      step.stoppedReason = outcome.stoppedReason;
+      step.summary = outcome.summary;
+      step.toolTurns = outcome.toolTurns;
+      toolTurns += outcome.toolTurns;
+      compactions += outcome.compactions || 0;
+      usage.prompt += outcome.usage.prompt;
+      usage.completion += outcome.usage.completion;
+      usage.cost += outcome.usage.cost || 0;
+      retries += outcome.retries || 0;
+      finalText = outcome.summary;
+
+      // Merge the step's fresh conversation into the run transcript: a
+      // user-role marker, then everything but the step's own system prompt.
+      // Tool-call/tool-result id pairs stay intact within the step, so the
+      // merged array is still one valid conversation.
+      messages.push({
+        role: 'user',
+        content: `[plan step ${step.id}/${total}: ${step.title}] (status: ${outcome.status})`,
+      });
+      for (const message of outcome.messages) {
+        if (message.role !== 'system') {
+          messages.push(message);
+        }
+      }
+
+      reporter.stepUpdate({
+        id: step.id,
+        total,
+        title: step.title,
+        status: outcome.status,
+        stoppedReason: outcome.stoppedReason,
+        summary: outcome.summary,
+      });
+    }
+  } catch (err) {
+    // The failing step's loop attached its own accounting to the error
+    // (see runToolLoop); fold in the planner's and the finished steps' so
+    // createErrorResult reports the whole planned build, and mark the step
+    // so the record shows which one died.
+    const current = plan.steps.find((step) => step.status === 'running');
+    if (current) {
+      current.status = 'failed';
+      current.stoppedReason = 'error';
+      current.summary = err.message;
+    }
+    const errUsage = err.usage ?? { prompt: 0, completion: 0, cost: 0 };
+    err.usage = {
+      prompt: usage.prompt + errUsage.prompt,
+      completion: usage.completion + errUsage.completion,
+      cost: usage.cost + (errUsage.cost || 0),
+    };
+    err.toolTurns = toolTurns + (err.toolTurns ?? 0);
+    err.compactions = compactions + (err.compactions ?? 0);
+    err.retries = retries + (err.retries ?? 0);
+    err.plan = plan;
+    throw err;
+  }
+
+  const completed = plan.steps.every((step) => step.status === 'done');
+  let stoppedReason = 'complete';
+  if (!completed) {
+    const firstBad = plan.steps.find((step) => step.status !== 'done');
+    if (firstBad.stoppedReason) {
+      stoppedReason = firstBad.stoppedReason;
+    } else {
+      // Never started: the run budget was spent before its turn came.
+      stoppedReason = 'budget-exceeded';
+    }
+  }
+
+  return {
+    finalText,
+    completed,
+    stoppedReason,
+    toolTurns,
+    compactions,
+    usage,
+    retries,
+    plan,
+  };
+}
+
+/**
  * Resolve the context window for a run. Precedence: an explicit option or the
  * KODR_CONTEXT_WINDOW env var, then the model's loaded context length probed
  * from LM Studio, then the built-in default. Emits a one-line notice on startup
@@ -1226,6 +1492,7 @@ export function createRunRecord(result, finish = {}) {
     noOpCompletion: result.noOpCompletion ?? false,
     healed: result.healed ?? null,
     healTurns: result.healTurns ?? null,
+    plan: result.plan ?? null,
     messages: result.messages,
   };
 }
