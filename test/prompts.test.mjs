@@ -11,6 +11,8 @@ const KNOWN_PROMPTS = [
   'review-nudge',
   'retrospective',
   'compact',
+  'plan',
+  'plan-step',
 ];
 
 describe('loadPrompt', () => {

@@ -16,6 +16,8 @@ files:
   - prompts/review-nudge.md — grounding nudge appended on the review retry (review.mjs)
   - prompts/retrospective.md — memory retrospective system prompt (memory.mjs)
   - prompts/compact.md — compaction summary system prompt (compact.mjs)
+  - prompts/plan.md — planner system prompt (plan.mjs)
+  - prompts/plan-step.md — plan-step addendum appended to the build system prompt (plan.mjs)
 
 inputs:
   name:
