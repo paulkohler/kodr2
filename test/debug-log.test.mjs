@@ -63,7 +63,7 @@ describe('createDebugLogger', () => {
       requestBody: { a: 1 },
       rawResponse: 'data: ok',
     });
-    await flush(onDebug);
+    await flush();
 
     const files = await readdir(runsDir);
     assert.equal(files.length, 1);
@@ -86,7 +86,7 @@ describe('createDebugLogger', () => {
     onDebug({ rawResponse: 'first' });
     onDebug({ rawResponse: 'second' });
     onDebug({ rawResponse: 'third' });
-    await flush(onDebug);
+    await flush();
 
     const files = await readdir(runsDir);
     const content = await readFile(join(runsDir, files[0]), 'utf8');
@@ -106,7 +106,7 @@ describe('createDebugLogger', () => {
     const onDebug = createDebugLogger(runsDir, new Date());
 
     onDebug({ rawResponse: 'ok' });
-    await flush(onDebug);
+    await flush();
 
     const files = await readdir(runsDir);
     assert.equal(files.length, 1);
@@ -122,7 +122,7 @@ describe('createDebugLogger', () => {
 
     const onDebug = createDebugLogger(join(blockedPath, 'runs'), new Date());
     assert.doesNotThrow(() => onDebug({ rawResponse: 'never written' }));
-    await flush(onDebug);
+    await flush();
     // No unhandled rejection reached this point -- node:test would report one.
   });
 });
