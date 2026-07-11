@@ -216,7 +216,7 @@ function coerceArgs(raw) {
  * Slice the balanced `{...}` or `[...]` beginning at start, respecting strings
  * and escapes. Returns the JSON substring or null. Trailing text is ignored.
  */
-function extractBalanced(str, start) {
+export function extractBalanced(str, start) {
   const open = str[start];
   let close = ']';
   if (open === '{') {
@@ -255,7 +255,7 @@ function extractBalanced(str, start) {
   return null;
 }
 
-function extractFenced(text) {
+export function extractFenced(text) {
   const match = text.match(/```[a-z_]*\s*\n?([\s\S]*?)```/i);
   if (!match) {
     return null;
