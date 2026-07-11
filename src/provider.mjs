@@ -31,6 +31,9 @@ const FACTORIES = {
   ollama: createOllamaProvider,
 };
 
+/** Every provider name the factory accepts. */
+export const PROVIDER_NAMES = Object.keys(FACTORIES);
+
 /**
  * Resolve which provider to use. Precedence: an explicit option, then
  * KODR_PROVIDER, then the default (lmstudio).

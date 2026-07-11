@@ -46,6 +46,7 @@ import {
   createPlan,
   planEnabled,
   planMaxSteps,
+  planModelSpec,
   planTimeoutMs,
   runStep,
   stepMaxToolTurns,
@@ -87,6 +88,8 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  * @property {string[]} envPassthrough
  * @property {number} contextWindow
  * @property {boolean} plan
+ * @property {string|null} planModel
+ * @property {string|null} planProvider
  * @property {string} startedAt
  */
 
@@ -193,6 +196,12 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  * @param {boolean} [options.plan] - Run the planning phase: decompose the prompt into a
  *   fixed plan of steps, each executed as a fresh sub-agent conversation (also
  *   KODR_PLAN). Off by default -- see specs/planning.yaml.
+ * @param {string} [options.planModel] - Model spec for the planner call only (also
+ *   KODR_PLAN_MODEL), so a larger model can plan while a smaller one implements. A
+ *   bare model id plans on the run's own provider; a provider-prefixed spec
+ *   ("openrouter/anthropic/claude-opus-4.8") plans on a second client constructed for
+ *   the planner call. Setting this implies the planning phase. Steps always run on
+ *   the build model. Setup failure falls back to the build model with a notice.
  * @param {number} [options.planMaxSteps] - Upper bound on plan length (default 8 —
  *   KODR_PLAN_MAX_STEPS)
  * @param {number} [options.planTimeoutMs] - Cap on the planner call itself (default
@@ -312,7 +321,13 @@ export async function run(prompt, options) {
     maxToolTurns,
     envPassthrough,
     contextWindow,
-    plan: planEnabled(options.plan),
+    // A plan model implies the planning phase -- mirroring how --review-model
+    // alone turns on the review pass.
+    plan:
+      planEnabled(options.plan) ||
+      planModelSpec(options.planModel).model !== null,
+    planModel: planModelSpec(options.planModel).model,
+    planProvider: planModelSpec(options.planModel).provider,
     startedAt: startedAt.toISOString(),
   };
   const tools = createToolRegistry(cwd, {
@@ -446,6 +461,8 @@ export async function run(prompt, options) {
         prompt,
         systemPrompt,
         messages,
+        planModel: options.planModel,
+        buildProvider: metadata.provider,
         planMaxSteps: options.planMaxSteps,
         planTimeoutMs: options.planTimeoutMs,
         planStepMaxToolTurns: options.planStepMaxToolTurns,
@@ -1137,6 +1154,37 @@ export async function runReviewPass(params) {
 }
 
 /**
+ * The client/model the planner call runs on. A bare plan model (or one
+ * prefixed with the run's own provider) is just a different model id on the
+ * build client; a foreign-provider prefix constructs a second client for
+ * the planner call only, with that provider's default base URL and
+ * env-based credentials. Throws on setup failure -- the caller catches and
+ * falls back to the build model.
+ * @param {object} params
+ * @param {{ provider: string|null, model: string|null }} params.spec
+ * @param {import('./provider.mjs').Provider} params.client
+ * @param {string} params.modelId
+ * @param {string} [params.buildProvider]
+ * @param {function} params.createProviderFn
+ * @returns {Promise<{ planClient: import('./provider.mjs').Provider, planModelId: string }>}
+ */
+async function resolvePlanModel(params) {
+  const { spec, client, modelId, buildProvider, createProviderFn } = params;
+  if (!spec.model) {
+    return { planClient: client, planModelId: modelId };
+  }
+  if (!spec.provider || spec.provider === buildProvider) {
+    return { planClient: client, planModelId: spec.model };
+  }
+  const planClient = createProviderFn({
+    provider: spec.provider,
+    model: spec.model,
+  });
+  const planModelId = await planClient.resolveModel();
+  return { planClient, planModelId };
+}
+
+/**
  * The planned build (specs/planning.yaml): plan the prompt, then execute each
  * step as a fresh sub-agent conversation, sequenced and tracked here -- the
  * harness owns the todo list. Returns the same shape as a single runToolLoop
@@ -1169,6 +1217,9 @@ export async function runReviewPass(params) {
  * @param {function} [params.onDebug]
  * @param {boolean} [params.approveCommands]
  * @param {function} [params.confirm]
+ * @param {string} [params.planModel] - Plan-model spec (see plan.mjs's planModelSpec)
+ * @param {string} [params.buildProvider] - The run's own resolved provider name,
+ *   for deciding whether a provider-prefixed plan model needs a second client
  * @param {number} [params.planMaxSteps]
  * @param {number} [params.planTimeoutMs]
  * @param {number} [params.planStepMaxToolTurns]
@@ -1176,6 +1227,7 @@ export async function runReviewPass(params) {
  * @param {number} [params.planSummaryCap]
  * @param {function} [params.createPlanFn]
  * @param {function} [params.runStepFn]
+ * @param {function} [params.createProviderFn]
  * @returns {Promise<{ finalText: string, completed: boolean, stoppedReason: string, toolTurns: number, compactions: number, usage: { prompt: number, completion: number, cost: number }, retries: number, plan: import('./plan.mjs').Plan }>}
  */
 export async function runPlannedBuild(params) {
@@ -1192,12 +1244,35 @@ export async function runPlannedBuild(params) {
     maxToolTurns = MAX_TOOL_TURNS,
     createPlanFn = createPlan,
     runStepFn = runStep,
+    createProviderFn = createProvider,
   } = params;
 
   reporter.phase('plan');
+  // The planner may run on its own model (and provider) -- see
+  // specs/planning.yaml. Steps always run on the build client/model, and a
+  // plan-model setup failure falls back to the build model with a notice,
+  // like every other planning failure.
+  let planClient = client;
+  let planModelId = modelId;
+  try {
+    const resolved = await resolvePlanModel({
+      spec: planModelSpec(params.planModel),
+      client,
+      modelId,
+      buildProvider: params.buildProvider,
+      createProviderFn,
+    });
+    planClient = resolved.planClient;
+    planModelId = resolved.planModelId;
+  } catch (err) {
+    reporter.notice(
+      `plan model unavailable (${err.message}); planning on the build model`,
+    );
+  }
+
   const created = await createPlanFn({
-    client,
-    modelId,
+    client: planClient,
+    modelId: planModelId,
     prompt,
     maxSteps: planMaxSteps(params.planMaxSteps),
     timeoutMs: planTimeoutMs(params.planTimeoutMs),

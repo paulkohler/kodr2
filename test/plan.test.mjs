@@ -12,6 +12,7 @@ import {
   parsePlanResponse,
   planEnabled,
   planMaxSteps,
+  planModelSpec,
   planTimeoutMs,
   runStep,
   stepMaxToolTurns,
@@ -573,6 +574,65 @@ describe('planEnabled', () => {
     assert.equal(planEnabled(false), false);
     process.env[envKey] = '0';
     assert.equal(planEnabled(false), false);
+  });
+});
+
+describe('planModelSpec', () => {
+  const envKey = 'KODR_PLAN_MODEL';
+  let originalEnv;
+
+  beforeEach(() => {
+    originalEnv = process.env[envKey];
+    delete process.env[envKey];
+  });
+
+  afterEach(() => {
+    if (originalEnv === undefined) {
+      delete process.env[envKey];
+    } else {
+      process.env[envKey] = originalEnv;
+    }
+  });
+
+  it('is unset when neither option nor env is given', () => {
+    assert.deepEqual(planModelSpec(undefined), { provider: null, model: null });
+  });
+
+  it('treats a bare model id as a model on the current provider', () => {
+    assert.deepEqual(planModelSpec('qwen3-235b'), {
+      provider: null,
+      model: 'qwen3-235b',
+    });
+  });
+
+  it('keeps a slash-bearing model id whose first segment is not a provider', () => {
+    assert.deepEqual(planModelSpec('google/gemma-4-26b'), {
+      provider: null,
+      model: 'google/gemma-4-26b',
+    });
+  });
+
+  it('splits a provider-prefixed spec, preserving slashes in the model id', () => {
+    assert.deepEqual(planModelSpec('openrouter/anthropic/claude-opus-4.8'), {
+      provider: 'openrouter',
+      model: 'anthropic/claude-opus-4.8',
+    });
+    assert.deepEqual(planModelSpec('lmstudio/google/gemma-4-26b'), {
+      provider: 'lmstudio',
+      model: 'google/gemma-4-26b',
+    });
+  });
+
+  it('falls back to KODR_PLAN_MODEL, with the option winning', () => {
+    process.env[envKey] = 'ollama/big-model';
+    assert.deepEqual(planModelSpec(undefined), {
+      provider: 'ollama',
+      model: 'big-model',
+    });
+    assert.deepEqual(planModelSpec('small-model'), {
+      provider: null,
+      model: 'small-model',
+    });
   });
 });
 

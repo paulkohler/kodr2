@@ -1194,4 +1194,128 @@ describe('runPlannedBuild', () => {
     assert.equal(plan.steps[1].stoppedReason, 'error');
     assert.equal(plan.steps[1].summary, 'provider down');
   });
+
+  it('plans on a bare plan model via the build client, steps on the build model', async () => {
+    const plan = makePlan(['one']);
+    let plannerCall;
+    let stepCall;
+    await runPlannedBuild({
+      ...baseParams,
+      messages: [],
+      planModel: 'big-planner',
+      buildProvider: 'lmstudio',
+      createPlanFn: async ({ client, modelId }) => {
+        plannerCall = { client, modelId };
+        return {
+          plan,
+          usage: { prompt: 1, completion: 1, cost: 0 },
+          retries: 0,
+        };
+      },
+      runStepFn: async ({ client, modelId }) => {
+        stepCall = { client, modelId };
+        return outcome();
+      },
+    });
+
+    assert.equal(plannerCall.client, baseParams.client, 'same client');
+    assert.equal(plannerCall.modelId, 'big-planner');
+    assert.equal(stepCall.client, baseParams.client);
+    assert.equal(stepCall.modelId, 'm', 'steps stay on the build model');
+  });
+
+  it('constructs a second client for a foreign-provider plan model', async () => {
+    const plan = makePlan(['one']);
+    const foreignClient = /** @type {any} */ ({
+      resolveModel: async () => 'anthropic/claude-opus-4.8',
+    });
+    let providerArgs;
+    let plannerCall;
+    await runPlannedBuild({
+      ...baseParams,
+      messages: [],
+      planModel: 'openrouter/anthropic/claude-opus-4.8',
+      buildProvider: 'lmstudio',
+      createProviderFn: (args) => {
+        providerArgs = args;
+        return foreignClient;
+      },
+      createPlanFn: async ({ client, modelId }) => {
+        plannerCall = { client, modelId };
+        return {
+          plan,
+          usage: { prompt: 1, completion: 1, cost: 0 },
+          retries: 0,
+        };
+      },
+      runStepFn: async () => outcome(),
+    });
+
+    assert.deepEqual(providerArgs, {
+      provider: 'openrouter',
+      model: 'anthropic/claude-opus-4.8',
+    });
+    assert.equal(plannerCall.client, foreignClient);
+    assert.equal(plannerCall.modelId, 'anthropic/claude-opus-4.8');
+  });
+
+  it('reuses the build client when the plan model prefix matches the build provider', async () => {
+    const plan = makePlan(['one']);
+    let plannerCall;
+    await runPlannedBuild({
+      ...baseParams,
+      messages: [],
+      planModel: 'lmstudio/google/gemma-4-26b',
+      buildProvider: 'lmstudio',
+      createProviderFn: () => {
+        throw new Error('should not construct a second client');
+      },
+      createPlanFn: async ({ client, modelId }) => {
+        plannerCall = { client, modelId };
+        return {
+          plan,
+          usage: { prompt: 1, completion: 1, cost: 0 },
+          retries: 0,
+        };
+      },
+      runStepFn: async () => outcome(),
+    });
+
+    assert.equal(plannerCall.client, baseParams.client);
+    assert.equal(plannerCall.modelId, 'google/gemma-4-26b');
+  });
+
+  it('falls back to the build model with a notice when plan-model setup fails, and still plans', async () => {
+    const plan = makePlan(['one']);
+    const { reporter, events } = createCaptureReporter();
+    let plannerCall;
+    const result = await runPlannedBuild({
+      ...baseParams,
+      messages: [],
+      reporter,
+      planModel: 'openrouter/anthropic/claude-opus-4.8',
+      buildProvider: 'lmstudio',
+      createProviderFn: () => {
+        throw new Error('OPENROUTER_API_KEY is required');
+      },
+      createPlanFn: async ({ client, modelId }) => {
+        plannerCall = { client, modelId };
+        return {
+          plan,
+          usage: { prompt: 1, completion: 1, cost: 0 },
+          retries: 0,
+        };
+      },
+      runStepFn: async () => outcome(),
+    });
+
+    const notice = events.find((e) => e.type === 'notice');
+    assert.match(
+      /** @type {any} */ (notice).payload,
+      /plan model unavailable.*OPENROUTER_API_KEY.*planning on the build model/,
+    );
+    assert.equal(plannerCall.client, baseParams.client);
+    assert.equal(plannerCall.modelId, 'm');
+    assert.equal(result.completed, true);
+  });
 });

@@ -7,6 +7,7 @@
  * never a failed run.
  */
 
+import { PROVIDER_NAMES } from './provider.mjs';
 import { loadPrompt } from './prompts.mjs';
 import { remainingRunBudgetMs, runToolLoop } from './tool-loop.mjs';
 import { extractBalanced, extractFenced } from './tool-recovery.mjs';
@@ -103,6 +104,35 @@ export function stepSummaryCap(option) {
     return fromEnv;
   }
   return DEFAULT_STEP_SUMMARY_CAP;
+}
+
+/**
+ * The plan-model spec: which model (and optionally which provider) runs the
+ * planner call, so a larger model can plan while a smaller one implements.
+ * Resolved from an explicit option, then KODR_PLAN_MODEL, then unset.
+ *
+ * A spec is either a bare model id ("qwen/qwen3-235b" -- planned on the
+ * run's own provider) or provider-prefixed
+ * ("openrouter/anthropic/claude-opus-4.8"). The prefix is recognized only
+ * when the first path segment is a known provider name, since model ids
+ * themselves contain slashes -- "google/gemma-4-26b" is a model on the
+ * current provider, not a provider called "google".
+ * @param {string} [option]
+ * @returns {{ provider: string|null, model: string|null }}
+ */
+export function planModelSpec(option) {
+  const spec = option || process.env.KODR_PLAN_MODEL || null;
+  if (!spec) {
+    return { provider: null, model: null };
+  }
+  const slash = spec.indexOf('/');
+  if (slash > 0) {
+    const head = spec.slice(0, slash);
+    if (PROVIDER_NAMES.includes(head)) {
+      return { provider: head, model: spec.slice(slash + 1) };
+    }
+  }
+  return { provider: null, model: spec };
 }
 
 /**
