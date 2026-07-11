@@ -155,6 +155,40 @@ instruction), replay starts over with the _same original prompt_:
 $ kodr replay last
 ```
 
+### Planning phase (`--plan`)
+
+`--plan` (or `KODR_PLAN`) adds a planning phase before the build: a single
+planner call decomposes the prompt into a fixed, ordered plan of steps, and
+each step then runs as a **fresh sub-agent conversation** — its own system
+prompt, messages, and tool-turn budget — over the run's shared tool set,
+with a handoff summary flowing from each step to the next. The harness owns
+the todo list: statuses, sequencing, and progress lines
+(`step 2/4 done`). A simple prompt yields one step and follows the same
+path; a multi-part task (set up a server, deploy two branches, wire a
+hook) gets each part its own focused context and turn budget.
+
+```
+$ kodr --plan "Set up a git server over SSH and deploy two branches via nginx"
+
+plan 4 steps
+  1. Initialize the bare repository and SSH access
+  2. Write the post-receive deployment hook
+  3. Configure nginx with the self-signed certificate
+  4. Verify pushes deploy both branches
+step 1/4 Initialize the bare repository and SSH access
+...
+```
+
+Planning failure (an unparseable reply, a timeout) never fails the run — it
+degrades to a single step carrying the whole prompt, which is behaviorally
+an unplanned run. The plan is fixed once created, verify/heal/review run
+once over the combined outcome, and the merged transcript plus structured
+step outcomes land in the run record. `--plan` cannot be combined with
+`--continue`. Limits are overridable: `--plan-max-steps` (default 8),
+`--plan-timeout-ms`, `--plan-step-max-tool-turns`, `--plan-step-min-ms`,
+`--plan-summary-cap`, each with a `KODR_PLAN_*` env var. See
+`specs/planning.yaml`.
+
 ## Tools
 
 The model has these tools available:
@@ -253,6 +287,8 @@ routing docs](https://openrouter.ai/docs/features/provider-routing).
 --context-window <n>    Max context tokens; compact at 80% (auto-detected where the provider supports it; 0 disables)
 --env <a,b,c>           Extra env vars to expose to commands (CSV of names)
 --continue <last|path>  Continue from a prior run
+--plan                  Decompose the prompt into steps, each run as a fresh
+                        sub-agent conversation (or KODR_PLAN; see Planning phase)
 --quiet, -q             Suppress streaming output
 ```
 
@@ -342,6 +378,7 @@ src/
   provider-ollama.mjs     Ollama provider
   lms.mjs              LM Studio model load/unload via the `lms` CLI
   context.mjs          System prompt assembly
+  plan.mjs             Planning phase: planner call + per-step sub-agent executor
   verify.mjs           Test/check runner
   heal.mjs             Repair loop
   format.mjs           Terminal output formatting

@@ -1,5 +1,5 @@
 name: planning phase
-status: proposed
+status: implemented
 description: >
   An opt-in (--plan / KODR_PLAN) pre-build phase. A single scoped model
   call — the planner — assesses the user prompt and decomposes it into a
