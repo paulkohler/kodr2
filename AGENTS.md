@@ -21,6 +21,7 @@ Rules for AI agents working in this repo.
   degrades to nulls there.
 - Biome for formatting as an external developer tool. Prefer a globally or environment-provided `biome` binary; do not add Biome to `dependencies` or `devDependencies`. CI has no lockfile (by design) and doesn't get Biome preinstalled either — CI must install it itself; never assume it's on the runner.
 - `node:test` for all tests.
+- JSDoc types are checked via a `jsconfig.json` (`checkJs: true`) plus TypeScript's `tsc --noEmit`, the same "external tool, not a dependency" pattern as Biome: `npm install -g typescript` for the `tsc` binary (`npm run check:types`), and `npm install --no-save @types/node` locally so the IDE's JS language service resolves Node globals (`process`, `Buffer`, etc.). Neither goes in `package.json` — `@types/node` lands in the gitignored `node_modules/` and isn't required for tests or the build, only for IDE IntelliSense and the opt-in `check:types` script.
 
 ## Code style
 
