@@ -18,6 +18,7 @@ files:
   - prompts/compact.md — compaction summary system prompt (compact.mjs)
   - prompts/plan.md — planner system prompt (plan.mjs)
   - prompts/plan-step.md — plan-step addendum appended to the build system prompt (plan.mjs)
+  - prompts/plan-step-final.md — closing self-check addendum appended for the final plan step only (plan.mjs)
 
 inputs:
   name:

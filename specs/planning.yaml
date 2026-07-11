@@ -129,6 +129,17 @@ constraints:
     full plan rendered with statuses and prior handoff summaries, the
     files changed so far, and the assigned step.
   - >
+    The final step additionally receives a closing self-check addendum
+    (prompts/plan-step-final.md): after finishing its own step it
+    re-checks the overall goal against the whole plan and completes,
+    with tools, any goal requirement no step covered — the last net
+    before verify/heal. This is passed as an explicit isFinalStep
+    boolean (step.id === total; a single-step plan's only step is
+    final), threaded from runPlannedBuild through runStep into
+    buildStepMessages. The self-check spends tool calls within the
+    final step's own execution only — it never mutates the plan, and no
+    plan tool is offered, consistent with the plan being fixed.
+  - >
     Every step gets the full build tool set via the run's single shared
     registry, so filesChanged/commandsRun/packageCommands aggregate
     across steps for verify, raw-then-fix commits, review, and
@@ -194,6 +205,9 @@ tests:
     - createPlan degrades to the fallback plan (preserving usage) when the chat call throws or the reply is unparseable
     - stepRunMs splits the remaining budget equally with a floor, recomputes from actual remaining time, clamps to the real run budget, and returns 0 when no budget is set
     - runStep composes a fresh conversation from the build system prompt plus the plan-step addendum, with goal, plan, handoffs, files changed, and the assigned step in the user message
+    - buildStepMessages appends the closing self-check addendum only when isFinalStep is set
+    - runStep threads isFinalStep into the final step's system prompt
+    - runPlannedBuild marks only the last step as the final step (isFinalStep), including a single-step plan
     - runStep's summary is finalText truncated to summaryCap, or a synthesized stop summary when the step did not complete
     - runPlannedBuild sequences steps in order, transitions statuses, continues after a failed step, leaves unexecuted steps pending on budget exhaustion, and aggregates usage/retries/toolTurns/compactions across the planner and all steps
     - runPlannedBuild returns stoppedReason 'complete' only when every step is done

@@ -13,6 +13,7 @@ const KNOWN_PROMPTS = [
   'compact',
   'plan',
   'plan-step',
+  'plan-step-final',
 ];
 
 describe('loadPrompt', () => {
