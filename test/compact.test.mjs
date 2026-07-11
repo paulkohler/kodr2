@@ -19,18 +19,24 @@ import { runToolLoop } from '../src/tool-loop.mjs';
 
 // A scripted client: queued chat() responses returned in order, repeating the
 // last once drained. Records every call so tests can assert what was sent.
+/**
+ * @param {Array<object>} responses
+ * @returns {import('../src/provider.mjs').Provider & { calls: Array<any> }}
+ */
 function scriptedClient(responses) {
   const calls = [];
   let i = 0;
-  return {
-    calls,
-    async chat(params) {
-      calls.push(params);
-      const response = responses[Math.min(i, responses.length - 1)];
-      i++;
-      return response;
-    },
-  };
+  return /** @type {import('../src/provider.mjs').Provider & { calls: Array<any> }} */ (
+    /** @type {any} */ ({
+      calls,
+      async chat(params) {
+        calls.push(params);
+        const response = responses[Math.min(i, responses.length - 1)];
+        i++;
+        return response;
+      },
+    })
+  );
 }
 
 function finalTurn(text, prompt = 2) {
@@ -57,10 +63,12 @@ function toolCallTurn(name, args, prompt = 1) {
   };
 }
 
-const stubTools = {
-  definitions: () => [],
-  dispatch: async () => ({ ok: true }),
-};
+const stubTools = /** @type {import('../src/tools/index.mjs').ToolRegistry} */ (
+  /** @type {any} */ ({
+    definitions: () => [],
+    dispatch: async () => ({ ok: true }),
+  })
+);
 
 describe('needsCompaction', () => {
   it('is false when the context window is zero', () => {
@@ -321,7 +329,6 @@ describe('compactMessages', () => {
       client,
       modelId: 'm',
       messages,
-      quiet: true,
     });
 
     assert.equal(result.error, undefined);
@@ -353,7 +360,6 @@ describe('compactMessages', () => {
       client,
       modelId: 'm',
       messages,
-      quiet: true,
       maxMessageChars: 2000,
     });
 
@@ -375,7 +381,6 @@ describe('compactMessages', () => {
       client,
       modelId: 'm',
       messages,
-      quiet: true,
       timeoutMs: 5000,
     });
 
@@ -394,7 +399,6 @@ describe('compactMessages', () => {
       client,
       modelId: 'm',
       messages,
-      quiet: true,
       heartbeatMs: 5000,
       onHeartbeat,
     });
@@ -404,11 +408,13 @@ describe('compactMessages', () => {
   });
 
   it('leaves messages unchanged when summarization fails', async () => {
-    const client = {
-      async chat() {
-        throw new Error('model offline');
-      },
-    };
+    const client = /** @type {import('../src/provider.mjs').Provider} */ (
+      /** @type {any} */ ({
+        async chat() {
+          throw new Error('model offline');
+        },
+      })
+    );
     const messages = [
       { role: 'system', content: 'system prompt' },
       { role: 'user', content: 'task' },
@@ -418,7 +424,6 @@ describe('compactMessages', () => {
       client,
       modelId: 'm',
       messages,
-      quiet: true,
     });
 
     assert.equal(result.error, 'model offline');
@@ -438,20 +443,23 @@ describe('compactMessages', () => {
       client,
       modelId: 'm',
       messages,
-      quiet: true,
     });
 
     assert.equal(result.retries, 1);
   });
 
   it('reports retries from the error when summarization ultimately fails', async () => {
-    const client = {
-      async chat() {
-        const err = new Error('model offline');
-        err.retries = 1;
-        throw err;
-      },
-    };
+    const client = /** @type {import('../src/provider.mjs').Provider} */ (
+      /** @type {any} */ ({
+        async chat() {
+          const err = /** @type {Error & { retries: number }} */ (
+            new Error('model offline')
+          );
+          err.retries = 1;
+          throw err;
+        },
+      })
+    );
     const messages = [
       { role: 'system', content: 'system prompt' },
       { role: 'user', content: 'task' },
@@ -461,7 +469,6 @@ describe('compactMessages', () => {
       client,
       modelId: 'm',
       messages,
-      quiet: true,
     });
 
     assert.equal(result.retries, 1);
@@ -477,7 +484,6 @@ describe('compactMessages', () => {
       client,
       modelId: 'm',
       messages,
-      quiet: true,
     });
     assert.equal(result.error, 'empty summary');
     assert.deepEqual(result.messages, messages);
@@ -490,7 +496,6 @@ describe('compactMessages', () => {
       client,
       modelId: 'm',
       messages,
-      quiet: true,
     });
     assert.equal(result.summary, '');
     assert.deepEqual(result.messages, messages);
@@ -518,7 +523,6 @@ describe('runToolLoop compaction', () => {
       modelId: 'm',
       messages,
       tools: stubTools,
-      quiet: true,
       contextWindow: 1000,
     });
 
@@ -555,7 +559,6 @@ describe('runToolLoop compaction', () => {
       modelId: 'm',
       messages,
       tools: stubTools,
-      quiet: true,
       contextWindow: 500,
     });
 
@@ -580,7 +583,6 @@ describe('runToolLoop compaction', () => {
       modelId: 'm',
       messages,
       tools: stubTools,
-      quiet: true,
       contextWindow: 1000,
     });
 
@@ -605,7 +607,6 @@ describe('runToolLoop compaction', () => {
       modelId: 'm',
       messages,
       tools: stubTools,
-      quiet: true,
       contextWindow: 1000,
       heartbeatMs: 5000,
       onHeartbeat,
@@ -633,7 +634,6 @@ describe('runToolLoop compaction', () => {
       modelId: 'm',
       messages,
       tools: stubTools,
-      quiet: true,
       contextWindow: 1000,
       startedAt,
       maxRunMs: 10_000,
@@ -660,7 +660,6 @@ describe('runToolLoop compaction', () => {
       modelId: 'm',
       messages,
       tools: stubTools,
-      quiet: true,
       contextWindow: 1000,
     });
 
@@ -680,7 +679,6 @@ describe('runToolLoop compaction', () => {
       modelId: 'm',
       messages,
       tools: stubTools,
-      quiet: true,
       contextWindow: 0,
     });
 
@@ -689,21 +687,23 @@ describe('runToolLoop compaction', () => {
 
   it('continues uncompacted when the summary call fails', async () => {
     let chatCalls = 0;
-    const client = {
-      calls: [],
-      async chat(params) {
-        chatCalls++;
-        // First call: a tool call that crosses the threshold.
-        if (chatCalls === 1) {
-          return toolCallTurn('list_files', {}, 900);
-        }
-        // Second call is the compaction summary — fail it.
-        if (chatCalls === 2) {
-          throw new Error('summary failed');
-        }
-        return finalTurn('done anyway', 50);
-      },
-    };
+    const client = /** @type {import('../src/provider.mjs').Provider} */ (
+      /** @type {any} */ ({
+        calls: [],
+        async chat(params) {
+          chatCalls++;
+          // First call: a tool call that crosses the threshold.
+          if (chatCalls === 1) {
+            return toolCallTurn('list_files', {}, 900);
+          }
+          // Second call is the compaction summary — fail it.
+          if (chatCalls === 2) {
+            throw new Error('summary failed');
+          }
+          return finalTurn('done anyway', 50);
+        },
+      })
+    );
     const messages = [
       { role: 'system', content: 'sp' },
       { role: 'user', content: 'task' },
@@ -714,7 +714,6 @@ describe('runToolLoop compaction', () => {
       modelId: 'm',
       messages,
       tools: stubTools,
-      quiet: true,
       contextWindow: 1000,
     });
 
