@@ -1,0 +1,179 @@
+name: planning phase
+status: proposed
+description: >
+  An opt-in (--plan / KODR_PLAN) pre-build phase. A single scoped model
+  call — the planner — assesses the user prompt and decomposes it into a
+  fixed, ordered plan of 1..N steps. Each step then runs as a fresh,
+  isolated sub-agent conversation (own system prompt, own messages, own
+  tool loop with its own turn budget) over the run's shared tool
+  registry. The harness owns the todo list: step statuses, sequencing,
+  and progress reporting. The post-loop phases (verify/heal/review/
+  memory) run once over the combined outcome, exactly as in an unplanned
+  run. A simple prompt yields exactly one step and follows the same path
+  as a multi-step plan.
+
+  Motivated by Terminal-Bench dogfooding: multi-part tasks (e.g. "set up
+  a Git server over SSH, deploy two branches to HTTPS endpoints via
+  Nginx, trigger deploys from a post-receive hook") go into a single
+  tool loop as one undifferentiated blob, forcing the model to
+  self-manage a large task inside one conversation and one turn budget.
+  Decomposing into harness-managed steps keeps each sub-agent's context
+  small and gives every part of the task its own turn budget.
+
+inputs:
+  prompt:
+    type: string
+    required: true
+    description: The user's task prompt, passed verbatim to the planner
+  client:
+    type: object
+    required: true
+    description: Model client (same one used for the build phase)
+  modelId:
+    type: string
+    required: true
+    description: Model used for both the planner call and every step
+  maxSteps:
+    type: number
+    required: false
+    description: >
+      Upper bound on plan length (default 8 — KODR_PLAN_MAX_STEPS)
+  timeoutMs:
+    type: number
+    required: false
+    description: >
+      Cap on the planner call itself (default 120,000 —
+      KODR_PLAN_TIMEOUT_MS; 0 disables the extra cap). Always further
+      clamped to the remaining run budget so planning can never starve
+      the build.
+  stepMaxToolTurns:
+    type: number
+    required: false
+    description: >
+      Tool-turn ceiling for each step's loop (default: the run's own
+      maxToolTurns — KODR_PLAN_STEP_MAX_TOOL_TURNS)
+  stepMinMs:
+    type: number
+    required: false
+    description: >
+      Wall-clock floor for each step's share of the remaining run budget
+      (default 60,000 — KODR_PLAN_STEP_MIN_MS)
+  summaryCap:
+    type: number
+    required: false
+    description: >
+      Character cap on each step's handoff summary (default 2,000 —
+      KODR_PLAN_SUMMARY_CAP)
+
+outputs:
+  plan:
+    type: object
+    description: >
+      { createdAt, degraded, steps: [{ id, title, description, status,
+      stoppedReason, summary, toolTurns }] }. status is one of
+      pending | running | done | failed. degraded is true when planning
+      failed and the single-step fallback plan is in use. Attached to
+      the run result (including the error path) and persisted in the
+      run record.
+  loop:
+    type: object
+    description: >
+      The planned build returns the same shape as a single runToolLoop
+      call — { finalText, completed, stoppedReason, toolTurns,
+      compactions, usage, retries } — so everything downstream of the
+      build site (result assembly, commits, verify/heal gate, review,
+      memory, saveRun, summary) is untouched.
+
+constraints:
+  - >
+    The planner is a single chat call with no tools; its reply is parsed
+    as JSON defensively (fence-stripped, balanced-brace extraction) and
+    validated strictly — steps must be an array of objects with
+    non-empty string title and description, count in 1..maxSteps, with
+    length caps applied by truncation (title 200 chars, description
+    4,000 chars). Model output is untrusted. A step count over maxSteps
+    is rejected outright rather than truncated — silently dropping tail
+    steps would silently drop work, and an over-long plan signals an
+    unreliable planner.
+  - >
+    Planning failure (chat error, timeout, malformed or over-cap JSON)
+    never fails the run. It degrades to a single-step plan whose one
+    step is the whole prompt — behaviorally today's unplanned run —
+    with degraded true and a reporter notice. Planner token usage is
+    still counted.
+  - >
+    The plan is fixed once created. No mid-run plan mutation, and no
+    plan tool is offered to any model.
+  - >
+    A single-step plan follows the same sub-agent path as a multi-step
+    plan — there is no separate "trivial" code path.
+  - >
+    Each step's system prompt is the run's own build system prompt plus
+    a plan-step addendum (execute only your step; trust prior handoffs
+    but verify with tools when needed; end the final reply with a
+    handoff summary). The user message carries the overall goal, the
+    full plan rendered with statuses and prior handoff summaries, the
+    files changed so far, and the assigned step.
+  - >
+    Every step gets the full build tool set via the run's single shared
+    registry, so filesChanged/commandsRun/packageCommands aggregate
+    across steps for verify, raw-then-fix commits, review, and
+    no-op-completion detection with no extra bookkeeping.
+  - >
+    Per-step wall clock is an equal share of the actual remaining run
+    budget over the remaining steps, with a floor (stepMinMs), clamped
+    so no step outlives the real run budget. The share is recomputed
+    before each step, so a fast early step donates leftover time to
+    later steps. Implemented as a synthetic per-step maxRunMs passed to
+    the unmodified tool loop.
+  - >
+    A step that stops on tool-limit or budget-exceeded is marked failed
+    and the next step still runs — steps are often partially
+    independent, and verify/heal runs once at the end as the repair
+    net. Steps never started because the run budget is spent stay
+    pending. A thrown error propagates exactly like the single-loop
+    path, with the plan (and the failing step's status) attached to the
+    error result.
+  - >
+    Each step's handoff summary is its loop's own final text, truncated
+    to summaryCap; when a step did not complete, a deterministic
+    summary is synthesized from the stop reason and turn count. No
+    extra summarize call.
+  - >
+    The aggregate stoppedReason is 'complete' only when every step is
+    done; otherwise it is the first non-complete step's stop reason
+    ('budget-exceeded' when steps were left pending).
+  - >
+    The saved transcript is one merged message array — the run seed
+    plus, per step, a user-role step marker and the step's non-system
+    messages — forming a valid conversation replayable by --continue
+    and consumable unchanged by heal and the memory retrospective. The
+    structured plan is saved alongside it in the run record.
+  - >
+    --plan cannot be combined with --continue (explicit CLI error).
+    Prior messages belong to a single conversation; injecting them into
+    every fresh sub-agent bloats each step, and injecting them nowhere
+    silently discards them — both worse than an honest error.
+  - >
+    Every limit is overridable by option and env var (option wins).
+
+tests:
+  unit:
+    - parsePlanResponse accepts bare, fenced, and prose-wrapped JSON
+    - parsePlanResponse returns an error on malformed JSON, non-array steps, empty steps, missing or non-string title/description, and step count over maxSteps
+    - parsePlanResponse truncates over-length titles and descriptions
+    - fallbackPlan yields a single-step degraded plan carrying the whole prompt
+    - createPlan degrades to the fallback plan (preserving usage) when the chat call throws or the reply is unparseable
+    - stepRunMs splits the remaining budget equally with a floor, recomputes from actual remaining time, clamps to the real run budget, and returns 0 when no budget is set
+    - runStep composes a fresh conversation from the build system prompt plus the plan-step addendum, with goal, plan, handoffs, files changed, and the assigned step in the user message
+    - runStep's summary is finalText truncated to summaryCap, or a synthesized stop summary when the step did not complete
+    - runPlannedBuild sequences steps in order, transitions statuses, continues after a failed step, leaves unexecuted steps pending on budget exhaustion, and aggregates usage/retries/toolTurns/compactions across the planner and all steps
+    - runPlannedBuild returns stoppedReason 'complete' only when every step is done
+    - runPlannedBuild extends the run messages with a step marker plus each step's non-system messages
+    - runPlannedBuild emits plan and stepUpdate reporter events in order
+    - plan resolvers (enabled, maxSteps, timeoutMs, stepMaxToolTurns, stepMinMs, summaryCap) resolve option, then env var, then default
+    - parseArgs handles --plan and every plan limit flag
+    - --plan combined with --continue is rejected with an explicit error
+    - reporter totality covers plan and stepUpdate across all implementations
+  eval:
+    - a multi-step prompt against real LM Studio yields at least 2 steps, all done, the expected files on disk, and stoppedReason 'complete'

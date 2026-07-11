@@ -11,6 +11,21 @@ Line references are approximate — treat them as anchors, not addresses.
 
 None — every finding from the 2026-07-10 audit is fixed. New issues go here.
 
+## Follow-ups (planning phase, specs/planning.yaml)
+
+Deliberate v1 scope cuts, not bugs:
+
+- **Planner exploration tools** — an opt-in `--plan-explore` giving the
+  planner the review pass's read-only tool set, for plans grounded in the
+  actual repo rather than the prompt alone. Cut for planner latency on
+  local models.
+- **Plan-aware `--continue`** — v1 rejects `--plan` + `--continue`; a
+  continuation would need to resume a partially-executed plan from the run
+  record's structured plan field.
+- **TUI live checklist panel** — v1 shows step transitions in scrollback
+  plus a `step i/N` header indicator; a persistent checklist panel needs
+  render-region work in tui-render.mjs.
+
 ## Fixed
 
 - **#1** mid-loop failure zeroed run metrics — `8535040`
