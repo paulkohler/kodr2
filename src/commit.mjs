@@ -41,6 +41,9 @@ function combinedOutput(result) {
  * Whether cwd is inside a git work tree.
  * @param {string} cwd
  * @param {object} [options]
+ * @param {Record<string, string>} [options.env]
+ * @param {number} [options.timeoutMs]
+ * @param {function} [options.run] - Overridable for tests; defaults to shell.mjs's runShell
  * @returns {Promise<boolean>}
  */
 export async function isGitRepo(cwd, options = {}) {

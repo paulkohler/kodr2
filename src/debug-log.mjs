@@ -29,12 +29,13 @@ export function debugLogEnabled(option) {
  * alongside the eventual run transcript.
  * @param {string} runsDir
  * @param {Date} startedAt
- * @returns {function(object): void} onDebug(record) -- fire-and-forget; a
+ * @returns {(record: object) => void} onDebug(record) -- fire-and-forget; a
  *   write failure is swallowed, never surfaced to the caller
  */
 export function createDebugLogger(runsDir, startedAt) {
   const filename = `${startedAt.toISOString().replace(/[:.]/g, '-')}-debug.jsonl`;
   const filePath = join(runsDir, filename);
+  /** @type {Promise<any>} */
   let queue = mkdir(runsDir, { recursive: true });
 
   return function onDebug(record) {

@@ -60,7 +60,7 @@ function normalizeConfig(parsed) {
 /**
  * Build the ordered list of Stop hooks: the `--test` command (if set) first,
  * then any valid Stop hooks from the config. Invalid entries are dropped.
- * @param {{ hooks?: object }} config
+ * @param {{ hooks?: { Stop?: Array } }} config
  * @param {string | null} [testCommand]
  * @returns {Array<{ run: string, name: string, runWhenUnchanged: boolean, timeout?: number }>}
  */
