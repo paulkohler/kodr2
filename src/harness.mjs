@@ -132,6 +132,10 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  * @param {boolean} [options.debug] - Write every model request's raw request/response
  *   to a JSONL sidecar next to the run transcript (also KODR_DEBUG). Off by default;
  *   see specs/debug-log.yaml.
+ * @param {boolean} [options.approveCommands] - Require confirm() approval before each
+ *   run_command tool call (see specs/tui.yaml). Off by default.
+ * @param {function} [options.confirm] - (call) => Promise<{ approved }>; the approval
+ *   channel used when approveCommands is on (the TUI supplies this)
  * @returns {Promise<object>} Run result
  */
 export async function run(prompt, options) {
@@ -366,6 +370,8 @@ export async function run(prompt, options) {
       heartbeatMs,
       onHeartbeat: onModelHeartbeat,
       onDebug: onModelDebug,
+      approveCommands: options.approveCommands,
+      confirm: options.confirm,
     });
     const totalUsage = loop.usage;
     const { completed, stoppedReason, toolTurns } = loop;
@@ -489,6 +495,8 @@ export async function run(prompt, options) {
           heartbeatMs,
           onHeartbeat: onModelHeartbeat,
           onDebug: onModelDebug,
+          approveCommands: options.approveCommands,
+          confirm: options.confirm,
         });
 
         result.healed = healResult.healed;

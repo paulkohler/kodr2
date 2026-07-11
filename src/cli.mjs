@@ -63,7 +63,14 @@ export async function main(argv) {
     return;
   }
 
-  if (!args.prompt) {
+  if (tuiRequested(args)) {
+    const tuiError = validateTui(args);
+    if (tuiError) {
+      process.stderr.write(`${tuiError}\n`);
+      process.exitCode = 1;
+      return;
+    }
+  } else if (!args.prompt) {
     process.stderr.write('Usage: kodr run "your prompt here"\n');
     process.stderr.write('Run `kodr --help` for more options.\n');
     process.exitCode = 1;
@@ -193,6 +200,7 @@ export async function main(argv) {
     memory: args.memory,
     memoryAutoApply: args.memoryAutoApply,
     debug: args.debug,
+    approveCommands: args.approveCommands,
     // Attended: an interactive terminal where output isn't being scraped
     // (--quiet) or consumed as machine-readable (--json) -- only then does
     // prompting for a y/N confirmation make sense. Both ends of the
@@ -228,6 +236,17 @@ export async function main(argv) {
       process.exitCode = 1;
       return;
     }
+  }
+
+  // Interactive TUI: a multi-turn REPL over the same harness (specs/tui.yaml).
+  // It supplies its own reporter and command-approval channel, so quiet/events
+  // don't apply.
+  if (tuiRequested(args)) {
+    const { runTui } = await import('./tui.mjs');
+    options.reporter = undefined;
+    options.quiet = false;
+    await runTui(args.prompt || '', options);
+    return;
   }
 
   try {
@@ -275,6 +294,29 @@ function noFailEnabled(args) {
   }
   const env = process.env.KODR_NO_FAIL;
   return env === '1' || env === 'true';
+}
+
+/** Whether the interactive TUI was requested (--tui or the `tui` subcommand). */
+export function tuiRequested(args) {
+  return Boolean(args.tui) || args.command === 'tui';
+}
+
+/**
+ * Validate a --tui invocation. Returns an error string, or null when the
+ * request is valid. The TUI owns the terminal, so it needs a real interactive
+ * TTY on both ends and is incompatible with the output modes that scrape or
+ * silence stdout/stderr.
+ * @param {object} args
+ * @returns {string|null}
+ */
+export function validateTui(args) {
+  if (args.json || args.quiet || args.events) {
+    return '--tui cannot be combined with --json, --quiet, or --events.';
+  }
+  if (!process.stdout.isTTY || !process.stdin.isTTY) {
+    return '--tui requires an interactive terminal (stdin and stdout must be a TTY).';
+  }
+  return null;
 }
 
 /**
@@ -378,6 +420,8 @@ export function parseArgs(argv) {
     commitTimeoutMs: DEFAULT_COMMIT_TIMEOUT_MS,
     json: false,
     events: false,
+    tui: false,
+    approveCommands: false,
     noFail: false,
     help: false,
     version: false,
@@ -562,6 +606,16 @@ export function parseArgs(argv) {
       i++;
       continue;
     }
+    if (arg === '--tui') {
+      args.tui = true;
+      i++;
+      continue;
+    }
+    if (arg === '--approve-commands') {
+      args.approveCommands = true;
+      i++;
+      continue;
+    }
     if (arg === '--no-fail') {
       args.noFail = true;
       i++;
@@ -598,6 +652,10 @@ export function parseArgs(argv) {
     // `kodr replay <last|path>` — the ref lands in args.prompt via the
     // generic "second positional" capture above; replay reads it as a ref,
     // not a task prompt, and re-runs the referenced record's own prompt.
+  } else if (args.command === 'tui') {
+    // `kodr tui ["prompt"]` — launch the interactive TUI; the prompt is
+    // optional (typed into the input box otherwise), so don't shorthand a
+    // bare `kodr tui` into a run with prompt "tui".
   } else if (args.command && !args.prompt) {
     // Treat the command as the prompt (shorthand)
     args.prompt = args.command;
@@ -686,6 +744,9 @@ Options:
   --json                          Print a machine-readable run summary to stdout
   --events                        Stream the run as newline-delimited JSON events on stdout
                                   (specs/reporter.yaml); can be combined with --json
+  --tui                           Launch the interactive full-screen REPL (specs/tui.yaml);
+                                  also "kodr tui". Needs an interactive terminal.
+  --approve-commands              In the TUI, prompt for y/N approval before each run_command
   --no-fail                       Always exit 0 (or KODR_NO_FAIL); for external-verifier runs
   --debug                         Write every model request's raw request/response to a
                                   JSONL sidecar next to the run transcript (or KODR_DEBUG).

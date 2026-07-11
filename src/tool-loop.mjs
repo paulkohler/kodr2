@@ -52,6 +52,10 @@ export const MAX_TOOL_TURNS = 20;
  * @param {function} [params.onHeartbeat] - Called with elapsed ms on each heartbeat tick
  * @param {function} [params.onDebug] - Called once per HTTP attempt with the raw
  *   request/response (see specs/debug-log.yaml); forwarded to every chat call
+ * @param {boolean} [params.approveCommands] - Require confirm() approval before
+ *   each run_command tool call (see specs/tui.yaml). Off by default.
+ * @param {function} [params.confirm] - (call) => Promise<{ approved }>; the
+ *   approval channel used when approveCommands is on
  * @returns {Promise<{ finalText: string, completed: boolean, stoppedReason: string, toolTurns: number, compactions: number, usage: { prompt: number, completion: number }, retries: number }>}
  */
 export async function runToolLoop(params) {
@@ -61,6 +65,12 @@ export async function runToolLoop(params) {
   const { contextWindow = 0, compactThreshold = COMPACTION_THRESHOLD } = params;
   const { heartbeatMs = 0, onHeartbeat, onDebug } = params;
   const hookCtx = buildHookCtx(params);
+  // Approval gate: only active when both opted in and given a channel, so the
+  // default (and every non-TUI run) executes commands exactly as before.
+  const gate =
+    params.approveCommands && params.confirm
+      ? { confirm: params.confirm }
+      : null;
 
   const usage = { prompt: 0, completion: 0, cost: 0 };
   let toolTurns = 0;
@@ -143,6 +153,7 @@ export async function runToolLoop(params) {
         messages,
         reporter,
         hookCtx,
+        gate,
       );
       if (nativeCalls === 0) {
         const recovered = await executeRecoveredTextToolCall(
@@ -151,6 +162,7 @@ export async function runToolLoop(params) {
           messages,
           reporter,
           hookCtx,
+          gate,
         );
         if (!recovered) {
           finalText = message.content || '';
@@ -278,6 +290,7 @@ export async function executeNativeToolCalls(
   messages,
   reporter,
   hookCtx,
+  gate,
 ) {
   if (!message.tool_calls || message.tool_calls.length === 0) {
     return 0;
@@ -285,7 +298,13 @@ export async function executeNativeToolCalls(
 
   let executed = 0;
   for (const tc of message.tool_calls) {
-    const result = await executeOneNativeCall(tc, tools, reporter, hookCtx);
+    const result = await executeOneNativeCall(
+      tc,
+      tools,
+      reporter,
+      hookCtx,
+      gate,
+    );
     appendToolResult(messages, tc.id, result);
     executed++;
   }
@@ -339,7 +358,7 @@ function appendToolResult(messages, toolCallId, result) {
  * the model to resend a valid call, rather than dispatching garbage.
  * @returns {Promise<object>} The tool result (or a repair error)
  */
-async function executeOneNativeCall(tc, tools, reporter, hookCtx) {
+async function executeOneNativeCall(tc, tools, reporter, hookCtx, gate) {
   if (isUnparseableArgs(tc.function.arguments)) {
     tc.function.arguments = '{}';
     reporter.notice(
@@ -353,7 +372,7 @@ async function executeOneNativeCall(tc, tools, reporter, hookCtx) {
 
   const name = recoverToolName(tc.function.name);
   const args = parseToolArguments(tc.function.arguments);
-  return dispatchTool({ name, args }, tools, reporter, hookCtx);
+  return dispatchTool({ name, args }, tools, reporter, hookCtx, gate);
 }
 
 /**
@@ -373,6 +392,7 @@ export async function executeRecoveredTextToolCall(
   messages,
   reporter,
   hookCtx,
+  gate,
 ) {
   if (message.tool_calls && message.tool_calls.length > 0) {
     return false;
@@ -383,7 +403,7 @@ export async function executeRecoveredTextToolCall(
   }
 
   for (const call of calls) {
-    const result = await dispatchTool(call, tools, reporter, hookCtx);
+    const result = await dispatchTool(call, tools, reporter, hookCtx, gate);
     messages.push({
       role: 'user',
       content: `Recovered text-form tool call ${call.name}. Result:\n${JSON.stringify(result)}`,
@@ -406,8 +426,14 @@ function parseToolArguments(value) {
   }
 }
 
-async function dispatchTool(call, tools, reporter, hookCtx) {
+async function dispatchTool(call, tools, reporter, hookCtx, gate) {
   reporter.toolCall({ name: call.name, args: call.args });
+
+  const unapproved = await denyByApproval(call, gate);
+  if (unapproved) {
+    reporter.toolResult({ name: call.name, result: unapproved });
+    return unapproved;
+  }
 
   const denial = await denyByPreToolHooks(call, hookCtx);
   if (denial) {
@@ -440,6 +466,23 @@ function buildHookCtx(params) {
     startedAt: params.startedAt,
     maxRunMs: params.maxRunMs || 0,
   };
+}
+
+/**
+ * Command approval (see specs/tui.yaml): when the gate is active, ask the
+ * caller's confirm() before a run_command runs. Returns an error result when
+ * denied, else null. Only run_command is gated; every other tool runs freely.
+ * @returns {Promise<object|null>}
+ */
+async function denyByApproval(call, gate) {
+  if (!gate || call.name !== 'run_command') {
+    return null;
+  }
+  const { approved } = await gate.confirm(call);
+  if (approved) {
+    return null;
+  }
+  return { error: 'run_command was not approved by the user' };
 }
 
 /**

@@ -55,6 +55,8 @@ export async function heal(params) {
     heartbeatMs,
     onHeartbeat,
     onDebug,
+    approveCommands,
+    confirm,
   } = params;
 
   let lastOutput = failure.output;
@@ -98,6 +100,8 @@ ${lastOutput}
       heartbeatMs,
       onHeartbeat,
       onDebug,
+      approveCommands,
+      confirm,
     });
     totalUsage.prompt += loop.usage.prompt;
     totalUsage.completion += loop.usage.completion;

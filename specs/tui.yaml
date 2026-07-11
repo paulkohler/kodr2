@@ -1,0 +1,102 @@
+name: tui
+status: implemented
+description: >
+  An interactive, full-screen terminal UI for Kodr: a multi-turn REPL that
+  reads a prompt, streams the run live, and takes follow-ups. Launched with
+  `kodr --tui` or `kodr tui`. Each turn is a full run(); follow-ups continue
+  the conversation through the continuation mechanism (priorMessages).
+
+  The TUI is a consumer of the reporter channel (specs/reporter.yaml): run()
+  emits events to a TUI reporter that mutates render state, alongside the
+  terminal and JSON reporters. Zero runtime dependencies -- raw ANSI plus
+  node:readline keypress events only. Rendering (src/tui-render.mjs) and state
+  (src/tui-state.mjs) are pure; src/tui.mjs is the imperative shell (terminal
+  setup, input loop, run orchestration, cleanup).
+
+inputs:
+  prompt:
+    type: string
+    description: Optional initial prompt; when omitted the user types it into the input box
+  options:
+    type: object
+    description: >
+      The same options object run() takes (cwd, model, testCommand, etc.),
+      plus approveCommands. The TUI supplies its own reporter and confirm.
+
+outputs:
+  exitCode:
+    type: number
+    description: Process exit code after the user quits the session
+
+constraints:
+  - Requires an interactive terminal -- both process.stdin.isTTY and
+    process.stdout.isTTY must be true. --tui errors out (exit 1) otherwise, and
+    is mutually exclusive with --json, --quiet, and --events.
+  - Full-screen: enters the alternate screen buffer (\x1b[?1049h) on start and
+    always leaves it (\x1b[?1049l) on exit, including on SIGINT, SIGTERM, and
+    an uncaught error. The real cursor is hidden; the TUI draws its own
+    reverse-video caret in the input box.
+  - Cleanup is idempotent and installed as the outermost teardown, so the
+    alternate screen is left before incident.mjs's crash-stack write reaches
+    stderr. Restores: show cursor, leave alt screen, setRawMode(false), remove
+    listeners, and settle any pending command approval as denied.
+  - Layout, top to bottom: a one-line status header (model, phase, tokens,
+    cost, elapsed, status), a scrollback pane, a separator, the input line,
+    and a hint line. Scrollback is stored as logical (unwrapped) lines and
+    wrapped to the current width at render time; ANSI escapes are treated as
+    zero display width so wrapping and truncation count real columns.
+  - Rendering is throttled: streamed tokens accumulate and trigger at most one
+    full-frame redraw per animation frame (~16ms), never one redraw per token.
+  - Terminal resize (process.stdout 'resize') recomputes dimensions and
+    redraws.
+  - Input is handled in raw keypress mode (readline.emitKeypressEvents), not
+    readline line-mode. The TUI owns the input buffer and cursor: printable
+    insert, backspace, left/right/home/end, and Enter to submit.
+  - Streamed assistant text is buffered and flushed into scrollback ahead of
+    the next discrete event (tool call/result, notice, verification, heal,
+    summary, phase), so text emitted before a tool call is ordered above it.
+  - As assistant text flushes into scrollback it is rendered from simple inline
+    Markdown to ANSI: **bold**, *italic* / _italic_, `code`, `-`/`*` bullets,
+    and `#` headings. Chrome lines (tool calls, notices, summaries) are already
+    ANSI and are not Markdown-processed. Rendering is line-scoped and
+    best-effort -- snake_case identifiers and prose stars are left untouched.
+  - Identical notices are shown once per session; a note repeated on a later
+    turn (e.g. the context-window notice emitted at the start of every run) is
+    not reprinted.
+  - Never runs two harness runs concurrently. A follow-up typed while a run is
+    active is queued (single slot, shown as "queued" in the header); when the
+    active run finishes it starts the next with priorMessages set to the prior
+    run's messages -- the same continuation the CLI's --continue uses.
+  - Command approval (opt-in via --approve-commands / options.approveCommands,
+    off by default so nothing changes otherwise): before a run_command tool
+    call executes, run() calls the injected confirm(call); the TUI switches the
+    input line to an approval prompt and the next y/n keypress resolves it.
+    A denied command returns an error result to the model instead of running.
+  - Ctrl-C tears the session down cleanly (restores the terminal) and exits.
+
+tests:
+  unit:
+    - createTuiState starts idle with empty scrollback and input
+    - pushLine appends a logical line to scrollback
+    - addToken accumulates streamed text and flushStream moves it into scrollback as lines
+    - setPhase updates the current phase
+    - applyUsage updates tokens and cost from a summary
+    - input insert adds a character at the cursor and advances it
+    - input backspace removes the character before the cursor
+    - input cursor moves clamp at both ends (left/right/home/end)
+    - takeInput returns the buffer and clears it
+    - enqueue/dequeue manage the single follow-up slot
+    - approval mode is set and cleared, and records the pending command
+    - displayWidth ignores ANSI escape sequences
+    - wrapAnsi wraps on display width without splitting an escape sequence
+    - renderFrame draws header, scrollback tail, input line, and hint within the given rows/cols
+    - renderFrame shows the reverse-video caret at the input cursor position
+    - renderFrame shows the approval prompt when approval mode is active
+    - the tui reporter routes tool calls, notices, and phase changes into the state
+    - the tui reporter flushes buffered streamed text before a discrete event line
+    - noteOnce reports a note as new the first time and seen thereafter
+    - the tui reporter shows an identical notice only once per session
+    - renderMarkdown renders bold, italic, and inline code
+    - renderMarkdown turns list markers into bullets and headings into bold
+    - renderMarkdown leaves snake_case identifiers and prose stars alone
+    - the tui reporter renders Markdown in streamed assistant text on flush
