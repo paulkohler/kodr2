@@ -11,6 +11,20 @@ import { createOpenRouterProvider } from './provider-openrouter.mjs';
 
 export const DEFAULT_PROVIDER = 'lmstudio';
 
+/**
+ * The shared provider contract every factory (lmstudio/openrouter/ollama)
+ * returns -- see specs/provider.yaml.
+ * @typedef {object} Provider
+ * @property {{ modelLifecycle: boolean, contextProbing: boolean, autoDetectModel: boolean, reasoning: boolean }} capabilities
+ * @property {Function} chat
+ * @property {() => Promise<Array>} models
+ * @property {() => Promise<string>} resolveModel
+ * @property {(modelId: string) => Promise<{ loaded: number, max: number }>} [contextInfo] - lmstudio/openrouter only
+ * @property {() => Promise<Array>} [richModels] - lmstudio only
+ * @property {Function} [loadModel] - lmstudio only
+ * @property {Function} [ejectModel] - lmstudio only
+ */
+
 const FACTORIES = {
   lmstudio: createLMStudioProvider,
   openrouter: createOpenRouterProvider,
@@ -56,7 +70,10 @@ export function reasoningEnabled(option) {
  * @param {number} [options.timeout]
  * @param {number} [options.maxRetries]
  * @param {boolean} [options.reasoning] - Only honored by openrouter
- * @returns {object} Provider (see specs/provider.yaml for the shared shape)
+ * @param {boolean} [options.noZdr] - Disable OpenRouter Zero Data Retention routing
+ * @param {boolean} [options.allowDataCollection] - Allow OpenRouter data-collecting providers
+ * @param {string[]} [options.providerOrder] - OpenRouter upstream provider slugs
+ * @returns {Provider}
  */
 export function createProvider(options = {}) {
   const name = resolveProviderName(options.provider);

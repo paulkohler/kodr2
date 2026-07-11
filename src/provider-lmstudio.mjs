@@ -12,6 +12,8 @@ import {
   DEFAULT_MAX_RETRIES,
 } from './model.mjs';
 
+/** @typedef {import('./provider.mjs').Provider} Provider */
+
 export const CAPABILITIES = {
   modelLifecycle: true,
   contextProbing: true,
@@ -25,7 +27,7 @@ export const CAPABILITIES = {
  * @param {string} [options.model] - Model identifier (auto-detected if omitted)
  * @param {number} [options.timeout] - Request timeout in ms
  * @param {number} [options.maxRetries] - Retries for a 5xx chat response
- * @returns {object} Provider with chat/models/resolveModel/contextInfo/richModels/loadModel/ejectModel
+ * @returns {Provider}
  */
 export function createLMStudioProvider(options = {}) {
   const client = createClient({

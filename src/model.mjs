@@ -14,7 +14,7 @@ export const DEFAULT_MAX_RETRIES = 1;
 /**
  * @typedef {object} ModelClient
  * @property {(params: object) => Promise<{ message: object, usage: object, retries: number }>} chat
- * @property {() => Promise<Array<{ id: string }>>} models
+ * @property {() => Promise<Array<{ id: string, context_length?: number }>>} models
  * @property {() => Promise<string>} resolveModel
  * @property {() => Promise<Array>} richModels
  * @property {(modelId: string) => Promise<{ loaded: number|null, max: number|null }>} contextInfo
