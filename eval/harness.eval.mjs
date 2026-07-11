@@ -144,14 +144,17 @@ describe('harness eval', {
     };
 
     const result = await heal({
-      client,
+      // heal() never reads .capabilities; the eval builds a raw ModelClient,
+      // not a full Provider.
+      client: /** @type {import('../src/provider.mjs').Provider} */ (
+        /** @type {unknown} */ (client)
+      ),
       modelId,
       messages,
       tools,
       verifyFn,
       failure,
       maxTurns: 2,
-      quiet: true,
     });
 
     assert.equal(result.healed, true);

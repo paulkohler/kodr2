@@ -34,7 +34,7 @@ const DEFAULT_MAX_TURNS = 3;
  * @param {function} [params.onDebug] - Forwarded to the tool loop (see specs/debug-log.yaml)
  * @param {boolean} [params.approveCommands] - Require confirm() approval before each run_command call
  * @param {function} [params.confirm] - (call) => Promise<{ approved }>; used when approveCommands is on
- * @returns {Promise<{ healed: boolean, turns: number, verification: object, compactions: number, usage: { prompt: number, completion: number, cost: number }, retries: number }>}
+ * @returns {Promise<{ healed: boolean, turns: number, verification: { passed: boolean, output: string }, compactions: number, usage: { prompt: number, completion: number, cost: number }, retries: number }>}
  */
 export async function heal(params) {
   const {
