@@ -122,7 +122,7 @@ async function readSkill(cwd, dirName) {
  * The body after the closing --- is preserved verbatim \u2014 indentation and
  * intentional whitespace in skill instructions are left intact.
  * @param {string} raw
- * @returns {{frontmatter: object, body: string}}
+ * @returns {{frontmatter: Record<string, string>, body: string}}
  */
 export function parseFrontmatter(raw) {
   const text = raw.replace(/^\uFEFF/, '');
