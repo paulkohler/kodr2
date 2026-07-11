@@ -35,7 +35,7 @@ const CARET = '\x1b[36m›\x1b[0m';
 /**
  * Run the interactive TUI. Resolves when the user quits.
  * @param {string} firstPrompt - Initial prompt (may be empty)
- * @param {object} options - The same options run() takes, plus approveCommands
+ * @param {import('./harness.mjs').RunOptions} options - The same options run() takes, plus approveCommands
  * @returns {Promise<void>}
  */
 export function runTui(firstPrompt, options) {

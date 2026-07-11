@@ -61,6 +61,46 @@ import { createToolRegistry } from './tools/index.mjs';
 // Re-exported for callers (and tests) that imported them from the harness.
 export { isRunBudgetExceeded, remainingRunBudgetMs };
 
+/** @typedef {Parameters<typeof run>[1]} RunOptions */
+
+/**
+ * @typedef {object} RunMetadata
+ * @property {string} cwd
+ * @property {string} prompt
+ * @property {string} provider
+ * @property {string} baseUrl
+ * @property {string} model
+ * @property {string|null} testCommand
+ * @property {number} maxHealTurns
+ * @property {number} maxRunMs
+ * @property {number} maxToolTurns
+ * @property {string[]} envPassthrough
+ * @property {number} contextWindow
+ * @property {string} startedAt
+ */
+
+/**
+ * @typedef {object} RunResult
+ * @property {RunMetadata} [metadata]
+ * @property {string} [response]
+ * @property {{ message: string, name?: string, stack?: string }} [error]
+ * @property {string[]} [filesChanged]
+ * @property {string[]} [packageCommands]
+ * @property {number} [toolTurns]
+ * @property {string} [stoppedReason]
+ * @property {{ prompt: number, completion: number, cost: number }} [usage]
+ * @property {number} [compactions]
+ * @property {number} [retries]
+ * @property {Array} [messages]
+ * @property {{ raw?: object, fix?: object }} [commits]
+ * @property {boolean} [noOpCompletion]
+ * @property {{ passed: boolean }} [verification]
+ * @property {boolean} [healed]
+ * @property {number} [healTurns]
+ * @property {object} [review]
+ * @property {object} [memory]
+ */
+
 /**
  * Run the harness.
  * @param {string} prompt - User prompt
@@ -138,7 +178,7 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  *   run_command tool call (see specs/tui.yaml). Off by default.
  * @param {function} [options.confirm] - (call) => Promise<{ approved }>; the approval
  *   channel used when approveCommands is on (the TUI supplies this)
- * @returns {Promise<object>} Run result
+ * @returns {Promise<RunResult>}
  */
 export async function run(prompt, options) {
   const startedAt = new Date();

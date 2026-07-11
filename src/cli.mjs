@@ -69,28 +69,7 @@ import { MAX_TOOL_TURNS } from './tool-loop.mjs';
  * @property {boolean} version
  */
 
-/**
- * Shape of run()'s resolved result (see harness.mjs); mirrored here rather
- * than imported since run()'s own @returns is still the loosely-typed
- * `Promise<object>` its incrementally-built result object resists
- * precisely annotating.
- * @typedef {object} RunResult
- * @property {string} [stoppedReason]
- * @property {number} [toolTurns]
- * @property {{ prompt: number, completion: number, cost: number }} [usage]
- * @property {number} [compactions]
- * @property {number} [retries]
- * @property {boolean} [healed]
- * @property {number} [healTurns]
- * @property {{ passed: boolean }} [verification]
- * @property {boolean} [noOpCompletion]
- * @property {string[]} [filesChanged]
- * @property {string[]} [packageCommands]
- * @property {string} [response]
- * @property {{ message: string }} [error]
- * @property {object} [commits]
- * @property {object} [review]
- */
+/** @typedef {import('./harness.mjs').RunResult} RunResult */
 
 /**
  * Parse CLI arguments and run.
