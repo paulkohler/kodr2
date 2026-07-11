@@ -5,6 +5,8 @@ import {
   formatHealTurn,
   formatHeartbeat,
   formatNotice,
+  formatPlan,
+  formatStepUpdate,
   formatSummary,
   formatToolCall,
   formatToolResult,
@@ -97,6 +99,18 @@ describe('createTerminalReporter', () => {
       `${formatNotice('compacting context (900 >= 800 tokens)')}\n`,
     );
   });
+
+  it('plan and stepUpdate write formatX(...)+newline to stderr', () => {
+    const { reporter, stderr } = setup();
+    const steps = [{ id: 1, title: 'Do it' }];
+    const update = { id: 1, total: 1, title: 'Do it', status: 'running' };
+    reporter.plan({ steps, degraded: false });
+    reporter.stepUpdate(update);
+    assert.equal(
+      stderr.text(),
+      `${formatPlan(steps, false)}\n${formatStepUpdate(update)}\n`,
+    );
+  });
 });
 
 describe('createJsonReporter', () => {
@@ -150,6 +164,46 @@ describe('createJsonReporter', () => {
       stoppedReason: 'complete',
       filesChanged: ['a.mjs'],
       usage: { prompt: 1, completion: 2, cost: 0 },
+    });
+  });
+
+  it('plan emits step ids and titles only, never descriptions', () => {
+    const out = createFakeStream();
+    const reporter = createJsonReporter({ out });
+    reporter.plan({
+      steps: /** @type {any} */ ([
+        { id: 1, title: 'Do it', description: 'kilobytes of detail' },
+      ]),
+      degraded: true,
+    });
+    const [event] = lines(out);
+    assert.deepEqual(event, {
+      event: 'plan',
+      steps: [{ id: 1, title: 'Do it' }],
+      degraded: true,
+    });
+  });
+
+  it('stepUpdate emits a step.update event with the transition', () => {
+    const out = createFakeStream();
+    const reporter = createJsonReporter({ out });
+    reporter.stepUpdate({
+      id: 2,
+      total: 3,
+      title: 'Write hook',
+      status: 'failed',
+      stoppedReason: 'tool-limit',
+      summary: 'ran out of turns',
+    });
+    const [event] = lines(out);
+    assert.deepEqual(event, {
+      event: 'step.update',
+      id: 2,
+      total: 3,
+      title: 'Write hook',
+      status: 'failed',
+      stoppedReason: 'tool-limit',
+      summary: 'ran out of turns',
     });
   });
 });

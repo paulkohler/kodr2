@@ -19,6 +19,7 @@ import {
   setApproval,
   setPhase,
   setRunning,
+  setStep,
   takeInput,
 } from '../src/tui-state.mjs';
 
@@ -54,6 +55,15 @@ describe('tui-state', () => {
     const state = createTuiState();
     setPhase(state, 'verify');
     assert.equal(state.phase, 'verify');
+  });
+
+  it('setStep sets and clears the running plan step', () => {
+    const state = createTuiState();
+    assert.equal(state.step, null);
+    setStep(state, { id: 2, total: 4, title: 'Write hook' });
+    assert.deepEqual(state.step, { id: 2, total: 4, title: 'Write hook' });
+    setStep(state, null);
+    assert.equal(state.step, null);
   });
 
   it('setRunning stamps the start time and status', () => {

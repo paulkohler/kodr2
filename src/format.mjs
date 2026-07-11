@@ -91,6 +91,42 @@ export function formatHealTurn(turn, max) {
 }
 
 /**
+ * Format the plan produced by the planning phase: a header plus one numbered
+ * line per step title (descriptions stay in the run record).
+ * @param {Array<{ id: number, title: string }>} steps
+ * @param {boolean} [degraded] - True when planning failed and the single-step fallback is in use
+ * @returns {string}
+ */
+export function formatPlan(steps, degraded) {
+  const count = steps.length === 1 ? '1 step' : `${steps.length} steps`;
+  const suffix = degraded
+    ? ` ${YELLOW}(degraded to a single step)${RESET}`
+    : '';
+  const lines = [`\n${BOLD}plan${RESET} ${DIM}${count}${RESET}${suffix}`];
+  for (const step of steps) {
+    lines.push(`  ${DIM}${step.id}.${RESET} ${step.title}`);
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Format a plan-step transition (running/done/failed).
+ * @param {{ id: number, total: number, title: string, status: string, stoppedReason?: string }} params
+ * @returns {string}
+ */
+export function formatStepUpdate({ id, total, title, status, stoppedReason }) {
+  const label = `${BOLD}step${RESET} ${id}/${total}`;
+  if (status === 'running') {
+    return `\n${label} ${CYAN}${title}${RESET}`;
+  }
+  if (status === 'done') {
+    return `${label} ${GREEN}done${RESET}`;
+  }
+  const reason = stoppedReason ? ` ${DIM}(${stoppedReason})${RESET}` : '';
+  return `${label} ${RED}failed${RESET}${reason}`;
+}
+
+/**
  * Format a run summary.
  * @param {{ filesChanged?: string[], verification?: { passed: boolean }, healed?: boolean, retries?: number, commits?: { raw?: object, fix?: object }, usage?: { prompt: number, completion: number, cost: number } }} result
  * @returns {string}

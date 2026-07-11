@@ -169,6 +169,10 @@ function headerLine(state, now) {
     state.running && state.phase
       ? `${CYAN}▸ ${state.phase}${RESET}`
       : state.status;
+  const step =
+    state.running && state.step
+      ? `${DIM} step ${state.step.id}/${state.step.total}${RESET}`
+      : '';
   const queued = state.queued ? `${DIM} (queued)${RESET}` : '';
   const tokens = `${DIM}${state.tokensIn} in / ${state.tokensOut} out${RESET}`;
   const cost = state.cost ? `  ${DIM}$${state.cost.toFixed(4)}${RESET}` : '';
@@ -176,7 +180,7 @@ function headerLine(state, now) {
     state.running && state.runStartedAt !== null
       ? `  ${DIM}${Math.round((now - state.runStartedAt) / 1000)}s${RESET}`
       : '';
-  return `${BOLD}kodr${RESET} ${DIM}${state.model}${RESET}  ${phase}${queued}  ${tokens}${cost}${elapsed}`;
+  return `${BOLD}kodr${RESET} ${DIM}${state.model}${RESET}  ${phase}${step}${queued}  ${tokens}${cost}${elapsed}`;
 }
 
 /** The last `height` wrapped display lines of scrollback plus any live stream. */

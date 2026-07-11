@@ -11,6 +11,7 @@
  * @typedef {object} TuiState
  * @property {string} model
  * @property {string} phase
+ * @property {{ id: number, total: number, title: string }|null} step
  * @property {string} status
  * @property {string[]} scrollback
  * @property {string} stream
@@ -34,6 +35,9 @@ export function createTuiState(init = {}) {
   return {
     model: init.model || 'model',
     phase: '',
+    // The running plan step ({ id, total, title }) while the planned build
+    // executes, else null. Rendered as "step i/N" in the header.
+    step: null,
     status: 'idle',
     // Scrollback holds logical (unwrapped) lines; wrapping happens at render.
     scrollback: [],
@@ -92,12 +96,21 @@ export function flushStream(state, transform = (line) => line) {
 }
 
 /**
- * Set the current run phase (build/verify/heal/review/memory/compact).
+ * Set the current run phase (plan/build/verify/heal/review/memory/compact).
  * @param {TuiState} state
  * @param {string} name
  */
 export function setPhase(state, name) {
   state.phase = name;
+}
+
+/**
+ * Set (or clear, with null) the running plan step shown in the header.
+ * @param {TuiState} state
+ * @param {{ id: number, total: number, title: string }|null} step
+ */
+export function setStep(state, step) {
+  state.step = step;
 }
 
 /**

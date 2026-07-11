@@ -89,4 +89,44 @@ describe('createTuiReporter', () => {
     assert.equal(state.tokensIn, 100);
     assert.equal(state.tokensOut, 20);
   });
+
+  it('plan pushes the plan lines into scrollback', () => {
+    const state = createTuiState();
+    const reporter = createTuiReporter(state, () => {});
+    reporter.plan({
+      steps: [
+        { id: 1, title: 'Set up' },
+        { id: 2, title: 'Deploy' },
+      ],
+      degraded: false,
+    });
+    const text = state.scrollback.join('\n');
+    assert.ok(text.includes('2 steps'));
+    assert.ok(text.includes('Set up'));
+    assert.ok(text.includes('Deploy'));
+  });
+
+  it('stepUpdate sets the header step on running and phase clears it', () => {
+    const state = createTuiState();
+    const reporter = createTuiReporter(state, () => {});
+
+    reporter.stepUpdate({
+      id: 1,
+      total: 2,
+      title: 'Set up',
+      status: 'running',
+    });
+    assert.deepEqual(state.step, { id: 1, total: 2, title: 'Set up' });
+    assert.ok(state.scrollback.some((l) => l.includes('1/2')));
+
+    reporter.stepUpdate({ id: 1, total: 2, title: 'Set up', status: 'done' });
+    assert.deepEqual(
+      state.step,
+      { id: 1, total: 2, title: 'Set up' },
+      'a done transition keeps the last step until the next one starts',
+    );
+
+    reporter.phase('verify');
+    assert.equal(state.step, null, 'a phase transition ends step context');
+  });
 });

@@ -8,7 +8,9 @@ import {
   formatHeartbeat,
   formatModelsList,
   formatNotice,
+  formatPlan,
   formatStats,
+  formatStepUpdate,
   formatSummary,
   formatToolCall,
   formatToolResult,
@@ -100,6 +102,67 @@ describe('formatHealTurn', () => {
   it('shows turn number', () => {
     const out = formatHealTurn(2, 3);
     assert.ok(out.includes('2/3'));
+  });
+});
+
+describe('formatPlan', () => {
+  const steps = [
+    { id: 1, title: 'Set up the repo' },
+    { id: 2, title: 'Write the hook' },
+  ];
+
+  it('shows the step count and one numbered line per title', () => {
+    const out = plain(formatPlan(steps, false));
+    assert.ok(out.includes('plan 2 steps'));
+    assert.ok(out.includes('1. Set up the repo'));
+    assert.ok(out.includes('2. Write the hook'));
+  });
+
+  it('uses the singular for one step and flags a degraded plan', () => {
+    const out = plain(formatPlan([{ id: 1, title: 'Do it' }], true));
+    assert.ok(out.includes('plan 1 step'));
+    assert.ok(out.includes('degraded to a single step'));
+  });
+});
+
+describe('formatStepUpdate', () => {
+  it('shows the title when a step starts running', () => {
+    const out = plain(
+      formatStepUpdate({
+        id: 2,
+        total: 4,
+        title: 'Write hook',
+        status: 'running',
+      }),
+    );
+    assert.ok(out.includes('step 2/4'));
+    assert.ok(out.includes('Write hook'));
+  });
+
+  it('shows done without repeating the title', () => {
+    const out = plain(
+      formatStepUpdate({
+        id: 2,
+        total: 4,
+        title: 'Write hook',
+        status: 'done',
+      }),
+    );
+    assert.ok(out.includes('step 2/4 done'));
+    assert.ok(!out.includes('Write hook'));
+  });
+
+  it('shows failed with the stop reason', () => {
+    const out = plain(
+      formatStepUpdate({
+        id: 2,
+        total: 4,
+        title: 'Write hook',
+        status: 'failed',
+        stoppedReason: 'tool-limit',
+      }),
+    );
+    assert.ok(out.includes('step 2/4 failed (tool-limit)'));
   });
 });
 

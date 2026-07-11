@@ -8,6 +8,8 @@
 import {
   formatHealTurn,
   formatNotice,
+  formatPlan,
+  formatStepUpdate,
   formatSummary,
   formatToolCall,
   formatToolResult,
@@ -22,6 +24,7 @@ import {
   pushLine,
   setPhase,
   setStatus,
+  setStep,
 } from './tui-state.mjs';
 
 /**
@@ -86,7 +89,21 @@ export function createTuiReporter(state, requestRender) {
     phase: (name) => {
       flush();
       setPhase(state, name);
+      // A phase transition ends any plan-step context (verify/heal/review run
+      // over the whole plan, not one step).
+      setStep(state, null);
       render();
+    },
+    plan: ({ steps, degraded }) => line(formatPlan(steps, degraded)),
+    stepUpdate: (params) => {
+      if (params.status === 'running') {
+        setStep(state, {
+          id: params.id,
+          total: params.total,
+          title: params.title,
+        });
+      }
+      line(formatStepUpdate(params));
     },
   };
 }

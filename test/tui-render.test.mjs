@@ -7,6 +7,7 @@ import {
   setApproval,
   setPhase,
   setRunning,
+  setStep,
 } from '../src/tui-state.mjs';
 import {
   displayWidth,
@@ -132,5 +133,18 @@ describe('renderFrame', () => {
     const frame = renderFrame(state, size, 5000);
     assert.ok(frame.includes('verify'), 'header reflects the phase');
     assert.ok(frame.includes('5s'), 'header shows elapsed seconds');
+  });
+
+  it('shows the running plan step in the header, and drops it when cleared', () => {
+    const state = createTuiState();
+    setRunning(state, true, 0);
+    setPhase(state, 'build');
+    setStep(state, { id: 2, total: 4, title: 'Write hook' });
+    const frame = renderFrame(state, size, 0);
+    assert.ok(frame.includes('step 2/4'), 'header shows the step indicator');
+
+    setStep(state, null);
+    const cleared = renderFrame(state, size, 0);
+    assert.ok(!cleared.includes('step 2/4'), 'indicator gone once cleared');
   });
 });

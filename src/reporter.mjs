@@ -39,14 +39,20 @@
  * | verification(result)                | A verification (Stop-hook) outcome.         |
  * | healTurn({ turn, max })             | A heal turn is starting.                    |
  * | summary(result)                     | The end-of-run summary.                     |
- * | phase(name)                         | A run-phase transition (build/verify/heal/  |
- * |                                     | review/memory/compact). No terminal bytes.  |
+ * | phase(name)                         | A run-phase transition (plan/build/verify/  |
+ * |                                     | heal/review/memory/compact). No terminal    |
+ * |                                     | bytes.                                      |
+ * | plan({ steps, degraded })           | The planning phase produced a plan.         |
+ * | stepUpdate({ id, total, title,      | A plan step transitioned                    |
+ * |   status, stoppedReason, summary }) | (running/done/failed).                      |
  */
 
 import {
   formatHealTurn,
   formatHeartbeat,
   formatNotice,
+  formatPlan,
+  formatStepUpdate,
   formatSummary,
   formatToolCall,
   formatToolResult,
@@ -67,6 +73,8 @@ import {
  * @property {(params: { turn: number, max: number }) => void} healTurn
  * @property {(result: { stoppedReason?: string, filesChanged?: string[], verification?: { passed: boolean }, healed?: boolean, retries?: number, commits?: object, usage?: { prompt: number, completion: number, cost: number } }) => void} summary
  * @property {(name: string) => void} phase
+ * @property {(params: { steps: Array<{ id: number, title: string }>, degraded?: boolean }) => void} plan
+ * @property {(params: { id: number, total: number, title: string, status: string, stoppedReason?: string, summary?: string }) => void} stepUpdate
  */
 
 /** The full method set — the single source of truth for reporter totality. */
@@ -83,6 +91,8 @@ export const REPORTER_METHODS = [
   'healTurn',
   'summary',
   'phase',
+  'plan',
+  'stepUpdate',
 ];
 
 /**
@@ -132,6 +142,8 @@ export function createTerminalReporter(streams = {}) {
     healTurn: ({ turn, max }) => line(formatHealTurn(turn, max)),
     summary: (result) => line(formatSummary(result)),
     phase: () => {},
+    plan: ({ steps, degraded }) => line(formatPlan(steps, degraded)),
+    stepUpdate: (params) => line(formatStepUpdate(params)),
   };
 }
 
@@ -185,5 +197,21 @@ export function createJsonReporter(options = {}) {
         usage: result.usage,
       }),
     phase: (name) => event('phase', { name }),
+    // Titles only -- step descriptions can be kilobytes each; full steps live
+    // in the run record.
+    plan: ({ steps, degraded }) =>
+      event('plan', {
+        steps: steps.map((step) => ({ id: step.id, title: step.title })),
+        degraded: Boolean(degraded),
+      }),
+    stepUpdate: ({ id, total, title, status, stoppedReason, summary }) =>
+      event('step.update', {
+        id,
+        total,
+        title,
+        status,
+        stoppedReason,
+        summary,
+      }),
   };
 }
