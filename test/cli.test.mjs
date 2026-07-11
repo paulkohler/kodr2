@@ -9,6 +9,17 @@ import {
   visionEnabled,
 } from '../src/cli.mjs';
 
+/**
+ * Test doubles only ever populate the CliArgs fields a given test exercises;
+ * this cast documents that the object is deliberately partial rather than
+ * accidentally missing fields.
+ * @param {Partial<import('../src/cli.mjs').CliArgs>} partial
+ * @returns {import('../src/cli.mjs').CliArgs}
+ */
+function mockArgs(partial) {
+  return /** @type {import('../src/cli.mjs').CliArgs} */ (partial);
+}
+
 describe('parseArgs', () => {
   it('extracts prompt from "run" command', () => {
     const args = parseArgs(['run', 'fix the bug']);
@@ -51,14 +62,14 @@ describe('parseArgs', () => {
     const original = process.env.KODR_VISION;
     try {
       delete process.env.KODR_VISION;
-      assert.equal(visionEnabled({ vision: true }), true);
-      assert.equal(visionEnabled({ vision: false }), false);
+      assert.equal(visionEnabled(mockArgs({ vision: true })), true);
+      assert.equal(visionEnabled(mockArgs({ vision: false })), false);
       process.env.KODR_VISION = '1';
-      assert.equal(visionEnabled({ vision: false }), true);
+      assert.equal(visionEnabled(mockArgs({ vision: false })), true);
       process.env.KODR_VISION = 'true';
-      assert.equal(visionEnabled({ vision: false }), true);
+      assert.equal(visionEnabled(mockArgs({ vision: false })), true);
       process.env.KODR_VISION = '0';
-      assert.equal(visionEnabled({ vision: false }), false);
+      assert.equal(visionEnabled(mockArgs({ vision: false })), false);
     } finally {
       if (original === undefined) {
         delete process.env.KODR_VISION;
@@ -294,12 +305,43 @@ describe('parseArgs', () => {
   });
 });
 
+/**
+ * summarizeResult's own JSDoc return type is the generic `object`, so this
+ * cast documents the real shape it builds (see src/cli.mjs) for the call
+ * sites below.
+ * @typedef {object} ResultSummary
+ * @property {string} [stoppedReason]
+ * @property {boolean} completed
+ * @property {number} toolTurns
+ * @property {{ prompt: number, completion: number, cost: number }} usage
+ * @property {number} compactions
+ * @property {number} retries
+ * @property {boolean|null} healed
+ * @property {number|null} healTurns
+ * @property {boolean|null} verified
+ * @property {boolean} noOpCompletion
+ * @property {string[]} filesChanged
+ * @property {string[]} packageCommands
+ * @property {string} response
+ * @property {string|null} error
+ * @property {{ raw?: object, fix?: object }|null} commits
+ * @property {import('../src/review.mjs').ReviewResult|{skipped:true,reason:string}|null} review
+ */
+
+/**
+ * @param {import('../src/harness.mjs').RunResult} result
+ * @returns {ResultSummary}
+ */
+function summarize(result) {
+  return /** @type {ResultSummary} */ (summarizeResult(result));
+}
+
 describe('summarizeResult', () => {
   it('produces a compact machine-readable summary', () => {
-    const summary = summarizeResult({
+    const summary = summarize({
       stoppedReason: 'complete',
       toolTurns: 5,
-      usage: { prompt: 100, completion: 20 },
+      usage: { prompt: 100, completion: 20, cost: 0 },
       healed: true,
       healTurns: 2,
       verification: { passed: true },
@@ -318,7 +360,7 @@ describe('summarizeResult', () => {
   });
 
   it('marks incomplete runs and surfaces errors', () => {
-    const summary = summarizeResult({
+    const summary = summarize({
       stoppedReason: 'error',
       error: { message: 'HTTP 500' },
     });
@@ -328,7 +370,7 @@ describe('summarizeResult', () => {
   });
 
   it('surfaces a no-op completion', () => {
-    const summary = summarizeResult({
+    const summary = summarize({
       stoppedReason: 'complete',
       noOpCompletion: true,
       filesChanged: [],
@@ -337,19 +379,22 @@ describe('summarizeResult', () => {
   });
 
   it('surfaces the total retries count', () => {
-    const summary = summarizeResult({ stoppedReason: 'complete', retries: 3 });
+    const summary = summarize({ stoppedReason: 'complete', retries: 3 });
     assert.equal(summary.retries, 3);
   });
 
   it('defaults review to null when absent', () => {
-    const summary = summarizeResult({ stoppedReason: 'complete' });
+    const summary = summarize({ stoppedReason: 'complete' });
     assert.equal(summary.review, null);
   });
 
   it('surfaces a completed review pass', () => {
-    const summary = summarizeResult({
+    const summary = summarize({
       stoppedReason: 'complete',
-      review: { findings: 'No findings.', grounded: true },
+      review: /** @type {import('../src/review.mjs').ReviewResult} */ ({
+        findings: 'No findings.',
+        grounded: true,
+      }),
     });
     assert.deepEqual(summary.review, {
       findings: 'No findings.',
@@ -358,8 +403,8 @@ describe('summarizeResult', () => {
   });
 
   it('distinguishes a review skipped for an incomplete build from no review configured at all', () => {
-    const noReview = summarizeResult({ stoppedReason: 'error' });
-    const skippedReview = summarizeResult({
+    const noReview = summarize({ stoppedReason: 'error' });
+    const skippedReview = summarize({
       stoppedReason: 'error',
       review: {
         skipped: true,
@@ -373,20 +418,29 @@ describe('summarizeResult', () => {
 
 describe('exitCodeFor', () => {
   it('returns 1 for an incomplete run by default', () => {
-    assert.equal(exitCodeFor({ stoppedReason: 'budget-exceeded' }, {}), 1);
+    assert.equal(
+      exitCodeFor({ stoppedReason: 'budget-exceeded' }, mockArgs({})),
+      1,
+    );
   });
 
   it('returns 0 for a completed run', () => {
-    assert.equal(exitCodeFor({ stoppedReason: 'complete' }, {}), 0);
+    assert.equal(exitCodeFor({ stoppedReason: 'complete' }, mockArgs({})), 0);
   });
 
   it('returns 0 even for failure when --no-fail is set', () => {
     assert.equal(
-      exitCodeFor({ stoppedReason: 'budget-exceeded' }, { noFail: true }),
+      exitCodeFor(
+        { stoppedReason: 'budget-exceeded' },
+        mockArgs({ noFail: true }),
+      ),
       0,
     );
     assert.equal(
-      exitCodeFor({ verification: { passed: false } }, { noFail: true }),
+      exitCodeFor(
+        { verification: { passed: false } },
+        mockArgs({ noFail: true }),
+      ),
       0,
     );
   });
