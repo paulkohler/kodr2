@@ -34,6 +34,10 @@ constraints:
   - Output truncated at 50,000 characters per stream
   - Runs in workspace directory (cwd)
   - Rejects explicit cd targets that resolve outside the workspace
+  - Known accepted limitation -- cd targets are the only path validation.
+    Absolute paths inside a command (cat /etc/..., redirection to /tmp/...)
+    are not jailed; the system prompt's run_command conduct rules are the
+    control on that surface (see the harness spec), not an enforcement layer
   - Runs with a minimal curated environment, not the full process.env
   - Default env allowlist: PATH, HOME, TMPDIR, LANG, LC_ALL, LC_CTYPE, TERM, TZ
   - Extra variables are passed through by name only (--env a,b,c)

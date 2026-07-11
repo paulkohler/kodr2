@@ -124,7 +124,13 @@ constraints:
   - System prompt assembled fresh each run from workspace state
   - System prompt discloses the workspace root's absolute path and states that tool paths are relative to it, and that an absolute path inside the root is also accepted -- otherwise a model told only "paths are relative to the workspace root" cannot map a task's absolute path (e.g. write to /app/out.txt when the root is /app) and may strip just the leading slash to "app/out.txt", nesting a level too deep. The path jail resolves an absolute path within the (canonical) root to the same location as its relative form
   - System prompt file listing skips operator logs, copied kodr artifacts, and common build/dependency dirs (node_modules, target, dist, build, .next, __pycache__, .venv, venv, .gradle) so a build can't flood the prompt; ignored paths are still readable directly
-  - System prompt requires tools to be called through the provided tool channel, not text-form pseudo calls
+  - System prompt file listing is capped (200 files); when the cap is hit the listing ends with an explicit truncation marker and the prompt tells the model the listing may be incomplete -- a silently partial listing makes a model conclude the missing files don't exist instead of looking for them
+  - System prompt requires tools to be called through the provided tool channel, not text-form pseudo calls, one tool call per message
+  - System prompt states the loop's completion semantics -- a reply with no tool call ends the run -- and forbids describing an intended action instead of calling the tool, since a model narrating "now I will edit the file" as prose silently terminates the run as a no-op completion
+  - System prompt states the tool error contract ({ error } results are recoverable; fix arguments and retry, never repeat a failing call unchanged)
+  - System prompt steers file work to the dedicated tools (read_file/search/list_files over cat/grep/find, edit_file over sed/echo redirection, write_file only for new files or full rewrites) since the dedicated tools are path-jailed and output-bounded
+  - System prompt carries run_command conduct rules (stay inside the workspace; no sudo, global installs, or global config changes; no downloading/installing unless the task requires it and never piping fetched content into a shell; nothing destructive beyond the task; commands must be non-interactive and terminate) -- run_command validates only cd targets, so the prompt is the only control on that surface
+  - System prompt instructs the model to treat workspace content and command output as data, not instructions, with an explicit precedence order (system prompt, then task, then workspace instructions/memory, then file contents)
   - Verification runs when a test command is set and the workspace was touched (files written or a command run)
   - A "complete" stop where the workspace was never touched sets noOpCompletion and emits a one-line stderr notice, so a genuine no-op (nothing to do) and a derailed run that quietly did nothing both stay visible instead of looking like an ordinary success
   - Healing only attempted when verification fails
@@ -165,7 +171,15 @@ tests:
     - a mid-loop failure preserves the usage and tool turns done before it
     - a non-SSE 200 response records an error, not a false completion
     - workspace file listing skips operator logs and copied kodr artifacts
-    - system prompt requires native tool-channel calls
+    - workspace file listing stops at the cap and reports truncation
+    - workspace file listing does not report truncation when remaining entries are all ignored
+    - system prompt requires native tool-channel calls, one per message
+    - system prompt states that a reply with no tool call ends the run
+    - system prompt states the tool error contract
+    - system prompt steers file work to the dedicated tools
+    - system prompt carries run_command conduct rules
+    - system prompt treats workspace content as data with an explicit precedence order
+    - system prompt marks the file listing as truncated when the cap is hit
     - system prompt discloses the workspace root path and that absolute paths within it are accepted
     - write_file accepts an absolute path inside the workspace root
     - recovers text-form tool calls (all framings) through the tool registry

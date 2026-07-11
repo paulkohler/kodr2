@@ -5,7 +5,7 @@ description: >
   command works independently of the source checkout.
 
 constraints:
-  - Published package contains only runtime source, executable, README, and license
+  - Published package contains only runtime source, prompt files (prompts/, see specs/prompts.yaml), executable, README, and license
   - Local settings, tests, evals, and development specifications are excluded
   - Installed kodr executable supports help and version output
   - CLI failures return a non-zero exit code

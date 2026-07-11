@@ -15,6 +15,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { renderTranscript } from './compact.mjs';
+import { loadPrompt } from './prompts.mjs';
 import { remainingRunBudgetMs } from './tool-loop.mjs';
 
 export const MEMORY_FILE = 'MEMORY.md';
@@ -46,11 +47,7 @@ export function memoryPromptTimeoutMs(option) {
   return DEFAULT_MEMORY_PROMPT_TIMEOUT_MS;
 }
 
-const RETROSPECTIVE_SYSTEM = `You just finished a coding session in this workspace. Reflect on what would have helped you (or another instance of yourself) get to the right answer faster or avoid a wrong turn -- a mistaken assumption, a dead end you had to backtrack from, a workspace-specific convention you only discovered partway through, or a gotcha in this codebase's tooling or tests.
-
-Write a short, concrete addition to this workspace's persistent memory file, in a few sentences or a short bullet list. Be specific -- name files, commands, or patterns, not generic advice ("write tests", "read the docs first") that would apply to any project.
-
-If nothing from this session would meaningfully change how a future run approaches this workspace, reply with exactly: No findings.`;
+const RETROSPECTIVE_SYSTEM = loadPrompt('retrospective');
 
 /**
  * Whether the end-of-run retrospective is enabled, via the memory option

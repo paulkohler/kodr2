@@ -5,6 +5,7 @@
  * lms.mjs for the load/verify sequencing that makes that safe).
  */
 
+import { loadPrompt } from './prompts.mjs';
 import { createTerminalReporter } from './reporter.mjs';
 import { runShell } from './shell.mjs';
 import { runToolLoop } from './tool-loop.mjs';
@@ -96,25 +97,18 @@ async function gatherDiff(cwd, filesChanged, options = {}) {
   return result.stdout ?? '';
 }
 
+const REVIEW_SYSTEM = loadPrompt('review');
+const REVIEW_NUDGE = loadPrompt('review-nudge');
+
 function buildReviewMessages(filesChanged, diff, nudge) {
   const fileList = filesChanged.map((file) => `- ${file}`).join('\n');
   const diffSection = diff
     ? `\n\n<diff>\n${diff}\n</diff>`
     : '\n\n(No diff available -- read the files directly.)';
   const nudgeSection = nudge ? `\n\n${nudge}` : '';
-  const system =
-    'You are reviewing a code change for correctness, not style. You have ' +
-    'read-only tools (read_file, list_files, search) -- use them to check ' +
-    'imports, call sites, and related tests before drawing conclusions. Do ' +
-    'not just react to the diff text below without verifying it against ' +
-    'the real files; a diff without checked context is exactly how past ' +
-    'reviews got fooled. Respond with a short list of concrete findings ' +
-    '(file, line if known, and what\'s wrong), or "No findings." if ' +
-    'nothing stood out. Never cite a file, quote, or line you have not ' +
-    'actually read via a tool call.';
   const user = `Files changed:\n${fileList}${diffSection}${nudgeSection}`;
   return [
-    { role: 'system', content: system },
+    { role: 'system', content: REVIEW_SYSTEM },
     { role: 'user', content: user },
   ];
 }
@@ -208,13 +202,9 @@ export async function runReview(params) {
   let totalRetries = attempt.retries || 0;
 
   if (attempt.toolTurns < minToolCalls) {
-    const nudge =
-      'Read the actual changed files with the tools provided before ' +
-      'answering -- do not answer from the diff text alone. A review ' +
-      'that never opened a file has no business citing a file:line.';
     attempt = await runReviewAttempt({
       ...loopParams,
-      messages: buildReviewMessages(filesChanged, diff, nudge),
+      messages: buildReviewMessages(filesChanged, diff, REVIEW_NUDGE),
     });
     totalUsage.prompt += attempt.usage.prompt;
     totalUsage.completion += attempt.usage.completion;

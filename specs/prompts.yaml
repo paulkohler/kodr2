@@ -1,0 +1,53 @@
+name: prompt files
+status: implemented
+description: >
+  Static model-facing prompt text lives in prompts/*.md as plain markdown
+  files, loaded via src/prompts.mjs, instead of being embedded as template
+  literals in code. Editing prompt wording then never touches program
+  logic: the diff is the prompt change and nothing else, prompts are
+  reviewable (and diffable) as prose, and there is no string-escaping in
+  the way. Dynamic prompt parts (the workspace root note, diffs, file
+  lists, per-attempt nudge assembly) stay in code -- only static text
+  moves.
+
+files:
+  - prompts/system.md — build-phase base system prompt (context.mjs)
+  - prompts/review.md — review pass system prompt (review.mjs)
+  - prompts/review-nudge.md — grounding nudge appended on the review retry (review.mjs)
+  - prompts/retrospective.md — memory retrospective system prompt (memory.mjs)
+  - prompts/compact.md — compaction summary system prompt (compact.mjs)
+
+inputs:
+  name:
+    type: string
+    required: true
+    description: Prompt name -- the prompts/<name>.md basename, no extension
+
+outputs:
+  content:
+    type: string
+    description: The file's content, trimmed
+
+constraints:
+  - >
+    loadPrompt(name) resolves prompts/<name>.md relative to the package
+    itself (new URL against import.meta.url), never the process cwd, so it
+    works installed globally, as a dependency, or run from any directory.
+  - >
+    Content is read synchronously and trimmed, so a trailing newline in a
+    .md file (which editors and formatters add) never changes the prompt
+    sent to the model.
+  - >
+    A missing or empty prompt file throws -- deliberately, despite this
+    repo's errors-as-return-values convention. It is a packaging bug, not
+    a runtime condition to degrade through, and consumers load prompts at
+    module import: failing the import beats a model silently running with
+    an empty system prompt.
+  - >
+    prompts/ ships in the npm package (package.json files list) -- see
+    specs/distribution.yaml. The tarball test asserts it is present.
+
+tests:
+  unit:
+    - every known prompt loads as non-empty trimmed text
+    - loadPrompt throws on an unknown prompt name

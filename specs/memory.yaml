@@ -142,17 +142,27 @@ constraints:
     already uses for its review pass) — treated as proposed: true (a
     retrospective did run) but notes: '' and applied: false, with no
     prompt and no proposal file, since there's nothing to confirm or write.
+  - >
+    The retrospective system prompt states the call's constraints
+    explicitly: the model has no tools in this step and must reply with
+    plain text only (the transcript it reflects on is full of tool calls,
+    which otherwise invites imitating one); the reply is saved verbatim
+    and loaded into every future run's system prompt, so notes must be
+    durable workspace lessons (not session narrative, not what the
+    workspace instructions already say) and must never contain secrets,
+    tokens, or credentials even if they appeared in the transcript.
 
 open_questions:
   - What triggers "worth a retrospective"? Every run, or only non-trivial ones (tool calls above some floor, or stoppedReason != complete)? Running it unconditionally is the simplest default but spends tokens on runs that taught nothing.
   - Should MEMORY.md be scoped per-workspace only, or is there ever a case for a user-level memory shared across projects? Starting workspace-only avoids cross-project bleed; revisit if that turns out to be too narrow.
-  - Retrospective prompt design (what specifically to ask the model to reflect on) needs its own iteration once this is implemented — not something to lock down before seeing real proposals.
+  - Retrospective prompt design (what specifically to ask the model to reflect on) needs iteration against real proposals. A first hardening pass added the no-tools/plain-text rule, the saved-verbatim warning, and the no-secrets rule; what to *ask for* is still based on intuition, not observed proposal quality.
 
 tests:
   unit:
     - retrospective is skipped when --memory is not set
     - retrospective is skipped when remaining budget (after memoryReserve) is exhausted
     - retrospective is skipped when the run made no tool calls
+    - retrospective system prompt forbids tool calls and secrets and states notes are saved verbatim
     - retrospective call receives timeoutMs capped to the remaining run budget
     - attended session prints the proposal and applies on a "y" response
     - attended session discards on "n" or no response

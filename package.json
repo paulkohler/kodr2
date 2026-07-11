@@ -20,6 +20,7 @@
   "type": "module",
   "files": [
     "bin/",
+    "prompts/",
     "src/",
     "README.md",
     "LICENSE"

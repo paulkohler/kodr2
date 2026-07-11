@@ -109,6 +109,26 @@ describe('runMemoryRetrospective', () => {
     assert.ok(timeoutMs > 7000 && timeoutMs < 9500, `got ${timeoutMs}`);
   });
 
+  it('system prompt forbids tool calls and secrets and states notes are saved verbatim', async () => {
+    const client = scriptedClient([finalTurn('No findings.')]);
+    await runMemoryRetrospective({
+      client,
+      modelId: 'test',
+      messages: baseMessages(),
+      cwd: tmpDir,
+      toolTurns: 2,
+      runsDir: tmpDir,
+    });
+    const system = client.calls[0].messages.find(
+      (m) => m.role === 'system',
+    ).content;
+    assert.match(system, /no tools in this step/);
+    assert.match(system, /plain text only/);
+    assert.match(system, /saved verbatim/);
+    assert.match(system, /secrets, tokens, or credentials/);
+    assert.match(system, /No findings\./);
+  });
+
   it('treats "No findings." as nothing to propose', async () => {
     const client = scriptedClient([finalTurn('No findings.')]);
     const result = await runMemoryRetrospective({

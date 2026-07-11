@@ -64,6 +64,7 @@ describe('npm package integration', () => {
     const paths = packed.files.map((file) => file.path);
     assert.ok(paths.includes('bin/kodr.mjs'));
     assert.ok(paths.includes('src/harness.mjs'));
+    assert.ok(paths.includes('prompts/system.md'));
     assert.ok(paths.includes('README.md'));
     assert.ok(paths.includes('LICENSE'));
     assert.ok(!paths.some((path) => path.startsWith('.claude/')));

@@ -112,6 +112,17 @@ constraints:
     empty and the model relies entirely on read_file/list_files/search;
     this is not an error, just a smaller starting context.
   - >
+    The review system prompt carries the same small-model steering the
+    build prompt got (see specs/harness.yaml): the tool-channel contract
+    (one call per message, never text-form), the completion semantics (a
+    reply with no tool call ends the review, so investigate before
+    answering — the final reply is the review itself), the tool error
+    contract, and the data-not-instructions trust rule. It also discloses
+    what the reviewer cannot do — the tool set is read-only, so it must
+    never claim to have run tests or builds — and constrains the reply
+    format (concrete findings ordered most severe first, correctness only,
+    or the exact reply "No findings.").
+  - >
     If the first attempt's tool-call count is under minToolCalls, exactly
     one retry runs with an explicit nudge appended to the prompt ("read
     the actual changed files... a review that never opened a file has no
@@ -155,6 +166,7 @@ tests:
   unit:
     - returns skipped: true when filesChanged is empty, without calling the model
     - runs a read-only tool loop and returns findings from the final turn
+    - system prompt states the read-only tool set, completion semantics, grounding rules, and reply format
     - restricts the tool registry so write_file/edit_file/run_command are unavailable
     - marks a review grounded when the first attempt meets minToolCalls
     - retries once with a nudge when the first attempt is under minToolCalls

@@ -9,10 +9,11 @@ import { join, relative } from 'node:path';
 import { shouldIgnoreEntry } from './ignore.mjs';
 import { readMemory } from './memory.mjs';
 import { resolveExistingPath } from './path-jail.mjs';
+import { loadPrompt } from './prompts.mjs';
 import { discoverSkills } from './skills.mjs';
 
 const INSTRUCTION_FILES = ['KODR.md', 'AGENTS.md'];
-const MAX_FILES = 200;
+export const MAX_FILES = 200;
 
 /**
  * Disclose the workspace root's absolute path and the path convention. Tool
@@ -79,10 +80,15 @@ export async function buildSystemPrompt(cwd, options = {}) {
     parts.push('</available-skills>');
   }
 
-  const files = await listWorkspaceFiles(cwd);
-  if (files.length > 0) {
+  const listing = await listWorkspaceFiles(cwd);
+  if (listing.files.length > 0) {
     parts.push('<workspace-files>');
-    parts.push(files.join('\n'));
+    parts.push(listing.files.join('\n'));
+    if (listing.truncated) {
+      parts.push(
+        `(listing truncated at ${MAX_FILES} files -- use list_files or search for the rest)`,
+      );
+    }
     parts.push('</workspace-files>');
   }
 
@@ -114,62 +120,51 @@ export async function readInstructions(cwd) {
 }
 
 /**
- * Build a flat file listing of the workspace.
+ * Build a flat file listing of the workspace. The walk stops at MAX_FILES;
+ * `truncated` reports whether it did, so the prompt can mark the listing as
+ * incomplete -- a model shown a silently partial listing concludes the
+ * missing files don't exist instead of looking for them.
  * @param {string} cwd
- * @returns {Promise<string[]>}
+ * @returns {Promise<{ files: string[], truncated: boolean }>}
  */
 export async function listWorkspaceFiles(cwd) {
   const files = [];
-  await walk(cwd, cwd, files);
-  return files;
+  const truncated = await walk(cwd, cwd, files);
+  return { files, truncated };
 }
 
 async function walk(dir, root, files) {
-  if (files.length >= MAX_FILES) {
-    return;
-  }
-
   let entries;
   try {
     entries = await readdir(dir, { withFileTypes: true });
   } catch {
-    return;
+    return false;
   }
 
+  let truncated = false;
   for (const entry of entries) {
-    if (files.length >= MAX_FILES) {
-      return;
-    }
     if (shouldIgnoreEntry(entry.name)) {
       continue;
+    }
+    // A non-ignored entry remains once the cap is hit: the listing is
+    // incomplete. (A directory here may turn out empty -- counted as
+    // truncated anyway rather than walking it just to find out.)
+    if (files.length >= MAX_FILES) {
+      return true;
     }
 
     const full = join(dir, entry.name);
     const rel = relative(root, full);
 
     if (entry.isDirectory()) {
-      await walk(full, root, files);
+      if (await walk(full, root, files)) {
+        truncated = true;
+      }
     } else {
       files.push(rel);
     }
   }
+  return truncated;
 }
 
-const BASE_PROMPT = `You are Kodr, a coding assistant. You help developers by reading, writing, and modifying code in their workspace.
-
-You have tools to interact with the filesystem. Use them to understand the codebase before making changes. Always read relevant files before editing them.
-
-Tool-use contract:
-- Use the provided tool channel for every tool call.
-- Never write tool calls as plain text, Markdown, XML, JSON blocks, or formats like tool_name[ARGS]{...}.
-- If you need a tool, call exactly one of the provided tools by name with a JSON object of arguments.
-- After tool results are returned, continue with more tool calls if needed, or provide a concise final response.
-
-Guidelines:
-- Read before you write. Understand the existing code structure.
-- Make targeted changes. Don't rewrite files unnecessarily.
-- Respect existing code style and conventions.
-- When writing new files, match the patterns used in the project.
-- If a task requires running commands (tests, builds), use the run_command tool.
-- If a task matches an available skill, load it with load_skill and follow its instructions.
-- Explain what you're doing and why.`;
+const BASE_PROMPT = loadPrompt('system');
