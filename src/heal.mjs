@@ -12,14 +12,14 @@ const DEFAULT_MAX_TURNS = 3;
 /**
  * Run the healing loop.
  * @param {object} params
- * @param {object} params.client - Model client
+ * @param {import('./provider.mjs').Provider} params.client - Model client
  * @param {string} params.modelId - Model to use
  * @param {Array} params.messages - Conversation so far
- * @param {object} params.tools - Tool registry
+ * @param {import('./tools/index.mjs').ToolRegistry} params.tools - Tool registry
  * @param {function} params.verifyFn - Verification function () => result
  * @param {{ passed: boolean, output: string }} params.failure - Initial failure
  * @param {number} [params.maxTurns] - Max repair turns
- * @param {object} [params.reporter] - Output channel (see specs/reporter.yaml);
+ * @param {import('./reporter.mjs').Reporter} [params.reporter] - Output channel (see specs/reporter.yaml);
  *   defaults to a null (silent) reporter
  * @param {Date} [params.startedAt] - Run start, for the budget check
  * @param {number} [params.maxRunMs] - Stop between turns after this many ms (0 disables)
@@ -32,7 +32,9 @@ const DEFAULT_MAX_TURNS = 3;
  * @param {number} [params.heartbeatMs] - Interval for "still waiting on a model response" notices (0 disables)
  * @param {function} [params.onHeartbeat] - Called with elapsed ms on each heartbeat tick
  * @param {function} [params.onDebug] - Forwarded to the tool loop (see specs/debug-log.yaml)
- * @returns {Promise<{ healed: boolean, turns: number, verification: object, compactions: number, usage: { prompt: number, completion: number }, retries: number }>}
+ * @param {boolean} [params.approveCommands] - Require confirm() approval before each run_command call
+ * @param {function} [params.confirm] - (call) => Promise<{ approved }>; used when approveCommands is on
+ * @returns {Promise<{ healed: boolean, turns: number, verification: object, compactions: number, usage: { prompt: number, completion: number, cost: number }, retries: number }>}
  */
 export async function heal(params) {
   const {
