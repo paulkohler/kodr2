@@ -11,8 +11,32 @@
  */
 
 /**
- * @param {Array<object>} jobs
- * @returns {Array<object>} one summary row per variant
+ * @typedef {object} Job
+ * @property {string} task
+ * @property {string} variant
+ * @property {boolean} [passed]
+ * @property {number} [toolTurns]
+ * @property {number} [promptTokens]
+ * @property {number} [completionTokens]
+ * @property {boolean} [healed]
+ * @property {string} [stoppedReason]
+ */
+
+/**
+ * @typedef {object} AggregateRow
+ * @property {string} variant
+ * @property {number} tasks
+ * @property {number} runs
+ * @property {number} passAtK
+ * @property {number} meanTurns
+ * @property {number} meanTokens
+ * @property {number} heals
+ * @property {number} aborted
+ */
+
+/**
+ * @param {Array<Job>} jobs
+ * @returns {Array<AggregateRow>} one summary row per variant
  */
 export function aggregate(jobs) {
   const byVariant = new Map();
@@ -82,7 +106,7 @@ function mean(values) {
 
 /**
  * Render aggregate rows as a markdown table.
- * @param {Array<object>} rows
+ * @param {Array<AggregateRow>} rows
  * @returns {string}
  */
 export function toMarkdown(rows) {
