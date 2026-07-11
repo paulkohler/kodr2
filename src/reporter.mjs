@@ -53,6 +53,22 @@ import {
   formatVerification,
 } from './format.mjs';
 
+/**
+ * @typedef {object} Reporter
+ * @property {(text: string) => void} token
+ * @property {(params: { completed: boolean, finalText?: string }) => void} turnEnd
+ * @property {(name: string) => void} toolActivity
+ * @property {(params: { name: string, args: object }) => void} toolCall
+ * @property {(params: { name: string, result: object }) => void} toolResult
+ * @property {(text: string) => void} notice
+ * @property {(params: { label: string, elapsedMs: number }) => void} heartbeat
+ * @property {(params: { promptTokens: number, limit: number }) => void} compaction
+ * @property {(result: { passed: boolean, output: string, command: string }) => void} verification
+ * @property {(params: { turn: number, max: number }) => void} healTurn
+ * @property {(result: { stoppedReason?: string, filesChanged?: string[], verification?: { passed: boolean }, healed?: boolean, retries?: number, commits?: object, usage?: { prompt: number, completion: number, cost: number } }) => void} summary
+ * @property {(name: string) => void} phase
+ */
+
 /** The full method set — the single source of truth for reporter totality. */
 export const REPORTER_METHODS = [
   'token',
@@ -72,10 +88,10 @@ export const REPORTER_METHODS = [
 /**
  * A reporter whose every method is a no-op. Selected by `--quiet` and `--json`,
  * and the default when a run-path function is called without one.
- * @returns {object}
+ * @returns {Reporter}
  */
 export function createNullReporter() {
-  const reporter = {};
+  const reporter = /** @type {Reporter} */ ({});
   for (const name of REPORTER_METHODS) {
     reporter[name] = () => {};
   }
@@ -88,8 +104,8 @@ export function createNullReporter() {
  * the matching format.mjs string plus a trailing newline. `phase` and
  * `toolActivity` produce no bytes (they had no terminal representation before).
  * The streams are injectable so tests can assert the produced bytes.
- * @param {{ stdout?: object, stderr?: object }} [streams]
- * @returns {object}
+ * @param {{ stdout?: { write: (text: string) => void }, stderr?: { write: (text: string) => void } }} [streams]
+ * @returns {Reporter}
  */
 export function createTerminalReporter(streams = {}) {
   const stdout = streams.stdout || process.stdout;
@@ -124,8 +140,8 @@ export function createTerminalReporter(streams = {}) {
  * for `--events`. Streamed tokens are coalesced: consecutive token() deltas
  * accumulate and flush as a single { event: "assistant_text", text } line on
  * the next non-token event, since a line per token would be unusable.
- * @param {{ out?: object }} [options]
- * @returns {object}
+ * @param {{ out?: { write: (text: string) => void } }} [options]
+ * @returns {Reporter}
  */
 export function createJsonReporter(options = {}) {
   const out = options.out || process.stdout;
