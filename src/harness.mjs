@@ -97,8 +97,8 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  * @property {{ passed: boolean }} [verification]
  * @property {boolean} [healed]
  * @property {number} [healTurns]
- * @property {object} [review]
- * @property {object} [memory]
+ * @property {import('./review.mjs').ReviewResult|{ skipped: true, reason: string }} [review]
+ * @property {import('./memory.mjs').MemoryRetrospective} [memory]
  */
 
 /**

@@ -164,7 +164,7 @@ export async function listLoadedModels(options = {}) {
  * @param {Record<string, string>} [options.env]
  * @param {number} [options.timeoutMs]
  * @param {function} [options.run] - Overridable for tests; defaults to shell.mjs's runShell
- * @returns {Promise<{ model?: object, error?: string }>}
+ * @returns {Promise<{ model?: { identifier: string, contextLength?: number }, error?: string }>}
  */
 export async function ensureModelLoaded(options) {
   const { model, contextWindow } = options;

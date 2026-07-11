@@ -246,6 +246,17 @@ function isNoFindings(notes) {
 }
 
 /**
+ * @typedef {object} MemoryRetrospective
+ * @property {boolean} proposed
+ * @property {string} [notes]
+ * @property {boolean} [applied]
+ * @property {string|null} [proposalPath]
+ * @property {{ prompt: number, completion: number, cost: number }} [usage]
+ * @property {number} [retries]
+ * @property {string} [error]
+ */
+
+/**
  * Run the end-of-run retrospective. Never writes to MEMORY.md without a
  * human decision in the loop -- see the module doc comment.
  * @param {object} params
@@ -265,7 +276,7 @@ function isNoFindings(notes) {
  *   directly to MEMORY.md (autoApply, or an attended "yes") has nothing to do with
  *   runsDir hygiene and must keep working under noSave
  * @param {function} [params.promptYesNoFn] - Overridable for tests; defaults to this module's promptYesNo
- * @returns {Promise<{ proposed: boolean, notes?: string, applied?: boolean, proposalPath?: string|null, usage?: object, retries?: number, error?: string }>}
+ * @returns {Promise<MemoryRetrospective>}
  */
 export async function runMemoryRetrospective(params) {
   const {
