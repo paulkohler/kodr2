@@ -25,6 +25,11 @@ Deliberate v1 scope cuts, not bugs:
 - **TUI live checklist panel** — v1 shows step transitions in scrollback
   plus a `step i/N` header indicator; a persistent checklist panel needs
   render-region work in tui-render.mjs.
+- **Plan-model load sequencing** — a same-provider `--plan-model` on LM
+  Studio relies on JIT on-demand loading (plan model loads for the planner
+  call, build model loads back on step 1). Kodr-owned load/unload/verify
+  sequencing à la `--review-model` (specs/lms.yaml) would avoid double
+  JIT loads and control the context size.
 
 ## Fixed
 

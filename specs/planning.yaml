@@ -64,6 +64,20 @@ inputs:
     description: >
       Character cap on each step's handoff summary (default 2,000 —
       KODR_PLAN_SUMMARY_CAP)
+  planModel:
+    type: string
+    required: false
+    description: >
+      Model spec for the planner call only (--plan-model /
+      KODR_PLAN_MODEL), so a larger model can plan and a smaller one
+      implement. Either a bare model id ("qwen/qwen3-235b" -- planned on
+      the run's own provider/client) or provider-prefixed
+      ("openrouter/anthropic/claude-opus-4.8",
+      "lmstudio/google/gemma-4-26b") to plan on a different provider
+      than the build. The prefix is recognized only when the first path
+      segment is a known provider name (lmstudio, openrouter, ollama);
+      anything else is treated as a bare model id, since model ids
+      themselves contain slashes. Setting a plan model implies --plan.
 
 outputs:
   plan:
@@ -155,6 +169,20 @@ constraints:
     every fresh sub-agent bloats each step, and injecting them nowhere
     silently discards them — both worse than an honest error.
   - >
+    A plan model on the run's own provider is just a different model id
+    on the same client (the provider's own on-demand loading applies --
+    no Kodr-owned load/unload sequencing in v1; that follow-up is
+    noted in the backlog). A provider-prefixed plan model constructs a
+    second provider client for the planner call only, with that
+    provider's default base URL and env-based credentials
+    (OPENROUTER_API_KEY etc.); the build client is untouched. Steps
+    always run on the build model.
+  - >
+    Plan-model setup failure (unknown provider, missing API key,
+    unresolvable model) follows the same rule as every other planning
+    failure: it never fails the run. The planner falls back to the
+    build client and model with a notice, and planning proceeds.
+  - >
     Every limit is overridable by option and env var (option wins).
 
 tests:
@@ -175,5 +203,12 @@ tests:
     - parseArgs handles --plan and every plan limit flag
     - --plan combined with --continue is rejected with an explicit error
     - reporter totality covers plan and stepUpdate across all implementations
+    - planModelSpec parses a bare model id, a provider-prefixed spec, and resolves option then KODR_PLAN_MODEL then null
+    - a slash-bearing model id whose first segment is not a known provider stays a bare model id
+    - runPlannedBuild plans on the plan model (same client) when a bare plan model is set, and steps still run on the build model
+    - runPlannedBuild constructs a second provider client for a provider-prefixed plan model (injectable createProviderFn)
+    - runPlannedBuild falls back to the build client/model with a notice when plan-model setup fails, and still plans
+    - setting a plan model implies the planning phase without --plan
+    - --plan-model combined with --continue is rejected like --plan
   eval:
     - a multi-step prompt against real LM Studio yields at least 2 steps, all done, the expected files on disk, and stoppedReason 'complete'
