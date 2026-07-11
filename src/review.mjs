@@ -144,6 +144,7 @@ async function runReviewAttempt(params) {
  * @param {number} [params.minToolCalls] - Tool-call floor before a review counts as grounded
  * @param {number} [params.maxToolTurns] - Tool-turn ceiling per attempt
  * @param {number} [params.diffTimeoutMs] - Timeout for the git diff call (default 30 seconds — KODR_REVIEW_DIFF_TIMEOUT_MS)
+ * @param {object} [params.reporter] - Output channel; defaults to a terminal reporter (see comment below)
  * @returns {Promise<{ skipped: boolean, findings?: string, grounded?: boolean, toolTurns?: number, usage?: object, retries?: number }>}
  */
 export async function runReview(params) {
