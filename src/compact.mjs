@@ -202,10 +202,10 @@ export function renderTranscript(
  * one message, and return the new conversation. On failure the original
  * messages are returned unchanged with an `error`.
  * @param {object} params
- * @param {object} params.client - Model client
+ * @param {import('./provider.mjs').Provider} params.client - Model client
  * @param {string} params.modelId - Model to summarize with
  * @param {Array} params.messages - Conversation so far
- * @param {object} [params.reporter] - Output channel for the streamed summary
+ * @param {import('./reporter.mjs').Reporter} [params.reporter] - Output channel for the streamed summary
  *   (see specs/reporter.yaml); defaults to a null (silent) reporter
  * @param {number} [params.timeoutMs] - Per-call timeout override (e.g. the run's remaining budget)
  * @param {number} [params.heartbeatMs] - Interval for onHeartbeat "still waiting" notices (0 disables)
@@ -217,7 +217,7 @@ export function renderTranscript(
  * @param {number} [params.maxTaskChars] - Cap for the first user (task) message
  *   (also KODR_COMPACT_TASK_CHARS; default 8000), a larger bound than other
  *   messages but still bounded so a huge task prompt can't overflow the request
- * @returns {Promise<{ messages: Array, summary: string, usage: { prompt: number, completion: number }, retries: number, error?: string }>}
+ * @returns {Promise<{ messages: Array, summary: string, usage: { prompt: number, completion: number, cost: number }, retries: number, error?: string }>}
  */
 export async function compactMessages(params) {
   const { client, modelId, messages, reporter, timeoutMs } = params;
