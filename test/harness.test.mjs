@@ -218,8 +218,12 @@ describe('run failure artifacts', () => {
       res.writeHead(500);
       res.end('model failed');
     });
-    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const { port } = server.address();
+    await new Promise((resolve) =>
+      server.listen(0, '127.0.0.1', () => resolve(undefined)),
+    );
+    const { port } = /** @type {import('node:net').AddressInfo} */ (
+      server.address()
+    );
 
     try {
       const result = await run('do work', {
@@ -257,8 +261,12 @@ describe('run failure artifacts', () => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end('{"choices":[{"message":{"content":"hi"}}]}');
     });
-    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const { port } = server.address();
+    await new Promise((resolve) =>
+      server.listen(0, '127.0.0.1', () => resolve(undefined)),
+    );
+    const { port } = /** @type {import('node:net').AddressInfo} */ (
+      server.address()
+    );
 
     try {
       const result = await run('do work', {
@@ -301,8 +309,12 @@ describe('run failure artifacts', () => {
       res.writeHead(400);
       res.end('bad request');
     });
-    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const { port } = server.address();
+    await new Promise((resolve) =>
+      server.listen(0, '127.0.0.1', () => resolve(undefined)),
+    );
+    const { port } = /** @type {import('node:net').AddressInfo} */ (
+      server.address()
+    );
 
     try {
       const result = await run('do work', {
@@ -345,8 +357,12 @@ describe('no-op completion', () => {
           'data: [DONE]\n\n',
       );
     });
-    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const { port } = server.address();
+    await new Promise((resolve) =>
+      server.listen(0, '127.0.0.1', () => resolve(undefined)),
+    );
+    const { port } = /** @type {import('node:net').AddressInfo} */ (
+      server.address()
+    );
 
     try {
       const result = await run('do work', {
@@ -402,8 +418,12 @@ describe('priorFilesChanged wiring', () => {
           'data: [DONE]\n\n',
       );
     });
-    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const { port } = server.address();
+    await new Promise((resolve) =>
+      server.listen(0, '127.0.0.1', () => resolve(undefined)),
+    );
+    const { port } = /** @type {import('node:net').AddressInfo} */ (
+      server.address()
+    );
 
     try {
       const result = await run('continue the previous work', {
@@ -419,7 +439,8 @@ describe('priorFilesChanged wiring', () => {
       // run's file is still reflected -- not lost just because this
       // session didn't re-touch it.
       assert.deepEqual(result.filesChanged, ['prior.mjs']);
-      assert.equal(result.commits.raw.committed, true);
+      const raw = /** @type {{ committed: boolean }} */ (result.commits.raw);
+      assert.equal(raw.committed, true);
       const filesInCommit = await git(cwd, [
         'show',
         '--name-only',
@@ -455,8 +476,12 @@ describe('retries telemetry', () => {
           'data: [DONE]\n\n',
       );
     });
-    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const { port } = server.address();
+    await new Promise((resolve) =>
+      server.listen(0, '127.0.0.1', () => resolve(undefined)),
+    );
+    const { port } = /** @type {import('node:net').AddressInfo} */ (
+      server.address()
+    );
 
     try {
       const result = await run('do work', {
@@ -496,8 +521,12 @@ describe('cost telemetry', () => {
           'data: [DONE]\n\n',
       );
     });
-    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const { port } = server.address();
+    await new Promise((resolve) =>
+      server.listen(0, '127.0.0.1', () => resolve(undefined)),
+    );
+    const { port } = /** @type {import('node:net').AddressInfo} */ (
+      server.address()
+    );
 
     try {
       const result = await run('do work', {
@@ -652,8 +681,12 @@ async function startTextOnlyModel() {
         'data: [DONE]\n\n',
     );
   });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = server.address();
+  await new Promise((resolve) =>
+    server.listen(0, '127.0.0.1', () => resolve(undefined)),
+  );
+  const { port } = /** @type {import('node:net').AddressInfo} */ (
+    server.address()
+  );
   return {
     baseUrl: `http://127.0.0.1:${port}`,
     close: () => new Promise((resolve) => server.close(resolve)),
@@ -670,8 +703,12 @@ async function startFailingModel() {
     res.writeHead(500);
     res.end('model failed');
   });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = server.address();
+  await new Promise((resolve) =>
+    server.listen(0, '127.0.0.1', () => resolve(undefined)),
+  );
+  const { port } = /** @type {import('node:net').AddressInfo} */ (
+    server.address()
+  );
   return {
     baseUrl: `http://127.0.0.1:${port}`,
     close: () => new Promise((resolve) => server.close(resolve)),
@@ -745,13 +782,17 @@ describe('review pass wiring', () => {
   it('skips the model-load step entirely for a provider with no model-lifecycle concept (e.g. OpenRouter)', async () => {
     let loadCalled = false;
     let reviewCalledWithModel;
+    const client = /** @type {import('../src/provider.mjs').Provider} */ ({
+      capabilities: { modelLifecycle: false },
+    });
     const result = await runReviewPass({
       cwd: '/tmp',
-      client: { capabilities: { modelLifecycle: false } },
+      client,
       reviewModel: 'reviewer',
       buildContextWindow: 8192,
+      startedAt: new Date(),
+      maxRunMs: 60000,
       filesChanged: ['a.mjs'],
-      quiet: true,
       ensureModelLoadedFn: async () => {
         loadCalled = true;
         return { model: { identifier: 'reviewer' } };
@@ -767,14 +808,20 @@ describe('review pass wiring', () => {
     assert.deepEqual(result, { grounded: true });
   });
 
+  const modelLifecycleClient =
+    /** @type {import('../src/provider.mjs').Provider} */ ({
+      capabilities: { modelLifecycle: true },
+    });
+
   it('returns { skipped: true, error } rather than throwing when the model switch fails', async () => {
     const result = await runReviewPass({
       cwd: '/tmp',
-      client: { capabilities: { modelLifecycle: true } },
+      client: modelLifecycleClient,
       reviewModel: 'reviewer',
       buildContextWindow: 8192,
+      startedAt: new Date(),
+      maxRunMs: 60000,
       filesChanged: ['a.mjs'],
-      quiet: true,
       ensureModelLoadedFn: async () => {
         throw new Error('lms exploded');
       },
@@ -790,11 +837,12 @@ describe('review pass wiring', () => {
   it('returns { skipped: true, error } rather than throwing when the review itself fails', async () => {
     const result = await runReviewPass({
       cwd: '/tmp',
-      client: { capabilities: { modelLifecycle: true } },
+      client: modelLifecycleClient,
       reviewModel: 'reviewer',
       buildContextWindow: 8192,
+      startedAt: new Date(),
+      maxRunMs: 60000,
       filesChanged: ['a.mjs'],
-      quiet: true,
       ensureModelLoadedFn: async () => ({ model: { identifier: 'reviewer' } }),
       runReviewFn: async () => {
         throw new Error('review crashed mid-flight');
@@ -808,11 +856,12 @@ describe('review pass wiring', () => {
   it("returns { skipped: true, error } from ensureModelLoaded's own error path, without throwing", async () => {
     const result = await runReviewPass({
       cwd: '/tmp',
-      client: { capabilities: { modelLifecycle: true } },
+      client: modelLifecycleClient,
       reviewModel: 'reviewer',
       buildContextWindow: 8192,
+      startedAt: new Date(),
+      maxRunMs: 60000,
       filesChanged: ['a.mjs'],
-      quiet: true,
       ensureModelLoadedFn: async () => ({ error: 'reviewer model not found' }),
       runReviewFn: async () => {
         throw new Error('should not be called -- load already failed');
