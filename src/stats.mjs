@@ -31,9 +31,40 @@ export async function loadRunRecords(runsDir) {
 }
 
 /**
+ * @typedef {object} Stats
+ * @property {number} total
+ * @property {Object<string, number>} [stoppedReasonCounts]
+ * @property {number} [noOpRate]
+ * @property {number} [healAttemptedRate]
+ * @property {number|null} [healSuccessRate]
+ * @property {number} [compactionRate]
+ * @property {number} [avgCompactions]
+ * @property {number} [retryRate]
+ * @property {number} [avgRetries]
+ * @property {number} [verifyAttemptedRate]
+ * @property {number|null} [verifyPassRate]
+ * @property {number} [avgToolTurns]
+ * @property {number|null} [avgDurationMs]
+ * @property {{ prompt: number, completion: number, cost: number }} [totalUsage]
+ */
+
+/**
+ * @typedef {object} RunRecord
+ * @property {string} [stoppedReason]
+ * @property {boolean} [noOpCompletion]
+ * @property {boolean} [healed]
+ * @property {number} [compactions]
+ * @property {number} [retries]
+ * @property {boolean} [verified]
+ * @property {number} [toolTurns]
+ * @property {number} [durationMs]
+ * @property {{ prompt: number, completion: number, cost: number }} [usage]
+ */
+
+/**
  * Compute aggregate stats across a set of run records.
- * @param {Array<object>} records
- * @returns {object} See specs/stats.yaml for the full field list
+ * @param {Array<RunRecord>} records
+ * @returns {Stats} See specs/stats.yaml for the full field list
  */
 export function computeStats(records) {
   const total = records.length;
