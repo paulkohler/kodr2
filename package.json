@@ -1,6 +1,6 @@
 {
   "name": "kodr2",
-  "version": "0.2.111",
+  "version": "0.2.113",
   "description": "A one-shot coding harness for local LM Studio models",
   "keywords": [
     "coding-agent",
