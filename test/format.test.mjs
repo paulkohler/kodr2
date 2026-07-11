@@ -126,7 +126,9 @@ describe('formatSummary', () => {
   });
 
   it('includes token usage', () => {
-    const out = formatSummary({ usage: { prompt: 100, completion: 50 } });
+    const out = formatSummary({
+      usage: { prompt: 100, completion: 50, cost: 0 },
+    });
     assert.ok(out.includes('100'));
     assert.ok(out.includes('50'));
   });
@@ -263,7 +265,7 @@ describe('formatStats', () => {
         verifyPassRate: 1,
         avgToolTurns: 3.5,
         avgDurationMs: 1234,
-        totalUsage: { prompt: 100, completion: 40 },
+        totalUsage: { prompt: 100, completion: 40, cost: 0 },
       }),
     );
 
@@ -312,7 +314,7 @@ describe('formatStats', () => {
         verifyPassRate: null,
         avgToolTurns: 1,
         avgDurationMs: null,
-        totalUsage: { prompt: 0, completion: 0 },
+        totalUsage: { prompt: 0, completion: 0, cost: 0 },
       }),
     );
 
