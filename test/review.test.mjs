@@ -26,18 +26,24 @@ afterEach(async () => {
 // the last one once the queue is drained. Mirrors tool-loop.test.mjs's
 // own scriptedClient -- kept local rather than shared, matching this
 // repo's existing per-file test-double style.
+/**
+ * @param {Array<object>} responses
+ * @returns {import('../src/provider.mjs').Provider & { calls: Array<any> }}
+ */
 function scriptedClient(responses) {
   const calls = [];
   let i = 0;
-  return {
-    calls,
-    async chat(params) {
-      calls.push(params);
-      const response = responses[Math.min(i, responses.length - 1)];
-      i++;
-      return response;
-    },
-  };
+  return /** @type {import('../src/provider.mjs').Provider & { calls: Array<any> }} */ (
+    /** @type {any} */ ({
+      calls,
+      async chat(params) {
+        calls.push(params);
+        const response = responses[Math.min(i, responses.length - 1)];
+        i++;
+        return response;
+      },
+    })
+  );
 }
 
 function toolCallTurn(name, args) {
