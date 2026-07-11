@@ -23,22 +23,26 @@ describe('healing', () => {
 
   it('respects a zero-turn limit without calling the model', async () => {
     let modelCalled = false;
-    const client = {
-      async chat() {
-        modelCalled = true;
-        throw new Error('model must not be called');
-      },
-    };
+    const client = /** @type {import('../src/provider.mjs').Provider} */ (
+      /** @type {any} */ ({
+        async chat() {
+          modelCalled = true;
+          throw new Error('model must not be called');
+        },
+      })
+    );
+    const tools = /** @type {import('../src/tools/index.mjs').ToolRegistry} */ (
+      /** @type {any} */ ({})
+    );
     const verification = { passed: false, output: 'failure' };
     const result = await heal({
       client,
       modelId: 'unused',
       messages: [],
-      tools: {},
+      tools,
       verifyFn: async () => verification,
       failure: verification,
       maxTurns: 0,
-      quiet: true,
     });
 
     assert.equal(modelCalled, false);
@@ -47,14 +51,16 @@ describe('healing', () => {
   });
 
   it('reports the last observed verification without re-verifying after turns exhaust', async () => {
-    const client = {
-      async chat() {
-        return {
-          message: { role: 'assistant', content: 'attempted a fix' },
-          usage: { prompt: 1, completion: 1 },
-        };
-      },
-    };
+    const client = /** @type {import('../src/provider.mjs').Provider} */ (
+      /** @type {any} */ ({
+        async chat() {
+          return {
+            message: { role: 'assistant', content: 'attempted a fix' },
+            usage: { prompt: 1, completion: 1 },
+          };
+        },
+      })
+    );
     let verifyCalls = 0;
     // Distinct output each call so the turn counts as progress (not no-op),
     // and a flip to passing on a hypothetical second call so a stray re-verify
@@ -66,15 +72,17 @@ describe('healing', () => {
       }
       return { passed: true, output: '' };
     };
+    const tools = /** @type {import('../src/tools/index.mjs').ToolRegistry} */ (
+      /** @type {any} */ ({ definitions: () => [] })
+    );
     const result = await heal({
       client,
       modelId: 'unused',
       messages: [],
-      tools: { definitions: () => [] },
+      tools,
       verifyFn,
       failure: { passed: false, output: 'initial failure' },
       maxTurns: 1,
-      quiet: true,
     });
 
     assert.equal(verifyCalls, 1);
@@ -85,26 +93,30 @@ describe('healing', () => {
 
   it('forwards heartbeatMs and onHeartbeat to the model client', async () => {
     const calls = [];
-    const client = {
-      async chat(params) {
-        calls.push(params);
-        return {
-          message: { role: 'assistant', content: 'fixed' },
-          usage: { prompt: 1, completion: 1 },
-        };
-      },
-    };
+    const client = /** @type {import('../src/provider.mjs').Provider} */ (
+      /** @type {any} */ ({
+        async chat(params) {
+          calls.push(params);
+          return {
+            message: { role: 'assistant', content: 'fixed' },
+            usage: { prompt: 1, completion: 1 },
+          };
+        },
+      })
+    );
+    const tools = /** @type {import('../src/tools/index.mjs').ToolRegistry} */ (
+      /** @type {any} */ ({ definitions: () => [] })
+    );
     const verification = { passed: false, output: 'failure' };
     const onHeartbeat = () => {};
     await heal({
       client,
       modelId: 'unused',
       messages: [],
-      tools: { definitions: () => [] },
+      tools,
       verifyFn: async () => ({ passed: true, output: '' }),
       failure: verification,
       maxTurns: 1,
-      quiet: true,
       heartbeatMs: 5000,
       onHeartbeat,
     });
@@ -115,25 +127,29 @@ describe('healing', () => {
   });
 
   it("sums the tool loop's retries into the heal result", async () => {
-    const client = {
-      async chat() {
-        return {
-          message: { role: 'assistant', content: 'fixed' },
-          usage: { prompt: 1, completion: 1 },
-          retries: 2,
-        };
-      },
-    };
+    const client = /** @type {import('../src/provider.mjs').Provider} */ (
+      /** @type {any} */ ({
+        async chat() {
+          return {
+            message: { role: 'assistant', content: 'fixed' },
+            usage: { prompt: 1, completion: 1 },
+            retries: 2,
+          };
+        },
+      })
+    );
+    const tools = /** @type {import('../src/tools/index.mjs').ToolRegistry} */ (
+      /** @type {any} */ ({ definitions: () => [] })
+    );
     const verification = { passed: false, output: 'failure' };
     const result = await heal({
       client,
       modelId: 'unused',
       messages: [],
-      tools: { definitions: () => [] },
+      tools,
       verifyFn: async () => ({ passed: true, output: '' }),
       failure: verification,
       maxTurns: 1,
-      quiet: true,
     });
 
     assert.equal(result.retries, 2);

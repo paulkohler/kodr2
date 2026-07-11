@@ -39,7 +39,8 @@ describe('loadHooks', () => {
     );
     const { config, error } = await loadHooks(tmpDir);
     assert.equal(error, null);
-    assert.deepEqual(config.hooks.Stop, [{ run: 'npm run build' }]);
+    const hooks = /** @type {{ Stop?: Array }} */ (config.hooks);
+    assert.deepEqual(hooks.Stop, [{ run: 'npm run build' }]);
   });
 
   it('yields no hooks and no error when the file is missing', async () => {

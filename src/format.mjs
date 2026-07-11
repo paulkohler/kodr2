@@ -6,6 +6,8 @@
 
 import { hasContextHeadroom } from './model.mjs';
 
+/** @typedef {import('./stats.mjs').Stats} Stats */
+
 const RESET = '\x1b[0m';
 const DIM = '\x1b[2m';
 const BOLD = '\x1b[1m';
@@ -28,7 +30,7 @@ export function formatToolCall(name, args) {
 /**
  * Format a tool result for terminal display.
  * @param {string} name - Tool name
- * @param {object} result - Tool result
+ * @param {{ error?: string, content?: string, files?: Array, matches?: Array, exitCode?: number, image?: { path: string } }} result - Tool result
  * @returns {string}
  */
 export function formatToolResult(name, result) {
@@ -90,7 +92,7 @@ export function formatHealTurn(turn, max) {
 
 /**
  * Format a run summary.
- * @param {object} result
+ * @param {{ filesChanged?: string[], verification?: { passed: boolean }, healed?: boolean, retries?: number, commits?: { raw?: object, fix?: object }, usage?: { prompt: number, completion: number, cost: number } }} result
  * @returns {string}
  */
 export function formatSummary(result) {
@@ -146,7 +148,7 @@ export function formatCost(cost) {
  * failed `git add`/`git commit` is actionable and must not be silently
  * absorbed into the result object with no visible signal. A clean skip
  * (no files changed, nothing to commit) stays quiet.
- * @param {{ raw?: object, fix?: object }} commits
+ * @param {{ raw?: { committed?: boolean, sha?: string, error?: string }, fix?: { committed?: boolean, sha?: string, error?: string } }} commits
  * @returns {string[]}
  */
 function formatCommitLines(commits) {
@@ -283,7 +285,7 @@ function statusIcon(status) {
 
 /**
  * Format a `kodr stats` report.
- * @param {object} stats - See computeStats' return shape
+ * @param {Stats} stats
  * @returns {string}
  */
 export function formatStats(stats) {

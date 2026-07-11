@@ -60,7 +60,10 @@ describe('view_image', () => {
   });
 
   it('requires a path', async () => {
-    const result = await viewImage.execute({}, context);
+    const result = await viewImage.execute(
+      /** @type {{ path: any }} */ ({}),
+      context,
+    );
     assert.match(result.error, /path is required/);
   });
 

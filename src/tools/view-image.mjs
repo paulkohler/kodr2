@@ -23,7 +23,7 @@ const MEDIA_TYPES = {
  * Max bytes an image may be before view_image refuses it. Overridable via the
  * registry option, then KODR_MAX_IMAGE_BYTES, then the default -- a huge file
  * would otherwise bloat the request the base64 rides in.
- * @param {object} [context]
+ * @param {{ maxImageBytes?: number }} [context]
  * @returns {number}
  */
 export function maxImageBytes(context = {}) {

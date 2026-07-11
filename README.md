@@ -2,6 +2,11 @@
 
 A one-shot coding harness for local and hosted LLMs. Zero dependencies, Node.js 22+.
 
+> **IDE type support:** the zero-dependency guard keeps type packages out of
+> `package.json`, so a fresh clone has no JSDoc IntelliSense out of the box.
+> Run `npm install --no-save @types/node` to get it (see
+> [CONTRIBUTING.md](CONTRIBUTING.md)).
+
 Kodr reads a prompt, assembles workspace context, lets the model use tools to read and write files, optionally verifies the result, and heals if verification fails. Works against LM Studio, Ollama (local or cloud), or OpenRouter — see [Providers](#providers).
 
 > **Note:** kodr2 is a from-scratch rebuild of the original [kodr](https://github.com/paulkohler/kodr), which grew to 264 numbered phases and became hard to reason about. This repo restarts spec-first: every feature gets a YAML spec in `specs/` before it's implemented, and spec status moves `proposed → accepted → implemented → deprecated`. The original is kept as a frozen archive — see [the switchover post](https://paulkohler.me/blog/2026-07-07-kodr2-starting-over/) for why.
@@ -305,6 +310,9 @@ npm run eval
 
 # Syntax check
 npm run check
+
+# JSDoc type check (requires `npm install -g typescript`; see note above)
+npm run check:types
 
 # Format
 npm run format

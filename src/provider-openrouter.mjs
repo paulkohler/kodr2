@@ -8,6 +8,8 @@
 import { parseEnvNames } from './env.mjs';
 import { createClient, DEFAULT_MAX_RETRIES } from './model.mjs';
 
+/** @typedef {import('./provider.mjs').Provider} Provider */
+
 export const DEFAULT_OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 
 export const CAPABILITIES = {
@@ -78,7 +80,7 @@ export function resolveProviderOrder(option) {
  * Returns undefined when there's nothing to say -- ZDR and data-collection
  * denial disabled, and no explicit provider order -- so it's cleanly
  * omittable from the request body rather than sent as an empty object.
- * @param {object} options
+ * @param {{ noZdr?: boolean, allowDataCollection?: boolean, providerOrder?: string[] }} options
  * @returns {object|undefined}
  */
 function buildProviderRouting(options) {
@@ -110,7 +112,7 @@ function buildProviderRouting(options) {
  * @param {string[]} [options.providerOrder] - Provider slugs to try in order
  *   (OpenRouter's `provider.order`), e.g. ["akashml", "parasail"]
  * @param {string} [options.apiKey] - Overridable for tests; defaults to OPENROUTER_API_KEY
- * @returns {object} Provider with chat/models/resolveModel/contextInfo
+ * @returns {Provider}
  */
 export function createOpenRouterProvider(options = {}) {
   const apiKey = options.apiKey ?? process.env.OPENROUTER_API_KEY;

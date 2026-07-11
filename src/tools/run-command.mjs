@@ -18,7 +18,7 @@ export const DEFAULT_SNAPSHOT_CAP = 1000;
  * traversal order would otherwise be silently missed from changed-file
  * tracking, and so dropped from the run's filesChanged and any commit. Resolved
  * from a registry option, then KODR_SNAPSHOT_CAP, then the default.
- * @param {object} [context]
+ * @param {{ snapshotCap?: number }} [context]
  * @returns {number}
  */
 export function snapshotCap(context) {
@@ -66,6 +66,7 @@ export default {
     }
     const cap = snapshotCap(context);
     const before = await snapshotWorkspace(context.cwd, cap);
+    /** @type {{ stdout: string, stderr: string, exitCode: number, filesChanged?: string[] }} */
     const result = await runShell(command, context.cwd, {
       env: buildEnv(context.envPassthrough),
       timeout: commandTimeout(context),

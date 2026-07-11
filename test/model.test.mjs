@@ -240,7 +240,10 @@ describe('model HTTP client', () => {
       onToken: (t) => tokens.push(t),
     });
     assert.deepEqual(tokens, ['he', 'llo']);
-    assert.equal(result.message.content, 'hello');
+    assert.equal(
+      /** @type {{ content: string }} */ (result.message).content,
+      'hello',
+    );
   });
 
   it('surfaces HTTP errors from model listing', async () => {
@@ -278,7 +281,10 @@ describe('model HTTP client', () => {
     const client = createClient({ baseUrl, model: 'test' });
     const result = await client.chat({ messages: [] });
     assert.equal(calls, 2);
-    assert.equal(result.message.content, 'ok');
+    assert.equal(
+      /** @type {{ content: string }} */ (result.message).content,
+      'ok',
+    );
   });
 
   it('rejects a 200 response that is not an SSE stream', async () => {
@@ -302,7 +308,10 @@ describe('model HTTP client', () => {
     });
     const client = createClient({ baseUrl, model: 'test' });
     const result = await client.chat({ messages: [] });
-    assert.equal(result.message.content, '');
+    assert.equal(
+      /** @type {{ content: string }} */ (result.message).content,
+      '',
+    );
   });
 
   it('does not retry a 4xx from chat', async () => {
@@ -333,7 +342,10 @@ describe('model HTTP client', () => {
     const client = createClient({ baseUrl, model: 'test' });
     const result = await client.chat({ messages: [] });
     assert.equal(calls, 2);
-    assert.equal(result.message.content, 'ok');
+    assert.equal(
+      /** @type {{ content: string }} */ (result.message).content,
+      'ok',
+    );
   });
 
   it('does not retry an ECONNREFUSED from chat', async () => {
@@ -345,7 +357,10 @@ describe('model HTTP client', () => {
       model: 'test',
     });
     await assert.rejects(client.chat({ messages: [] }), (err) => {
-      assert.equal(err.code, 'ECONNREFUSED');
+      assert.equal(
+        /** @type {NodeJS.ErrnoException} */ (err).code,
+        'ECONNREFUSED',
+      );
       return true;
     });
   });
@@ -400,7 +415,7 @@ describe('model HTTP client', () => {
     });
     const client = createClient({ baseUrl, model: 'test', maxRetries: 2 });
     await assert.rejects(client.chat({ messages: [] }), (err) => {
-      assert.equal(err.retries, 2);
+      assert.equal(/** @type {Error & { retries: number }} */ (err).retries, 2);
       return true;
     });
   });
@@ -505,8 +520,9 @@ describe('model HTTP client', () => {
     const baseUrl = await startServer(() => {});
     const client = createClient({ baseUrl, model: 'test', timeout: 20 });
     await assert.rejects(client.chat({ messages: [] }), (err) => {
-      assert.equal(err.code, 'ETIMEDOUT');
-      assert.equal(isTimeoutError(err), true);
+      const errnoErr = /** @type {NodeJS.ErrnoException} */ (err);
+      assert.equal(errnoErr.code, 'ETIMEDOUT');
+      assert.equal(isTimeoutError(errnoErr), true);
       return true;
     });
   });
@@ -783,8 +799,12 @@ describe('hasContextHeadroom', () => {
 async function startServer(handler) {
   const server = createServer(handler);
   servers.push(server);
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address();
+  await new Promise((resolve) =>
+    server.listen(0, '127.0.0.1', () => resolve(undefined)),
+  );
+  const address = /** @type {import('node:net').AddressInfo} */ (
+    server.address()
+  );
   return `http://127.0.0.1:${address.port}/v1`;
 }
 

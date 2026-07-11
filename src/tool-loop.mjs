@@ -28,14 +28,25 @@ import {
 export const MAX_TOOL_TURNS = 20;
 
 /**
+ * A chat message, as sent to/received from the model. `tool_calls` is
+ * present on an assistant message that invoked tools; `content` carries
+ * plain text (or, for a vision result, an array of OpenAI content parts).
+ * @typedef {object} Message
+ * @property {string} role
+ * @property {string|Array} [content]
+ * @property {Array<{ id: string, function: { name: string, arguments: string } }>} [tool_calls]
+ * @property {string} [tool_call_id]
+ */
+
+/**
  * Run the model/tool loop until it completes, exhausts its turn budget, or
  * hits the turn ceiling.
  * @param {object} params
- * @param {object} params.client - Model client
+ * @param {import('./provider.mjs').Provider} params.client - Model client
  * @param {string} params.modelId - Model to use
  * @param {Array} params.messages - Conversation so far (mutated in place)
- * @param {object} params.tools - Tool registry
- * @param {object} [params.reporter] - Output channel (see specs/reporter.yaml);
+ * @param {import('./tools/index.mjs').ToolRegistry} params.tools - Tool registry
+ * @param {import('./reporter.mjs').Reporter} [params.reporter] - Output channel (see specs/reporter.yaml);
  *   defaults to a null (silent) reporter
  * @param {Date} [params.startedAt] - Run start, for the budget check
  * @param {number} [params.maxRunMs] - Stop between turns after this many ms (0 disables)
@@ -56,7 +67,7 @@ export const MAX_TOOL_TURNS = 20;
  *   each run_command tool call (see specs/tui.yaml). Off by default.
  * @param {function} [params.confirm] - (call) => Promise<{ approved }>; the
  *   approval channel used when approveCommands is on
- * @returns {Promise<{ finalText: string, completed: boolean, stoppedReason: string, toolTurns: number, compactions: number, usage: { prompt: number, completion: number }, retries: number }>}
+ * @returns {Promise<{ finalText: string, completed: boolean, stoppedReason: string, toolTurns: number, compactions: number, usage: { prompt: number, completion: number, cost: number }, retries: number }>}
  */
 export async function runToolLoop(params) {
   const { client, modelId, messages, tools } = params;
@@ -206,6 +217,18 @@ export async function runToolLoop(params) {
  * threshold. Best effort: a failed summary leaves the conversation untouched
  * and the loop continues.
  * @param {object} params
+ * @param {import('./provider.mjs').Provider} params.client
+ * @param {string} params.modelId
+ * @param {Array} params.messages
+ * @param {number} params.lastPromptTokens
+ * @param {{ prompt: number, completion: number, cost: number }} params.usage
+ * @param {import('./reporter.mjs').Reporter} params.reporter
+ * @param {number} params.contextWindow
+ * @param {number} params.compactThreshold
+ * @param {number} [params.timeoutMs]
+ * @param {number} [params.heartbeatMs]
+ * @param {function} [params.onHeartbeat]
+ * @param {function} [params.onDebug]
  * @returns {Promise<{ compacted: boolean, retries: number }>} Whether the
  *   conversation was compacted, and retries the summary chat call used
  */
@@ -278,10 +301,12 @@ export function remainingRunBudgetMs(startedAt, maxRunMs) {
 
 /**
  * Execute native tool calls from a model message.
- * @param {object} message
- * @param {object} tools
+ * @param {Message} message
+ * @param {import('./tools/index.mjs').ToolRegistry} tools
  * @param {Array} messages
- * @param {object} reporter
+ * @param {import('./reporter.mjs').Reporter} reporter
+ * @param {object} [hookCtx]
+ * @param {object} [gate]
  * @returns {Promise<number>} Number of executed calls
  */
 export async function executeNativeToolCalls(
@@ -321,7 +346,7 @@ export async function executeNativeToolCalls(
  * specs/vision.yaml.
  * @param {Array} messages
  * @param {string} toolCallId
- * @param {object} result
+ * @param {{ image?: { path: string, mediaType: string, dataBase64: string } }} result
  */
 function appendToolResult(messages, toolCallId, result) {
   if (result.image) {
@@ -356,6 +381,11 @@ function appendToolResult(messages, toolCallId, result) {
  * break the backend chat template (a deterministic 500 that aborts the run), so
  * repair the stored arguments in place to "{}" and return a clear error telling
  * the model to resend a valid call, rather than dispatching garbage.
+ * @param {{ id: string, function: { name: string, arguments: string } }} tc
+ * @param {import('./tools/index.mjs').ToolRegistry} tools
+ * @param {import('./reporter.mjs').Reporter} reporter
+ * @param {object} [hookCtx]
+ * @param {object} [gate]
  * @returns {Promise<object>} The tool result (or a repair error)
  */
 async function executeOneNativeCall(tc, tools, reporter, hookCtx, gate) {
@@ -379,11 +409,12 @@ async function executeOneNativeCall(tc, tools, reporter, hookCtx, gate) {
  * Execute any text-form tool calls recovered from the message (a compatibility
  * fallback when the model emits calls as text). Runs every recovered call and
  * feeds each result back. Returns true if at least one ran.
- * @param {object} message
- * @param {object} tools
+ * @param {Message} message
+ * @param {import('./tools/index.mjs').ToolRegistry} tools
  * @param {Array} messages
- * @param {object} reporter
+ * @param {import('./reporter.mjs').Reporter} reporter
  * @param {object} [hookCtx]
+ * @param {object} [gate]
  * @returns {Promise<boolean>}
  */
 export async function executeRecoveredTextToolCall(
@@ -397,7 +428,7 @@ export async function executeRecoveredTextToolCall(
   if (message.tool_calls && message.tool_calls.length > 0) {
     return false;
   }
-  const calls = recoverToolCalls(message.content || '');
+  const calls = recoverToolCalls(/** @type {string} */ (message.content) || '');
   if (calls.length === 0) {
     return false;
   }

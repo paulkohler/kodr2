@@ -8,8 +8,27 @@
  */
 
 /**
+ * @typedef {object} TuiState
+ * @property {string} model
+ * @property {string} phase
+ * @property {string} status
+ * @property {string[]} scrollback
+ * @property {string} stream
+ * @property {string} input
+ * @property {number} cursor
+ * @property {string|null} queued
+ * @property {{ command: string }|null} approval
+ * @property {boolean} running
+ * @property {number|null} runStartedAt
+ * @property {number} tokensIn
+ * @property {number} tokensOut
+ * @property {number} cost
+ * @property {Set<string>} noticeSeen
+ */
+
+/**
  * @param {{ model?: string }} [init]
- * @returns {object} A fresh TUI state.
+ * @returns {TuiState} A fresh TUI state.
  */
 export function createTuiState(init = {}) {
   return {
@@ -36,12 +55,20 @@ export function createTuiState(init = {}) {
   };
 }
 
-/** Append one logical line to the scrollback. */
+/**
+ * Append one logical line to the scrollback.
+ * @param {TuiState} state
+ * @param {string} line
+ */
 export function pushLine(state, line) {
   state.scrollback.push(line);
 }
 
-/** Accumulate a streamed assistant-text delta (not yet in scrollback). */
+/**
+ * Accumulate a streamed assistant-text delta (not yet in scrollback).
+ * @param {TuiState} state
+ * @param {string} text
+ */
 export function addToken(state, text) {
   state.stream += text;
 }
@@ -51,7 +78,7 @@ export function addToken(state, text) {
  * clear it. A no-op when nothing has streamed. Each line passes through
  * `transform` first (used to render assistant Markdown to ANSI); the default
  * is identity.
- * @param {object} state
+ * @param {TuiState} state
  * @param {(line: string) => string} [transform]
  */
 export function flushStream(state, transform = (line) => line) {
@@ -64,17 +91,30 @@ export function flushStream(state, transform = (line) => line) {
   state.stream = '';
 }
 
-/** Set the current run phase (build/verify/heal/review/memory/compact). */
+/**
+ * Set the current run phase (build/verify/heal/review/memory/compact).
+ * @param {TuiState} state
+ * @param {string} name
+ */
 export function setPhase(state, name) {
   state.phase = name;
 }
 
-/** Set the short status word shown in the header. */
+/**
+ * Set the short status word shown in the header.
+ * @param {TuiState} state
+ * @param {string} text
+ */
 export function setStatus(state, text) {
   state.status = text;
 }
 
-/** Mark whether a run is in flight, stamping the start time when it begins. */
+/**
+ * Mark whether a run is in flight, stamping the start time when it begins.
+ * @param {TuiState} state
+ * @param {boolean} running
+ * @param {number} [now]
+ */
 export function setRunning(state, running, now = Date.now()) {
   state.running = running;
   if (running) {
@@ -86,7 +126,11 @@ export function setRunning(state, running, now = Date.now()) {
   }
 }
 
-/** Add a run's token/cost usage to the running session totals. */
+/**
+ * Add a run's token/cost usage to the running session totals.
+ * @param {TuiState} state
+ * @param {{ prompt: number, completion: number, cost: number }} usage
+ */
 export function applyUsage(state, usage) {
   if (!usage) {
     return;
@@ -96,14 +140,21 @@ export function applyUsage(state, usage) {
   state.cost += usage.cost || 0;
 }
 
-/** Insert a printable character at the cursor. */
+/**
+ * Insert a printable character at the cursor.
+ * @param {TuiState} state
+ * @param {string} ch
+ */
 export function insertChar(state, ch) {
   state.input =
     state.input.slice(0, state.cursor) + ch + state.input.slice(state.cursor);
   state.cursor += ch.length;
 }
 
-/** Delete the character before the cursor (Backspace). */
+/**
+ * Delete the character before the cursor (Backspace).
+ * @param {TuiState} state
+ */
 export function backspace(state) {
   if (state.cursor === 0) {
     return;
@@ -113,22 +164,36 @@ export function backspace(state) {
   state.cursor -= 1;
 }
 
-/** Move the cursor by delta, clamped to the input bounds. */
+/**
+ * Move the cursor by delta, clamped to the input bounds.
+ * @param {TuiState} state
+ * @param {number} delta
+ */
 export function moveCursor(state, delta) {
   state.cursor = clamp(state.cursor + delta, 0, state.input.length);
 }
 
-/** Move the cursor to the start of the input. */
+/**
+ * Move the cursor to the start of the input.
+ * @param {TuiState} state
+ */
 export function cursorHome(state) {
   state.cursor = 0;
 }
 
-/** Move the cursor to the end of the input. */
+/**
+ * Move the cursor to the end of the input.
+ * @param {TuiState} state
+ */
 export function cursorEnd(state) {
   state.cursor = state.input.length;
 }
 
-/** Return the current input and clear the buffer. */
+/**
+ * Return the current input and clear the buffer.
+ * @param {TuiState} state
+ * @returns {string}
+ */
 export function takeInput(state) {
   const value = state.input;
   state.input = '';
@@ -136,7 +201,11 @@ export function takeInput(state) {
   return value;
 }
 
-/** Queue a single follow-up prompt (replacing any already queued). */
+/**
+ * Queue a single follow-up prompt (replacing any already queued).
+ * @param {TuiState} state
+ * @param {string} prompt
+ */
 export function enqueue(state, prompt) {
   state.queued = prompt;
   if (state.running) {
@@ -144,7 +213,11 @@ export function enqueue(state, prompt) {
   }
 }
 
-/** Take the queued follow-up, clearing the slot. Returns null when empty. */
+/**
+ * Take the queued follow-up, clearing the slot. Returns null when empty.
+ * @param {TuiState} state
+ * @returns {string|null}
+ */
 export function dequeue(state) {
   const value = state.queued;
   state.queued = null;
@@ -154,6 +227,8 @@ export function dequeue(state) {
 /**
  * Record a notice text and report whether it is new this session. Returns true
  * the first time a given text is seen, false on every later repeat.
+ * @param {TuiState} state
+ * @param {string} text
  * @returns {boolean}
  */
 export function noteOnce(state, text) {
@@ -164,12 +239,19 @@ export function noteOnce(state, text) {
   return true;
 }
 
-/** Enter approval mode for a pending command. */
+/**
+ * Enter approval mode for a pending command.
+ * @param {TuiState} state
+ * @param {string} command
+ */
 export function setApproval(state, command) {
   state.approval = { command };
 }
 
-/** Leave approval mode. */
+/**
+ * Leave approval mode.
+ * @param {TuiState} state
+ */
 export function clearApproval(state) {
   state.approval = null;
 }

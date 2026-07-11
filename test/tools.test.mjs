@@ -26,6 +26,19 @@ import {
   snapshotWorkspace,
 } from '../src/tools/run-command.mjs';
 
+// run_command's execute() returns a discriminated union: an error shape or
+// the success shape. Individual tests already know which branch a given
+// command hits; these narrow the result at the call site instead of
+// re-checking `'error' in result` everywhere.
+/**
+ * @typedef {{ error: string }} RunCommandError
+ * @typedef {{ stdout: string, stderr: string, exitCode: number, filesChanged?: string[] }} RunCommandOk
+ */
+/** @type {(result: any) => RunCommandOk} */
+const asRunOk = (result) => result;
+/** @type {(result: any) => RunCommandError} */
+const asRunErr = (result) => result;
+
 let tmpDir;
 let context;
 
@@ -113,7 +126,7 @@ describe('read_file', () => {
   });
 
   it('requires path parameter', async () => {
-    const result = await readFileTool.execute({}, context);
+    const result = await readFileTool.execute({ path: undefined }, context);
     assert.ok(result.error);
   });
 });
@@ -186,7 +199,10 @@ describe('write_file', () => {
   });
 
   it('requires content parameter', async () => {
-    const result = await writeFileTool.execute({ path: 'f.txt' }, context);
+    const result = await writeFileTool.execute(
+      { path: 'f.txt', content: undefined },
+      context,
+    );
     assert.ok(result.error);
   });
 });
@@ -383,7 +399,10 @@ describe('search', () => {
       join(tmpDir, 'code.mjs'),
       'function hello() {\n  return "hi";\n}\n',
     );
-    const result = await searchTool.execute({ pattern: 'hello' }, context);
+    const result = await searchTool.execute(
+      { pattern: 'hello', glob: undefined },
+      context,
+    );
     assert.equal(result.matches.length, 1);
     assert.equal(result.matches[0].file, 'code.mjs');
     assert.equal(result.matches[0].line, 1);
@@ -414,7 +433,10 @@ describe('search', () => {
   it('skips .git directory', async () => {
     await mkdir(join(tmpDir, '.git'));
     await writeFile(join(tmpDir, '.git/config'), 'target');
-    const result = await searchTool.execute({ pattern: 'target' }, context);
+    const result = await searchTool.execute(
+      { pattern: 'target', glob: undefined },
+      context,
+    );
     assert.equal(result.matches.length, 0);
   });
 
@@ -424,7 +446,10 @@ describe('search', () => {
     await writeFile(join(tmpDir, 'run-qwen.log'), 'target');
     await writeFile(join(tmpDir, 'kodr/run.json'), 'target');
     await writeFile(join(tmpDir, 'source.mjs'), 'target');
-    const result = await searchTool.execute({ pattern: 'target' }, context);
+    const result = await searchTool.execute(
+      { pattern: 'target', glob: undefined },
+      context,
+    );
     assert.deepEqual(
       result.matches.map((match) => match.file),
       ['source.mjs'],
@@ -436,7 +461,10 @@ describe('search', () => {
     try {
       await writeFile(join(outside, 'secret.txt'), 'target secret');
       await symlink(join(outside, 'secret.txt'), join(tmpDir, 'secret.txt'));
-      const result = await searchTool.execute({ pattern: 'target' }, context);
+      const result = await searchTool.execute(
+        { pattern: 'target', glob: undefined },
+        context,
+      );
       assert.deepEqual(result.matches, []);
     } finally {
       await rm(outside, { recursive: true, force: true });
@@ -445,7 +473,10 @@ describe('search', () => {
 
   it('caps output at 100 matches', async () => {
     await writeFile(join(tmpDir, 'many.txt'), 'target\n'.repeat(110));
-    const result = await searchTool.execute({ pattern: 'target' }, context);
+    const result = await searchTool.execute(
+      { pattern: 'target', glob: undefined },
+      context,
+    );
     assert.equal(result.matches.length, 100);
     assert.equal(result.truncated, true);
     assert.equal(result.limit, 100);
@@ -453,19 +484,25 @@ describe('search', () => {
 
   it('does not flag truncation for a result under the cap', async () => {
     await writeFile(join(tmpDir, 'few.txt'), 'target\ntarget\n');
-    const result = await searchTool.execute({ pattern: 'target' }, context);
+    const result = await searchTool.execute(
+      { pattern: 'target', glob: undefined },
+      context,
+    );
     assert.equal(result.truncated, undefined);
   });
 
   it('truncates matching lines to 200 characters', async () => {
     await writeFile(join(tmpDir, 'long.txt'), `target ${'x'.repeat(300)}`);
-    const result = await searchTool.execute({ pattern: 'target' }, context);
+    const result = await searchTool.execute(
+      { pattern: 'target', glob: undefined },
+      context,
+    );
     assert.equal(result.matches[0].text.length, 200);
   });
 
   it('rejects paths escaping workspace', async () => {
     const result = await searchTool.execute(
-      { pattern: 'target', path: '..' },
+      { pattern: 'target', path: '..', glob: undefined },
       context,
     );
     assert.match(result.error, /escape/i);
@@ -475,7 +512,7 @@ describe('search', () => {
     await writeFile(join(tmpDir, 'code.mjs'), 'function target() {}\n');
     await writeFile(join(tmpDir, 'other.mjs'), 'target\ntarget\n');
     const result = await searchTool.execute(
-      { pattern: 'target', path: 'code.mjs' },
+      { pattern: 'target', path: 'code.mjs', glob: undefined },
       context,
     );
     assert.deepEqual(
@@ -492,26 +529,26 @@ describe('run_command', () => {
   afterEach(teardown);
 
   it('executes a command and returns output', async () => {
-    const result = await runCommandTool.execute(
-      { command: 'echo hello' },
-      context,
+    const result = asRunOk(
+      await runCommandTool.execute({ command: 'echo hello' }, context),
     );
     assert.equal(result.stdout.trim(), 'hello');
     assert.equal(result.exitCode, 0);
   });
 
   it('captures non-zero exit codes', async () => {
-    const result = await runCommandTool.execute(
-      { command: 'exit 42' },
-      context,
+    const result = asRunOk(
+      await runCommandTool.execute({ command: 'exit 42' }, context),
     );
     assert.notEqual(result.exitCode, 0);
   });
 
   it('tracks files changed by shell commands', async () => {
-    const result = await runCommandTool.execute(
-      { command: 'printf changed > shell.txt' },
-      context,
+    const result = asRunOk(
+      await runCommandTool.execute(
+        { command: 'printf changed > shell.txt' },
+        context,
+      ),
     );
     assert.equal(result.exitCode, 0);
     assert.deepEqual(result.filesChanged, ['shell.txt']);
@@ -519,23 +556,26 @@ describe('run_command', () => {
   });
 
   it('requires command parameter', async () => {
-    const result = await runCommandTool.execute({}, context);
+    const result = asRunErr(
+      await runCommandTool.execute({ command: undefined }, context),
+    );
     assert.ok(result.error);
   });
 
   it('rejects cd targets outside the workspace', async () => {
-    const result = await runCommandTool.execute(
-      { command: 'cd /home/user && node --test' },
-      context,
+    const result = asRunErr(
+      await runCommandTool.execute(
+        { command: 'cd /home/user && node --test' },
+        context,
+      ),
     );
     assert.match(result.error, /escapes workspace/i);
   });
 
   it('allows cd targets inside the workspace', async () => {
     await mkdir(join(tmpDir, 'subdir'));
-    const result = await runCommandTool.execute(
-      { command: 'cd subdir && pwd' },
-      context,
+    const result = asRunOk(
+      await runCommandTool.execute({ command: 'cd subdir && pwd' }, context),
     );
     assert.equal(result.exitCode, 0);
     assert.match(result.stdout, /subdir/);
@@ -544,9 +584,11 @@ describe('run_command', () => {
   it('does not expose non-allowlisted env vars by default', async () => {
     process.env.KODR_TEST_SECRET = 'shh';
     try {
-      const result = await runCommandTool.execute(
-        { command: 'echo "[$KODR_TEST_SECRET]"' },
-        context,
+      const result = asRunOk(
+        await runCommandTool.execute(
+          { command: 'echo "[$KODR_TEST_SECRET]"' },
+          context,
+        ),
       );
       assert.equal(result.stdout.trim(), '[]');
     } finally {
@@ -557,9 +599,11 @@ describe('run_command', () => {
   it('exposes env vars named in the passthrough', async () => {
     process.env.KODR_TEST_SECRET = 'shh';
     try {
-      const result = await runCommandTool.execute(
-        { command: 'echo "[$KODR_TEST_SECRET]"' },
-        { ...context, envPassthrough: ['KODR_TEST_SECRET'] },
+      const result = asRunOk(
+        await runCommandTool.execute(
+          { command: 'echo "[$KODR_TEST_SECRET]"' },
+          { ...context, envPassthrough: ['KODR_TEST_SECRET'] },
+        ),
       );
       assert.equal(result.stdout.trim(), '[shh]');
     } finally {

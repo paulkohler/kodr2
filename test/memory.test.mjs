@@ -30,18 +30,24 @@ afterEach(async () => {
 });
 
 // Mirrors tool-loop.test.mjs's/review.test.mjs's own scriptedClient.
+/**
+ * @param {Array<object>} responses
+ * @returns {import('../src/provider.mjs').Provider & { calls: Array<any> }}
+ */
 function scriptedClient(responses) {
   const calls = [];
   let i = 0;
-  return {
-    calls,
-    async chat(params) {
-      calls.push(params);
-      const response = responses[Math.min(i, responses.length - 1)];
-      i++;
-      return response;
-    },
-  };
+  return /** @type {import('../src/provider.mjs').Provider & { calls: Array<any> }} */ (
+    /** @type {any} */ ({
+      calls,
+      async chat(params) {
+        calls.push(params);
+        const response = responses[Math.min(i, responses.length - 1)];
+        i++;
+        return response;
+      },
+    })
+  );
 }
 
 function finalTurn(text, usage = { prompt: 2, completion: 3 }) {
@@ -225,13 +231,17 @@ describe('runMemoryRetrospective', () => {
   });
 
   it('reports retries from the error when the retrospective call ultimately fails', async () => {
-    const client = {
-      async chat() {
-        const err = new Error('model offline');
-        err.retries = 1;
-        throw err;
-      },
-    };
+    const client = /** @type {import('../src/provider.mjs').Provider} */ (
+      /** @type {any} */ ({
+        async chat() {
+          const err = /** @type {Error & { retries: number }} */ (
+            new Error('model offline')
+          );
+          err.retries = 1;
+          throw err;
+        },
+      })
+    );
     const result = await runMemoryRetrospective({
       client,
       modelId: 'test',

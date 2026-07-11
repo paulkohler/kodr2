@@ -49,21 +49,27 @@ describe('createToolRegistry', () => {
   it('dispatches known tools', async () => {
     await writeFile(join(tmpDir, 'test.txt'), 'hello');
     const registry = createToolRegistry(tmpDir);
-    const result = await registry.dispatch('read_file', { path: 'test.txt' });
+    const result = /** @type {any} */ (
+      await registry.dispatch('read_file', { path: 'test.txt' })
+    );
     assert.equal(result.content, 'hello');
   });
 
   it('returns error for unknown tools', async () => {
     const registry = createToolRegistry(tmpDir);
-    const result = await registry.dispatch('nonexistent', {});
+    const result = /** @type {any} */ (
+      await registry.dispatch('nonexistent', {})
+    );
     assert.ok(result.error);
     assert.match(result.error, /unknown tool/i);
   });
 
   it('rejects non-object tool arguments', async () => {
     const registry = createToolRegistry(tmpDir);
-    for (const args of [null, [], 'invalid']) {
-      const result = await registry.dispatch('read_file', args);
+    for (const args of /** @type {any[]} */ ([null, [], 'invalid'])) {
+      const result = /** @type {any} */ (
+        await registry.dispatch('read_file', args)
+      );
       assert.match(result.error, /JSON object/i);
     }
   });
@@ -132,10 +138,12 @@ describe('createToolRegistry', () => {
     const registry = createToolRegistry(tmpDir, {
       allowedTools: ['read_file'],
     });
-    const result = await registry.dispatch('write_file', {
-      path: 'a.txt',
-      content: 'a',
-    });
+    const result = /** @type {any} */ (
+      await registry.dispatch('write_file', {
+        path: 'a.txt',
+        content: 'a',
+      })
+    );
     assert.match(result.error, /unknown tool/i);
   });
 });

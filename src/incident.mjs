@@ -159,12 +159,12 @@ export async function sweepOrphanedHeartbeats(runsDir) {
  * @param {Date} params.startedAt
  * @param {number} [params.heartbeatMs] - 0 disables the heartbeat
  * @param {function} [params.exit] - Overridable for tests; defaults to process.exit
- * @param {object} [params.signalSource] - Overridable for tests; defaults to
+ * @param {{ on: Function, removeListener: Function }} [params.signalSource] - Overridable for tests; defaults to
  *   the real `process`. Needs `on`/`removeListener`. Real `SIGINT`/
  *   `uncaughtException`/etc. events must not be synthesized against the
  *   real `process` in-process, since node:test installs its own listeners
  *   on those same events to detect a genuinely crashing test.
- * @returns {Promise<function(): Promise<void>>} dispose
+ * @returns {Promise<() => Promise<void>>} dispose
  */
 export async function installIncidentHandlers({
   runsDir,

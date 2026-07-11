@@ -25,9 +25,9 @@ import {
 } from './tui-state.mjs';
 
 /**
- * @param {object} state - TUI state (mutated)
+ * @param {import('./tui-state.mjs').TuiState} state - TUI state (mutated)
  * @param {() => void} requestRender - Schedule a (throttled) redraw
- * @returns {object} A reporter (see specs/reporter.yaml)
+ * @returns {import('./reporter.mjs').Reporter}
  */
 export function createTuiReporter(state, requestRender) {
   const render = requestRender || (() => {});

@@ -26,6 +26,52 @@ import { computeStats, loadRunRecords } from './stats.mjs';
 import { MAX_TOOL_TURNS } from './tool-loop.mjs';
 
 /**
+ * @typedef {object} CliArgs
+ * @property {string|null} command
+ * @property {string|null} prompt
+ * @property {string|null} cwd
+ * @property {string|null} provider
+ * @property {string|null} baseUrl
+ * @property {string|null} model
+ * @property {boolean|null} reasoning
+ * @property {boolean} vision
+ * @property {boolean|null} openrouterNoZdr
+ * @property {boolean|null} openrouterAllowDataCollection
+ * @property {string[]} openrouterProviderOnly
+ * @property {string|null} test
+ * @property {number} healTurns
+ * @property {number} maxRunMs
+ * @property {number} maxToolTurns
+ * @property {number} heartbeatMs
+ * @property {number} incidentHeartbeatMs
+ * @property {number} modelRetries
+ * @property {number|null} contextWindow
+ * @property {string|null} reviewModel
+ * @property {number|null} reviewContextWindow
+ * @property {number} reviewMinToolCalls
+ * @property {number} reviewMaxToolTurns
+ * @property {boolean} quiet
+ * @property {string[]} env
+ * @property {string|null} continue
+ * @property {string|null} runsDir
+ * @property {boolean} noSave
+ * @property {boolean} rawThenFixCommits
+ * @property {boolean} memory
+ * @property {boolean} memoryAutoApply
+ * @property {boolean} debug
+ * @property {number} commitTimeoutMs
+ * @property {boolean} json
+ * @property {boolean} events
+ * @property {boolean} tui
+ * @property {boolean} approveCommands
+ * @property {boolean} noFail
+ * @property {boolean} help
+ * @property {boolean} version
+ */
+
+/** @typedef {import('./harness.mjs').RunResult} RunResult */
+
+/**
  * Parse CLI arguments and run.
  * @param {string[]} argv - process.argv.slice(2)
  * @returns {Promise<void>}
@@ -274,8 +320,8 @@ export async function main(argv) {
  * always exits 0 — for external-verifier contexts (Terminal-Bench, arenas)
  * where the verifier is the judge and a non-zero agent exit is recorded as a
  * harness error rather than a clean reward 0.
- * @param {object} result
- * @param {object} args
+ * @param {RunResult} result
+ * @param {CliArgs} args
  * @returns {number}
  */
 export function exitCodeFor(result, args) {
@@ -288,6 +334,7 @@ export function exitCodeFor(result, args) {
   return 0;
 }
 
+/** @param {CliArgs} args */
 function noFailEnabled(args) {
   if (args.noFail) {
     return true;
@@ -296,7 +343,10 @@ function noFailEnabled(args) {
   return env === '1' || env === 'true';
 }
 
-/** Whether the interactive TUI was requested (--tui or the `tui` subcommand). */
+/**
+ * Whether the interactive TUI was requested (--tui or the `tui` subcommand).
+ * @param {CliArgs} args
+ */
 export function tuiRequested(args) {
   return Boolean(args.tui) || args.command === 'tui';
 }
@@ -306,7 +356,7 @@ export function tuiRequested(args) {
  * request is valid. The TUI owns the terminal, so it needs a real interactive
  * TTY on both ends and is incompatible with the output modes that scrape or
  * silence stdout/stderr.
- * @param {object} args
+ * @param {CliArgs} args
  * @returns {string|null}
  */
 export function validateTui(args) {
@@ -323,7 +373,7 @@ export function validateTui(args) {
  * Whether the view_image tool should be offered, from --vision or KODR_VISION.
  * Off by default; vision can't be auto-detected (LM Studio reports only
  * tool_use even for a vision model), so the operator enables it explicitly.
- * @param {object} args
+ * @param {CliArgs} args
  * @returns {boolean}
  */
 export function visionEnabled(args) {
@@ -337,7 +387,7 @@ export function visionEnabled(args) {
 /**
  * A compact, machine-readable summary of a run for --json mode. Lets an external
  * harness/adapter read what Kodr did (outcome and cost) without scraping output.
- * @param {object} result
+ * @param {RunResult} result
  * @returns {object}
  */
 export function summarizeResult(result) {
@@ -361,6 +411,7 @@ export function summarizeResult(result) {
   };
 }
 
+/** @param {RunResult} result */
 export function shouldFailProcess(result) {
   if (result.stoppedReason && result.stoppedReason !== 'complete') {
     return true;
@@ -374,7 +425,7 @@ export function shouldFailProcess(result) {
 /**
  * Parse argv into structured options.
  * @param {string[]} argv
- * @returns {object}
+ * @returns {CliArgs}
  */
 export function parseArgs(argv) {
   const args = {
@@ -766,6 +817,7 @@ Examples:
   process.stdout.write(`${help.trim()}\n`);
 }
 
+/** @param {CliArgs} args */
 async function printModels(args) {
   let client;
   try {
@@ -800,6 +852,7 @@ async function printModels(args) {
   }
 }
 
+/** @param {CliArgs} args */
 async function printDoctor(args) {
   const report = await runDoctorChecks({
     provider: args.provider,
@@ -812,6 +865,7 @@ async function printDoctor(args) {
   }
 }
 
+/** @param {CliArgs} args */
 async function printStats(args) {
   const cwd = resolve(args.cwd || '.');
   const runsDir = resolveRunsDir(cwd, args.runsDir);
@@ -824,6 +878,7 @@ async function printStats(args) {
  * `kodr replay <last|path>` -- re-run a saved run record's original prompt
  * fresh (no prior conversation), against the same cwd/model/test command,
  * to check whether a failure reproduces. See specs/replay.yaml.
+ * @param {CliArgs} args
  */
 export async function runReplay(args) {
   const ref = args.prompt;

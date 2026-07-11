@@ -155,7 +155,10 @@ describe('load_skill tool', () => {
   });
 
   it('requires a name argument', async () => {
-    const result = await loadSkillTool.execute({}, { cwd: tmpDir });
+    const result = await loadSkillTool.execute(
+      /** @type {{ name: any }} */ ({}),
+      { cwd: tmpDir },
+    );
     assert.ok(result.error);
     assert.match(result.error, /name is required/i);
   });

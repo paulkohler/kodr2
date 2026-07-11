@@ -125,12 +125,23 @@ async function runReviewAttempt(params) {
 }
 
 /**
+ * @typedef {object} ReviewResult
+ * @property {boolean} skipped
+ * @property {string} [findings]
+ * @property {boolean} [grounded]
+ * @property {number} [toolTurns]
+ * @property {{ prompt: number, completion: number, cost: number }} [usage]
+ * @property {number} [retries]
+ * @property {string} [error]
+ */
+
+/**
  * Run a review pass. If the first attempt's tool-call count is under
  * minToolCalls, exactly one retry runs with an explicit nudge; if the
  * retry is still under the floor, grounded is false but the findings are
  * still returned -- never silently discarded.
  * @param {object} params
- * @param {object} params.client - Model client
+ * @param {import('./provider.mjs').Provider} params.client - Model client
  * @param {string} params.modelId - Review model to use
  * @param {string} params.cwd - Workspace root
  * @param {string[]} params.filesChanged - Files touched during the build phase
@@ -144,7 +155,8 @@ async function runReviewAttempt(params) {
  * @param {number} [params.minToolCalls] - Tool-call floor before a review counts as grounded
  * @param {number} [params.maxToolTurns] - Tool-turn ceiling per attempt
  * @param {number} [params.diffTimeoutMs] - Timeout for the git diff call (default 30 seconds — KODR_REVIEW_DIFF_TIMEOUT_MS)
- * @returns {Promise<{ skipped: boolean, findings?: string, grounded?: boolean, toolTurns?: number, usage?: object, retries?: number }>}
+ * @param {import('./reporter.mjs').Reporter} [params.reporter] - Output channel; defaults to a terminal reporter (see comment below)
+ * @returns {Promise<ReviewResult>}
  */
 export async function runReview(params) {
   const {

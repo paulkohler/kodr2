@@ -74,7 +74,7 @@ describe('createTerminalReporter', () => {
     reporter.healTurn({ turn: 1, max: 3 });
     reporter.summary({
       filesChanged: ['a.mjs'],
-      usage: { prompt: 1, completion: 2 },
+      usage: { prompt: 1, completion: 2, cost: 0 },
     });
 
     assert.equal(
@@ -85,7 +85,7 @@ describe('createTerminalReporter', () => {
         `${formatHeartbeat('model response', 3000)}\n` +
         `${formatVerification({ passed: true, output: '', command: 'npm test' })}\n` +
         `${formatHealTurn(1, 3)}\n` +
-        `${formatSummary({ filesChanged: ['a.mjs'], usage: { prompt: 1, completion: 2 } })}\n`,
+        `${formatSummary({ filesChanged: ['a.mjs'], usage: { prompt: 1, completion: 2, cost: 0 } })}\n`,
     );
   });
 
@@ -136,18 +136,20 @@ describe('createJsonReporter', () => {
   it('summary emits stoppedReason, filesChanged, and usage', () => {
     const out = createFakeStream();
     const reporter = createJsonReporter({ out });
-    reporter.summary({
-      stoppedReason: 'complete',
-      filesChanged: ['a.mjs'],
-      usage: { prompt: 1, completion: 2 },
-      messages: [{ role: 'user', content: 'huge' }],
-    });
+    reporter.summary(
+      /** @type {any} */ ({
+        stoppedReason: 'complete',
+        filesChanged: ['a.mjs'],
+        usage: { prompt: 1, completion: 2, cost: 0 },
+        messages: [{ role: 'user', content: 'huge' }],
+      }),
+    );
     const [event] = lines(out);
     assert.deepEqual(event, {
       event: 'summary',
       stoppedReason: 'complete',
       filesChanged: ['a.mjs'],
-      usage: { prompt: 1, completion: 2 },
+      usage: { prompt: 1, completion: 2, cost: 0 },
     });
   });
 });

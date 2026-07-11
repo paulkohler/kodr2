@@ -215,6 +215,8 @@ export async function writeMemoryProposal(runsDir, notes) {
  * @param {string} question
  * @param {object} [options]
  * @param {number} [options.timeoutMs]
+ * @param {NodeJS.ReadableStream} [options.input] - Overridable for tests; defaults to process.stdin
+ * @param {NodeJS.WritableStream} [options.output] - Overridable for tests; defaults to process.stdout
  * @returns {Promise<boolean|null>} null means no answer was obtained (timed out)
  */
 export async function promptYesNo(question, options = {}) {
@@ -244,10 +246,21 @@ function isNoFindings(notes) {
 }
 
 /**
+ * @typedef {object} MemoryRetrospective
+ * @property {boolean} proposed
+ * @property {string} [notes]
+ * @property {boolean} [applied]
+ * @property {string|null} [proposalPath]
+ * @property {{ prompt: number, completion: number, cost: number }} [usage]
+ * @property {number} [retries]
+ * @property {string} [error]
+ */
+
+/**
  * Run the end-of-run retrospective. Never writes to MEMORY.md without a
  * human decision in the loop -- see the module doc comment.
  * @param {object} params
- * @param {object} params.client - Model client
+ * @param {import('./provider.mjs').Provider} params.client - Model client
  * @param {string} params.modelId - Model to generate the retrospective with
  * @param {Array} params.messages - Full conversation from the run just finished
  * @param {string} params.cwd - Workspace root
@@ -263,7 +276,7 @@ function isNoFindings(notes) {
  *   directly to MEMORY.md (autoApply, or an attended "yes") has nothing to do with
  *   runsDir hygiene and must keep working under noSave
  * @param {function} [params.promptYesNoFn] - Overridable for tests; defaults to this module's promptYesNo
- * @returns {Promise<{ proposed: boolean, notes?: string, applied?: boolean, proposalPath?: string|null, usage?: object, retries?: number, error?: string }>}
+ * @returns {Promise<MemoryRetrospective>}
  */
 export async function runMemoryRetrospective(params) {
   const {

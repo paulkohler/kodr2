@@ -15,8 +15,12 @@ afterEach(async () => {
   }
 });
 
+/**
+ * @param {Partial<import('../src/stats.mjs').RunRecord>} [overrides]
+ * @returns {import('../src/stats.mjs').RunRecord}
+ */
 function record(overrides = {}) {
-  return {
+  return /** @type {import('../src/stats.mjs').RunRecord} */ ({
     stoppedReason: 'complete',
     toolTurns: 2,
     usage: { prompt: 10, completion: 5 },
@@ -27,7 +31,7 @@ function record(overrides = {}) {
     healed: null,
     durationMs: 100,
     ...overrides,
-  };
+  });
 }
 
 describe('loadRunRecords', () => {
@@ -44,7 +48,9 @@ describe('loadRunRecords', () => {
       'utf8',
     );
 
-    const records = await loadRunRecords(runsDir);
+    const records = /** @type {import('../src/stats.mjs').RunRecord[]} */ (
+      await loadRunRecords(runsDir)
+    );
     assert.equal(records.length, 2);
     assert.deepEqual(records.map((r) => r.toolTurns).sort(), [3, 5]);
   });

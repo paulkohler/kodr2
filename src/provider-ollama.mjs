@@ -18,6 +18,8 @@
 
 import { createClient, DEFAULT_MAX_RETRIES } from './model.mjs';
 
+/** @typedef {import('./provider.mjs').Provider} Provider */
+
 export const DEFAULT_OLLAMA_BASE_URL = 'http://localhost:11434/v1';
 
 export const CAPABILITIES = {
@@ -40,7 +42,7 @@ export const CAPABILITIES = {
  *   OLLAMA_API_KEY. Optional, unlike openrouter's -- a local install needs
  *   none, only Ollama's hosted API (or a local install proxying to a
  *   ":cloud" model) does
- * @returns {object} Provider with chat/models/resolveModel/contextInfo
+ * @returns {Provider}
  */
 export function createOllamaProvider(options = {}) {
   const apiKey = options.apiKey ?? process.env.OLLAMA_API_KEY;

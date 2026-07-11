@@ -13,8 +13,12 @@ afterEach(async () => {
 async function startServer(handler) {
   const server = createServer(handler);
   servers.push(server);
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address();
+  await new Promise((resolve) =>
+    server.listen(0, '127.0.0.1', () => resolve(undefined)),
+  );
+  const address = /** @type {import('node:net').AddressInfo} */ (
+    server.address()
+  );
   return `http://127.0.0.1:${address.port}/v1`;
 }
 

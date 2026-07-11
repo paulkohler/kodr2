@@ -12,6 +12,15 @@ const DEFAULT_TIMEOUT = 600_000; // 10 minutes
 export const DEFAULT_MAX_RETRIES = 1;
 
 /**
+ * @typedef {object} ModelClient
+ * @property {(params: object) => Promise<{ message: object, usage: object, retries: number }>} chat
+ * @property {() => Promise<Array<{ id: string, context_length?: number }>>} models
+ * @property {() => Promise<string>} resolveModel
+ * @property {() => Promise<Array>} richModels
+ * @property {(modelId: string) => Promise<{ loaded: number|null, max: number|null }>} contextInfo
+ */
+
+/**
  * Create a model client bound to an OpenAI-compatible chat completions
  * endpoint. Used directly for LM Studio; wrapped by provider-*.mjs modules
  * to add per-provider auth headers, extra body fields (e.g. reasoning), and
@@ -28,7 +37,7 @@ export const DEFAULT_MAX_RETRIES = 1;
  *   request (e.g. an Authorization bearer token for a hosted provider)
  * @param {object} [options.extraBody] - Extra fields merged into every chat
  *   request body (e.g. { reasoning: { enabled: true } })
- * @returns {object} Client with `chat` and `models` methods
+ * @returns {ModelClient}
  */
 export function createClient(options = {}) {
   const baseUrl = options.baseUrl || DEFAULT_BASE_URL;
@@ -46,6 +55,7 @@ export function createClient(options = {}) {
    * Returns the complete message when done.
    *
    * @param {object} params
+   * @param {string} [params.model] - Per-call model override (defaults to the client's configured model)
    * @param {Array} params.messages - Chat messages
    * @param {Array} [params.tools] - Tool definitions
    * @param {function} [params.onToken] - Called with each text token
@@ -67,6 +77,7 @@ export function createClient(options = {}) {
    * @returns {Promise<{ message: object, usage: object, retries: number }>}
    */
   async function chat(params) {
+    /** @type {{ model: string, messages: Array, stream: boolean, stream_options: { include_usage: boolean }, tools?: Array }} */
     const body = {
       model: params.model || model,
       messages: params.messages,
@@ -430,7 +441,7 @@ function timeoutError(timeout) {
 
 /**
  * Whether an error is a request timeout raised by this client.
- * @param {Error} err
+ * @param {NodeJS.ErrnoException} err
  * @returns {boolean}
  */
 export function isTimeoutError(err) {
@@ -456,7 +467,7 @@ const RETRYABLE_CONNECTION_ERROR_CODES = new Set(['ECONNRESET', 'EPIPE']);
  * and then dropped it mid-request (a crash, or a restart), as opposed to
  * ECONNREFUSED (nothing listening at all -- a persistent problem no retry
  * fixes) or a timeout (already used the full budget on that attempt).
- * @param {Error} err
+ * @param {NodeJS.ErrnoException} err
  * @returns {boolean}
  */
 export function isRetryableConnectionError(err) {
