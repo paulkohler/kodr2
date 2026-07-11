@@ -71,6 +71,8 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  * @param {string} [options.model] - Model identifier
  * @param {boolean} [options.reasoning] - Request reasoning tokens; only openrouter
  *   supports this -- errors otherwise (see specs/provider.yaml)
+ * @param {boolean} [options.vision] - Offer the view_image tool (see specs/vision.yaml)
+ * @param {number} [options.maxToolTurns] - Tool-turn ceiling per loop (default MAX_TOOL_TURNS)
  * @param {boolean} [options.noZdr] - Disable OpenRouter Zero Data Retention routing
  *   (on by default with the openrouter provider)
  * @param {boolean} [options.allowDataCollection] - Allow OpenRouter providers that
@@ -81,9 +83,9 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  * @param {number} [options.maxHealTurns] - Max heal turns (default 3)
  * @param {number} [options.maxRunMs] - Stop between turns after this many ms (0 disables)
  * @param {boolean} [options.quiet] - Suppress terminal output
- * @param {object} [options.reporter] - Output channel (see specs/reporter.yaml).
- *   Defaults to a terminal reporter, or a null (silent) reporter when quiet.
- *   The CLI passes a JSON reporter for --events.
+ * @param {import('./reporter.mjs').Reporter} [options.reporter] - Output channel
+ *   (see specs/reporter.yaml). Defaults to a terminal reporter, or a null
+ *   (silent) reporter when quiet. The CLI passes a JSON reporter for --events.
  * @param {Array} [options.priorMessages] - Continuation from previous run
  * @param {string[]} [options.priorFilesChanged] - The continued run's own
  *   filesChanged, from its saved transcript -- seeds this session's tool
@@ -306,7 +308,6 @@ export async function run(prompt, options) {
     const compactionResult = await runManualCompaction({
       client,
       modelId,
-      cwd,
       messages,
       metadata,
       reporter,
@@ -670,6 +671,13 @@ export async function run(prompt, options) {
  * Run SessionStart hooks before the task prompt. Successful hook output is
  * injected as context messages so the model sees it; failures surface a notice.
  * @param {object} params
+ * @param {Array} params.hooks
+ * @param {string} params.cwd
+ * @param {Record<string, string>} params.commandEnv
+ * @param {Array} params.messages
+ * @param {Date} params.startedAt
+ * @param {number} params.maxRunMs
+ * @param {import('./reporter.mjs').Reporter} params.reporter
  */
 async function runSessionStart(params) {
   const { hooks, cwd, commandEnv, messages, startedAt, maxRunMs, reporter } =
@@ -700,6 +708,10 @@ async function runSessionStart(params) {
  * Run SessionEnd hooks as the session closes. Side effects only; failures
  * surface a notice. Not capped by the run budget.
  * @param {object} params
+ * @param {Array} params.hooks
+ * @param {string} params.cwd
+ * @param {Record<string, string>} params.commandEnv
+ * @param {import('./reporter.mjs').Reporter} params.reporter
  */
 async function runSessionEnd(params) {
   const { hooks, cwd, commandEnv, reporter } = params;
@@ -837,6 +849,18 @@ export function stopVerifyBudgetMs(startedAt, maxRunMs, reserveFraction) {
  * On-demand compaction. Compresses the prior conversation in `messages` and
  * saves the result as a run, rather than running a new task.
  * @param {object} params
+ * @param {import('./provider.mjs').Provider} params.client
+ * @param {string} params.modelId
+ * @param {Array} params.messages
+ * @param {object} params.metadata
+ * @param {import('./reporter.mjs').Reporter} params.reporter
+ * @param {Date} params.startedAt
+ * @param {string} [params.runsDir]
+ * @param {boolean} [params.noSave]
+ * @param {number} [params.maxRunMs]
+ * @param {number} [params.heartbeatMs]
+ * @param {function} [params.onHeartbeat]
+ * @param {function} [params.onDebug]
  * @returns {Promise<object>} Run result
  */
 async function runManualCompaction(params) {
@@ -932,6 +956,21 @@ export function reviewSkippedForIncompleteBuild(stoppedReason) {
  * overridden in tests, to prove that guarantee holds even if either step
  * throws, without needing a real lms binary or model server to do it.
  * @param {object} params
+ * @param {string} params.cwd
+ * @param {import('./provider.mjs').Provider} params.client
+ * @param {string} params.reviewModel
+ * @param {number} [params.reviewContextWindow]
+ * @param {number} params.buildContextWindow
+ * @param {string[]} params.filesChanged
+ * @param {Date} params.startedAt
+ * @param {number} params.maxRunMs
+ * @param {number} [params.heartbeatMs]
+ * @param {function} [params.onHeartbeat]
+ * @param {function} [params.onDebug]
+ * @param {string[]} [params.envPassthrough]
+ * @param {number} [params.minToolCalls]
+ * @param {number} [params.maxToolTurns]
+ * @param {import('./reporter.mjs').Reporter} [params.reporter]
  * @param {function} [params.ensureModelLoadedFn]
  * @param {function} [params.runReviewFn]
  */
@@ -1013,9 +1052,9 @@ export async function runReviewPass(params) {
  * so the operator can see which window is in effect.
  * @param {object} params
  * @param {number} [params.option] - Explicit --context-window value
- * @param {object} params.client - Model client (for probing)
+ * @param {import('./provider.mjs').Provider} params.client - Model client (for probing)
  * @param {string} params.modelId - Resolved model id
- * @param {object} [params.reporter] - Output channel for the startup notice
+ * @param {import('./reporter.mjs').Reporter} [params.reporter] - Output channel for the startup notice
  *   (see specs/reporter.yaml); defaults to a null (silent) reporter
  * @returns {Promise<number>}
  */
