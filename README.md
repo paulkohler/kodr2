@@ -189,6 +189,22 @@ step outcomes land in the run record. `--plan` cannot be combined with
 `--plan-summary-cap`, each with a `KODR_PLAN_*` env var. See
 `specs/planning.yaml`.
 
+`--plan-model` (or `KODR_PLAN_MODEL`) runs the planner call on its own
+model — a larger model plans, a smaller one implements — and implies
+`--plan`. A bare model id plans on the run's own provider; prefix a
+provider name to mix providers, e.g. plan on OpenRouter while building
+locally:
+
+```bash
+kodr --plan-model openrouter/anthropic/claude-opus-4.8 \
+     --model google/gemma-4-26b-a4b \
+     "set up the git server"
+```
+
+Steps always run on the build model. If the plan model can't be set up (a
+missing `OPENROUTER_API_KEY`, an unknown model), planning falls back to the
+build model with a notice — never a failed run.
+
 ## Tools
 
 The model has these tools available:

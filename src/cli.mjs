@@ -16,7 +16,7 @@ import {
 import { DEFAULT_HEARTBEAT_MS, resolveRunsDir, run } from './harness.mjs';
 import { DEFAULT_INCIDENT_HEARTBEAT_MS } from './incident.mjs';
 import { DEFAULT_MAX_RETRIES } from './model.mjs';
-import { planEnabled } from './plan.mjs';
+import { planEnabled, planModelSpec } from './plan.mjs';
 import { createProvider, resolveProviderName } from './provider.mjs';
 import { createJsonReporter } from './reporter.mjs';
 import {
@@ -67,6 +67,7 @@ import { MAX_TOOL_TURNS } from './tool-loop.mjs';
  * @property {boolean} approveCommands
  * @property {boolean} noFail
  * @property {boolean} plan
+ * @property {string|null} planModel
  * @property {number|null} planMaxSteps
  * @property {number|null} planTimeoutMs
  * @property {number|null} planStepMaxToolTurns
@@ -259,8 +260,12 @@ export async function main(argv) {
   // A continuation is one prior conversation; a planned build is N fresh
   // sub-agent conversations. Injecting the prior messages into every step
   // bloats each one, and injecting them nowhere silently discards them --
-  // both worse than an honest error (see specs/planning.yaml).
-  if (planEnabled(args.plan) && args.continue) {
+  // both worse than an honest error (see specs/planning.yaml). A plan model
+  // implies the planning phase, so it conflicts the same way.
+  if (
+    (planEnabled(args.plan) || planModelSpec(args.planModel).model !== null) &&
+    args.continue
+  ) {
     process.stderr.write('--plan cannot be combined with --continue.\n');
     process.exitCode = 1;
     return;
@@ -297,6 +302,7 @@ export async function main(argv) {
     reviewMaxToolTurns: args.reviewMaxToolTurns,
     plan: args.plan,
     // null (unset) falls through to the plan.mjs resolvers' env/defaults.
+    planModel: args.planModel ?? undefined,
     planMaxSteps: args.planMaxSteps ?? undefined,
     planTimeoutMs: args.planTimeoutMs ?? undefined,
     planStepMaxToolTurns: args.planStepMaxToolTurns ?? undefined,
@@ -546,6 +552,7 @@ export function parseArgs(argv) {
     plan: false,
     // null (unset) so the plan.mjs resolvers' env vars still apply when the
     // flag isn't passed (the visionEnabled/contextWindow pattern).
+    planModel: null,
     planMaxSteps: null,
     planTimeoutMs: null,
     planStepMaxToolTurns: null,
@@ -754,6 +761,11 @@ export function parseArgs(argv) {
       i++;
       continue;
     }
+    if (arg === '--plan-model' && argv[i + 1]) {
+      args.planModel = argv[++i];
+      i++;
+      continue;
+    }
     if (arg === '--plan-max-steps' && argv[i + 1]) {
       args.planMaxSteps = parseInt(argv[++i], 10);
       i++;
@@ -886,6 +898,11 @@ Options:
                                   executed as a fresh sub-agent conversation (or KODR_PLAN).
                                   Off by default; cannot be combined with --continue.
                                   See specs/planning.yaml.
+  --plan-model <spec>             Model for the planner call only (or KODR_PLAN_MODEL), so a
+                                  larger model plans and a smaller one implements. A bare model
+                                  id plans on the run's own provider; prefix a provider name to
+                                  plan elsewhere: "openrouter/anthropic/claude-opus-4.8" with an
+                                  lmstudio build. Implies --plan. Steps always run on --model.
   --plan-max-steps <n>            Upper bound on plan length (or KODR_PLAN_MAX_STEPS; default: 8)
   --plan-timeout-ms <n>           Cap on the planner call itself (or KODR_PLAN_TIMEOUT_MS;
                                   default: 120000, 0 disables the extra cap)

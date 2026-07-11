@@ -314,6 +314,17 @@ describe('parseArgs', () => {
     assert.equal(args.planSummaryCap, null);
   });
 
+  it('parses --plan-model (default unset)', () => {
+    assert.equal(parseArgs(['run', 'hi']).planModel, null);
+    const args = parseArgs([
+      'run',
+      'hi',
+      '--plan-model',
+      'openrouter/anthropic/claude-opus-4.8',
+    ]);
+    assert.equal(args.planModel, 'openrouter/anthropic/claude-opus-4.8');
+  });
+
   it('parses --plan and every plan limit flag', () => {
     const args = parseArgs([
       'run',
@@ -356,6 +367,24 @@ describe('--plan validation', () => {
     process.exitCode = undefined;
     try {
       await main(['run', 'hi', '--plan-max-steps', 'lots']);
+      assert.equal(process.exitCode, 1);
+    } finally {
+      process.exitCode = originalExitCode;
+    }
+  });
+
+  it('rejects --plan-model combined with --continue (a plan model implies --plan)', async () => {
+    const originalExitCode = process.exitCode;
+    process.exitCode = undefined;
+    try {
+      await main([
+        'run',
+        'hi',
+        '--plan-model',
+        'big-planner',
+        '--continue',
+        'last',
+      ]);
       assert.equal(process.exitCode, 1);
     } finally {
       process.exitCode = originalExitCode;
