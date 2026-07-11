@@ -1341,6 +1341,7 @@ export async function runPlannedBuild(params) {
         approveCommands: params.approveCommands,
         confirm: params.confirm,
         summaryCap: params.planSummaryCap,
+        isFinalStep: step.id === total,
       });
 
       step.status = outcome.status;

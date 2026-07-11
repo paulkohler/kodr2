@@ -1035,6 +1035,42 @@ describe('runPlannedBuild', () => {
     assert.equal(result.plan, plan);
   });
 
+  it('passes isFinalStep true only for the last step', async () => {
+    const plan = makePlan(['one', 'two', 'three']);
+    const seen = [];
+    await runPlannedBuild({
+      ...baseParams,
+      messages: [],
+      createPlanFn: fakeCreatePlan(plan),
+      runStepFn: async ({ step, isFinalStep }) => {
+        seen.push([step.id, isFinalStep]);
+        return outcome();
+      },
+    });
+
+    assert.deepEqual(seen, [
+      [1, false],
+      [2, false],
+      [3, true],
+    ]);
+  });
+
+  it('marks a single-step plan as final on its only step', async () => {
+    const plan = makePlan(['only']);
+    let sawFinal;
+    await runPlannedBuild({
+      ...baseParams,
+      messages: [],
+      createPlanFn: fakeCreatePlan(plan),
+      runStepFn: async ({ isFinalStep }) => {
+        sawFinal = isFinalStep;
+        return outcome();
+      },
+    });
+
+    assert.equal(sawFinal, true);
+  });
+
   it('continues to the next step after a failed one, reporting its stop reason', async () => {
     const plan = makePlan(['one', 'two', 'three']);
     const result = await runPlannedBuild({

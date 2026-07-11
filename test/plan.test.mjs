@@ -399,6 +399,33 @@ describe('buildStepMessages', () => {
     assert.match(user.content, /3\. \[pending\] Configure nginx/);
     assert.match(user.content, /\(none yet\)/);
   });
+
+  it('appends the closing self-check addendum only when isFinalStep is set', () => {
+    const plan = samplePlan();
+    const [notFinal] = buildStepMessages({
+      systemPrompt: 'sys',
+      goal: 'g',
+      plan,
+      step: plan.steps[2],
+    });
+    assert.match(notFinal.content, /ONE step of a fixed plan/);
+    assert.doesNotMatch(notFinal.content, /last step of the plan/);
+
+    const [final] = buildStepMessages({
+      systemPrompt: 'sys',
+      goal: 'g',
+      plan,
+      step: plan.steps[2],
+      isFinalStep: true,
+    });
+    assert.match(final.content, /ONE step of a fixed plan/);
+    assert.match(final.content, /last step of the plan/);
+    assert.ok(
+      final.content.indexOf('ONE step of a fixed plan') <
+        final.content.indexOf('last step of the plan'),
+      'the plan-step addendum should precede the closing self-check',
+    );
+  });
 });
 
 describe('runStep', () => {
@@ -450,6 +477,26 @@ describe('runStep', () => {
     const sent = client.calls[0].messages;
     assert.equal(sent[0].role, 'system');
     assert.match(sent[1].content, /- a\.mjs/);
+    // Not the final step (and isFinalStep left at its default): no closing
+    // self-check addendum.
+    assert.doesNotMatch(sent[0].content, /last step of the plan/);
+  });
+
+  it('carries the closing self-check into the final step system prompt', async () => {
+    const client = scriptedClient([finalTurn('done.')]);
+    const plan = samplePlan();
+    await runStep({
+      client,
+      modelId: 'm',
+      tools: fakeTools(),
+      systemPrompt: 'sys',
+      goal: 'g',
+      plan,
+      step: plan.steps[2],
+      isFinalStep: true,
+    });
+    const sent = client.calls[0].messages;
+    assert.match(sent[0].content, /last step of the plan/);
   });
 
   it('truncates the summary to the cap', async () => {

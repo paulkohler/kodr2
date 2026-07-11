@@ -22,6 +22,7 @@ const DESCRIPTION_CAP = 4_000;
 
 const PLAN_SYSTEM = loadPrompt('plan');
 const PLAN_STEP_ADDENDUM = loadPrompt('plan-step');
+const PLAN_STEP_FINAL_ADDENDUM = loadPrompt('plan-step-final');
 
 /**
  * Whether the planning phase runs, from --plan or KODR_PLAN.
@@ -408,16 +409,17 @@ function renderPlanLine(step, currentId) {
 
 /**
  * The fresh conversation a step sub-agent starts from: the run's own build
- * system prompt plus the plan-step addendum, and a user message carrying
- * the overall goal, the full plan with statuses and prior handoffs, the
- * files changed so far (a cheap objective handoff supplement), and the
- * assigned step.
+ * system prompt plus the plan-step addendum (and, for the final step only,
+ * the closing self-check addendum), and a user message carrying the overall
+ * goal, the full plan with statuses and prior handoffs, the files changed
+ * so far (a cheap objective handoff supplement), and the assigned step.
  * @param {object} params
  * @param {string} params.systemPrompt - The run's build system prompt
  * @param {string} params.goal - The original user prompt
  * @param {Plan} params.plan
  * @param {PlanStep} params.step - The step to execute
  * @param {string[]} [params.filesChanged] - Files changed by prior steps
+ * @param {boolean} [params.isFinalStep] - True for the plan's last step
  * @returns {Array<{ role: string, content: string }>}
  */
 export function buildStepMessages({
@@ -426,6 +428,7 @@ export function buildStepMessages({
   plan,
   step,
   filesChanged = [],
+  isFinalStep = false,
 }) {
   const planLines = plan.steps
     .map((s) => renderPlanLine(s, step.id))
@@ -441,8 +444,13 @@ export function buildStepMessages({
     `Your step (${step.id} of ${plan.steps.length}): ${step.title}\n${step.description}`,
   ].join('\n\n');
 
+  let system = `${systemPrompt}\n\n${PLAN_STEP_ADDENDUM}`;
+  if (isFinalStep) {
+    system = `${system}\n\n${PLAN_STEP_FINAL_ADDENDUM}`;
+  }
+
   return [
-    { role: 'system', content: `${systemPrompt}\n\n${PLAN_STEP_ADDENDUM}` },
+    { role: 'system', content: system },
     { role: 'user', content: user },
   ];
 }
@@ -493,10 +501,19 @@ function stepSummaryFrom(loop, cap) {
  * @param {boolean} [params.approveCommands]
  * @param {function} [params.confirm]
  * @param {number} [params.summaryCap]
+ * @param {boolean} [params.isFinalStep] - True for the plan's last step
  * @returns {Promise<{ status: 'done'|'failed', stoppedReason: string, summary: string, toolTurns: number, compactions: number, usage: { prompt: number, completion: number, cost: number }, retries: number, messages: Array }>}
  */
 export async function runStep(params) {
-  const { systemPrompt, goal, plan, step, summaryCap, ...loopParams } = params;
+  const {
+    systemPrompt,
+    goal,
+    plan,
+    step,
+    summaryCap,
+    isFinalStep = false,
+    ...loopParams
+  } = params;
 
   const messages = buildStepMessages({
     systemPrompt,
@@ -504,6 +521,7 @@ export async function runStep(params) {
     plan,
     step,
     filesChanged: params.tools.filesChanged(),
+    isFinalStep,
   });
 
   const loop = await runToolLoop({ ...loopParams, messages });
