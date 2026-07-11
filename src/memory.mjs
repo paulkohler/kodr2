@@ -215,6 +215,8 @@ export async function writeMemoryProposal(runsDir, notes) {
  * @param {string} question
  * @param {object} [options]
  * @param {number} [options.timeoutMs]
+ * @param {NodeJS.ReadableStream} [options.input] - Overridable for tests; defaults to process.stdin
+ * @param {NodeJS.WritableStream} [options.output] - Overridable for tests; defaults to process.stdout
  * @returns {Promise<boolean|null>} null means no answer was obtained (timed out)
  */
 export async function promptYesNo(question, options = {}) {
@@ -247,7 +249,7 @@ function isNoFindings(notes) {
  * Run the end-of-run retrospective. Never writes to MEMORY.md without a
  * human decision in the loop -- see the module doc comment.
  * @param {object} params
- * @param {object} params.client - Model client
+ * @param {import('./provider.mjs').Provider} params.client - Model client
  * @param {string} params.modelId - Model to generate the retrospective with
  * @param {Array} params.messages - Full conversation from the run just finished
  * @param {string} params.cwd - Workspace root
