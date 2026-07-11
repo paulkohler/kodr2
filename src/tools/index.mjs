@@ -26,6 +26,15 @@ const ALL_TOOLS = [
 const VISION_TOOLS = [viewImage];
 
 /**
+ * @typedef {object} ToolRegistry
+ * @property {() => Array} definitions
+ * @property {(name: string, args: object) => Promise<object>} dispatch
+ * @property {() => string[]} filesChanged
+ * @property {() => number} commandsRun
+ * @property {() => string[]} packageCommands
+ */
+
+/**
  * Create a tool registry bound to a workspace.
  * @param {string} cwd - Workspace root (absolute path)
  * @param {object} [options]
@@ -43,7 +52,9 @@ const VISION_TOOLS = [viewImage];
  *   them but never got them committed) so this session's own tracking
  *   reflects the full set of changes still sitting in the working tree,
  *   not just what this specific process touches.
- * @returns {object} Registry with `definitions`, `dispatch`, and `context`
+ * @param {boolean} [options.vision] - Offer the view_image tool (see specs/vision.yaml)
+ * @param {number} [options.maxImageBytes] - Size cap for view_image reads
+ * @returns {ToolRegistry}
  */
 export function createToolRegistry(cwd, options = {}) {
   const filesChanged = [...new Set(options.initialFilesChanged ?? [])];
