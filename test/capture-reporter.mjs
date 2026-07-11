@@ -11,11 +11,11 @@
 import { REPORTER_METHODS } from '../src/reporter.mjs';
 
 /**
- * @returns {{ reporter: object, events: Array<object> }}
+ * @returns {{ reporter: import('../src/reporter.mjs').Reporter, events: Array<{ type: string, payload: object }> }}
  */
 export function createCaptureReporter() {
   const events = [];
-  const reporter = {};
+  const reporter = /** @type {import('../src/reporter.mjs').Reporter} */ ({});
   for (const type of REPORTER_METHODS) {
     reporter[type] = (payload) => {
       events.push({ type, payload });

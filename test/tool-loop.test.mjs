@@ -124,18 +124,24 @@ describe('executeRecoveredTextToolCall', () => {
 
 // A scripted model client: returns queued responses in order, repeating the
 // last one once the queue is drained. Records every chat() call.
+/**
+ * @param {Array<object>} responses
+ * @returns {import('../src/provider.mjs').Provider & { calls: Array<any> }}
+ */
 function scriptedClient(responses) {
   const calls = [];
   let i = 0;
-  return {
-    calls,
-    async chat(params) {
-      calls.push(params);
-      const response = responses[Math.min(i, responses.length - 1)];
-      i++;
-      return response;
-    },
-  };
+  return /** @type {import('../src/provider.mjs').Provider & { calls: Array<any> }} */ (
+    /** @type {any} */ ({
+      calls,
+      async chat(params) {
+        calls.push(params);
+        const response = responses[Math.min(i, responses.length - 1)];
+        i++;
+        return response;
+      },
+    })
+  );
 }
 
 function toolCallTurn(name, args) {
@@ -162,10 +168,12 @@ function finalTurn(text) {
   };
 }
 
-const stubTools = {
-  definitions: () => [],
-  dispatch: async () => ({ ok: true }),
-};
+const stubTools = /** @type {import('../src/tools/index.mjs').ToolRegistry} */ (
+  /** @type {any} */ ({
+    definitions: () => [],
+    dispatch: async () => ({ ok: true }),
+  })
+);
 
 describe('runToolLoop', () => {
   it('injects a user image message after a view_image tool call', async () => {
@@ -176,19 +184,24 @@ describe('runToolLoop', () => {
       toolCallTurn('view_image', { path: 'pic.png' }),
       finalTurn('I see it'),
     ]);
-    const tools = {
-      definitions: () => [],
-      dispatch: async () => ({
-        image: { path: 'pic.png', mediaType: 'image/png', dataBase64: 'AAAA' },
-      }),
-    };
+    const tools = /** @type {import('../src/tools/index.mjs').ToolRegistry} */ (
+      /** @type {any} */ ({
+        definitions: () => [],
+        dispatch: async () => ({
+          image: {
+            path: 'pic.png',
+            mediaType: 'image/png',
+            dataBase64: 'AAAA',
+          },
+        }),
+      })
+    );
     const messages = [];
     const loop = await runToolLoop({
       client,
       modelId: 'm',
       messages,
       tools,
-      quiet: true,
     });
 
     assert.equal(loop.completed, true);
@@ -220,10 +233,10 @@ describe('runToolLoop', () => {
     assert.ok(types.includes('toolCall'), 'expected a toolCall event');
     assert.ok(types.includes('toolResult'), 'expected a toolResult event');
     const toolCall = events.find((e) => e.type === 'toolCall');
-    assert.equal(toolCall.payload.name, 'list_files');
+    assert.equal(/** @type {any} */ (toolCall).payload.name, 'list_files');
     const turnEnd = events.find((e) => e.type === 'turnEnd');
     assert.ok(turnEnd, 'expected a turnEnd event');
-    assert.equal(turnEnd.payload.completed, true);
+    assert.equal(/** @type {any} */ (turnEnd).payload.completed, true);
   });
 
   it('completes when the model answers with no tool call', async () => {
@@ -234,7 +247,6 @@ describe('runToolLoop', () => {
       modelId: 'm',
       messages,
       tools: stubTools,
-      quiet: true,
     });
 
     assert.equal(loop.completed, true);
@@ -250,20 +262,21 @@ describe('runToolLoop', () => {
       finalTurn('fixed'),
     ]);
     let dispatched = 0;
-    const tools = {
-      definitions: () => [],
-      dispatch: async () => {
-        dispatched++;
-        return { ok: true };
-      },
-    };
+    const tools = /** @type {import('../src/tools/index.mjs').ToolRegistry} */ (
+      /** @type {any} */ ({
+        definitions: () => [],
+        dispatch: async () => {
+          dispatched++;
+          return { ok: true };
+        },
+      })
+    );
     const messages = [];
     const loop = await runToolLoop({
       client,
       modelId: 'm',
       messages,
       tools,
-      quiet: true,
     });
 
     assert.equal(dispatched, 1);
@@ -279,16 +292,17 @@ describe('runToolLoop', () => {
       { ...toolCallTurn('list_files', {}), retries: 1 },
       { ...finalTurn('fixed'), retries: 2 },
     ]);
-    const tools = {
-      definitions: () => [],
-      dispatch: async () => ({ ok: true }),
-    };
+    const tools = /** @type {import('../src/tools/index.mjs').ToolRegistry} */ (
+      /** @type {any} */ ({
+        definitions: () => [],
+        dispatch: async () => ({ ok: true }),
+      })
+    );
     const loop = await runToolLoop({
       client,
       modelId: 'm',
       messages: [],
       tools,
-      quiet: true,
     });
 
     assert.equal(loop.retries, 3);
@@ -301,7 +315,6 @@ describe('runToolLoop', () => {
       modelId: 'm',
       messages: [],
       tools: stubTools,
-      quiet: true,
     });
 
     assert.equal(loop.retries, 0);
@@ -314,7 +327,6 @@ describe('runToolLoop', () => {
       modelId: 'm',
       messages: [],
       tools: stubTools,
-      quiet: true,
     });
 
     assert.equal(loop.completed, false);
@@ -330,7 +342,6 @@ describe('runToolLoop', () => {
       modelId: 'm',
       messages: [],
       tools: stubTools,
-      quiet: true,
       maxToolTurns: 3,
     });
 
@@ -347,7 +358,6 @@ describe('runToolLoop', () => {
       modelId: 'm',
       messages: [],
       tools: stubTools,
-      quiet: true,
       startedAt: new Date(Date.now() - 1000),
       maxRunMs: 1,
     });
@@ -366,7 +376,6 @@ describe('runToolLoop', () => {
       modelId: 'm',
       messages: [],
       tools: stubTools,
-      quiet: true,
       startedAt,
       maxRunMs: 10_000,
     });
@@ -384,7 +393,6 @@ describe('runToolLoop', () => {
       modelId: 'm',
       messages: [],
       tools: stubTools,
-      quiet: true,
     });
 
     assert.equal(client.calls[0].timeoutMs, undefined);
@@ -398,7 +406,6 @@ describe('runToolLoop', () => {
       modelId: 'm',
       messages: [],
       tools: stubTools,
-      quiet: true,
       heartbeatMs: 5000,
       onHeartbeat,
     });
@@ -412,23 +419,25 @@ describe('runToolLoop', () => {
     // that budget is spent. It must be a clean budget-exceeded stop, not a
     // thrown error. maxRunMs is small and the chat takes longer than the
     // remaining budget, so by the time it throws the budget is exceeded.
-    const client = {
-      calls: [],
-      async chat(params) {
-        this.calls.push(params);
-        await new Promise((resolve) => setTimeout(resolve, 60));
-        throw Object.assign(new Error('Request timed out after 5ms'), {
-          code: 'ETIMEDOUT',
-        });
-      },
-    };
+    const client =
+      /** @type {import('../src/provider.mjs').Provider & { calls: Array<any> }} */ (
+        /** @type {any} */ ({
+          calls: [],
+          async chat(params) {
+            this.calls.push(params);
+            await new Promise((resolve) => setTimeout(resolve, 60));
+            throw Object.assign(new Error('Request timed out after 5ms'), {
+              code: 'ETIMEDOUT',
+            });
+          },
+        })
+      );
 
     const loop = await runToolLoop({
       client,
       modelId: 'm',
       messages: [],
       tools: stubTools,
-      quiet: true,
       startedAt: new Date(Date.now() - 15),
       maxRunMs: 20,
     });
@@ -441,13 +450,15 @@ describe('runToolLoop', () => {
     // Same timeout error, but with no run budget: isRunBudgetExceeded is false,
     // so this is a genuine failure and must surface as an error, not a clean
     // budget-exceeded stop.
-    const client = {
-      async chat() {
-        throw Object.assign(new Error('Request timed out after 30000ms'), {
-          code: 'ETIMEDOUT',
-        });
-      },
-    };
+    const client = /** @type {import('../src/provider.mjs').Provider} */ (
+      /** @type {any} */ ({
+        async chat() {
+          throw Object.assign(new Error('Request timed out after 30000ms'), {
+            code: 'ETIMEDOUT',
+          });
+        },
+      })
+    );
 
     await assert.rejects(
       runToolLoop({
@@ -455,9 +466,8 @@ describe('runToolLoop', () => {
         modelId: 'm',
         messages: [],
         tools: stubTools,
-        quiet: true,
       }),
-      (err) => {
+      (/** @type {any} */ err) => {
         assert.equal(err.code, 'ETIMEDOUT');
         return true;
       },
@@ -469,21 +479,26 @@ describe('runToolLoop', () => {
     // from turn 1 must survive on the error so the run record does not report
     // toolTurns: 0, cost: 0 for work that actually happened.
     let call = 0;
-    const client = {
-      calls: [],
-      async chat() {
-        call++;
-        if (call === 1) {
-          return {
-            message: toolCallTurn('list_files', {}).message,
-            usage: { prompt: 100, completion: 10, cost: 0.5 },
-          };
-        }
-        const err = new Error('model offline mid-loop');
-        err.retries = 2;
-        throw err;
-      },
-    };
+    const client =
+      /** @type {import('../src/provider.mjs').Provider & { calls: Array<any> }} */ (
+        /** @type {any} */ ({
+          calls: [],
+          async chat() {
+            call++;
+            if (call === 1) {
+              return {
+                message: toolCallTurn('list_files', {}).message,
+                usage: { prompt: 100, completion: 10, cost: 0.5 },
+              };
+            }
+            const err = /** @type {Error & { retries: number }} */ (
+              new Error('model offline mid-loop')
+            );
+            err.retries = 2;
+            throw err;
+          },
+        })
+      );
 
     await assert.rejects(
       runToolLoop({
@@ -491,9 +506,8 @@ describe('runToolLoop', () => {
         modelId: 'm',
         messages: [],
         tools: stubTools,
-        quiet: true,
       }),
-      (err) => {
+      (/** @type {any} */ err) => {
         assert.equal(err.message, 'model offline mid-loop');
         assert.equal(err.toolTurns, 1);
         assert.deepEqual(err.usage, { prompt: 100, completion: 10, cost: 0.5 });
@@ -675,16 +689,21 @@ describe('executeNativeToolCalls (untrusted model output)', () => {
 });
 
 // Records each dispatch so tests can assert whether a tool actually ran.
+/**
+ * @returns {import('../src/tools/index.mjs').ToolRegistry & { dispatched: Array<object> }}
+ */
 function recordingTools() {
   const dispatched = [];
-  return {
-    dispatched,
-    definitions: () => [],
-    dispatch: async (name, args) => {
-      dispatched.push({ name, args });
-      return { ok: true };
-    },
-  };
+  return /** @type {import('../src/tools/index.mjs').ToolRegistry & { dispatched: Array<object> }} */ (
+    /** @type {any} */ ({
+      dispatched,
+      definitions: () => [],
+      dispatch: async (name, args) => {
+        dispatched.push({ name, args });
+        return { ok: true };
+      },
+    })
+  );
 }
 
 describe('tool hooks in dispatch', () => {
