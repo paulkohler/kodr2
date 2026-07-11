@@ -165,7 +165,11 @@ with a handoff summary flowing from each step to the next. The harness owns
 the todo list: statuses, sequencing, and progress lines
 (`step 2/4 done`). A simple prompt yields one step and follows the same
 path; a multi-part task (set up a server, deploy two branches, wire a
-hook) gets each part its own focused context and turn budget.
+hook) gets each part its own focused context and turn budget. Every step
+does only its own assigned work except the last, which also does a
+closing self-check against the overall goal — with tools, not by editing
+the plan — so a requirement that fell between step boundaries still gets
+caught before verify/heal.
 
 ```
 $ kodr --plan "Set up a git server over SSH and deploy two branches via nginx"
