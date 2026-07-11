@@ -305,8 +305,8 @@ export function remainingRunBudgetMs(startedAt, maxRunMs) {
  * @param {import('./tools/index.mjs').ToolRegistry} tools
  * @param {Array} messages
  * @param {import('./reporter.mjs').Reporter} reporter
- * @param {object} hookCtx
- * @param {object} gate
+ * @param {object} [hookCtx]
+ * @param {object} [gate]
  * @returns {Promise<number>} Number of executed calls
  */
 export async function executeNativeToolCalls(
@@ -384,8 +384,8 @@ function appendToolResult(messages, toolCallId, result) {
  * @param {{ id: string, function: { name: string, arguments: string } }} tc
  * @param {import('./tools/index.mjs').ToolRegistry} tools
  * @param {import('./reporter.mjs').Reporter} reporter
- * @param {object} hookCtx
- * @param {object} gate
+ * @param {object} [hookCtx]
+ * @param {object} [gate]
  * @returns {Promise<object>} The tool result (or a repair error)
  */
 async function executeOneNativeCall(tc, tools, reporter, hookCtx, gate) {
@@ -413,8 +413,8 @@ async function executeOneNativeCall(tc, tools, reporter, hookCtx, gate) {
  * @param {import('./tools/index.mjs').ToolRegistry} tools
  * @param {Array} messages
  * @param {import('./reporter.mjs').Reporter} reporter
- * @param {object} hookCtx
- * @param {object} gate
+ * @param {object} [hookCtx]
+ * @param {object} [gate]
  * @returns {Promise<boolean>}
  */
 export async function executeRecoveredTextToolCall(
