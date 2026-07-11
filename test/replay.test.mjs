@@ -54,10 +54,21 @@ async function writeRunRecord(runDir, metadata) {
   );
 }
 
+// Mirrors cli.test.mjs's own mockArgs: test doubles only ever populate the
+// CliArgs fields a given test exercises; this cast documents that the
+// object is deliberately partial rather than accidentally missing fields.
+/**
+ * @param {Partial<import('../src/cli.mjs').CliArgs>} partial
+ * @returns {import('../src/cli.mjs').CliArgs}
+ */
+function mockArgs(partial) {
+  return /** @type {import('../src/cli.mjs').CliArgs} */ (partial);
+}
+
 describe('runReplay', () => {
   it('fails with a usage message when no ref is given', async () => {
     cwd = await mkdtemp(join(tmpdir(), 'kodr-replay-'));
-    await runReplay({ prompt: null, cwd });
+    await runReplay(mockArgs({ prompt: null, cwd }));
     assert.equal(process.exitCode, 1);
     process.exitCode = 0;
   });
@@ -66,7 +77,7 @@ describe('runReplay', () => {
     cwd = await mkdtemp(join(tmpdir(), 'kodr-replay-'));
     await writeRunRecord(join(cwd, '.kodr', 'runs'), { cwd });
 
-    await runReplay({ prompt: 'last', cwd });
+    await runReplay(mockArgs({ prompt: 'last', cwd }));
     assert.equal(process.exitCode, 1);
     process.exitCode = 0;
   });
@@ -82,7 +93,7 @@ describe('runReplay', () => {
       testCommand: 'npm test',
     });
 
-    await runReplay({ prompt: 'last', cwd, quiet: true });
+    await runReplay(mockArgs({ prompt: 'last', cwd, quiet: true }));
 
     assert.equal(model.calls.length, 1);
     const sent = model.calls[0];
@@ -103,12 +114,14 @@ describe('runReplay', () => {
       model: 'recorded-model',
     });
 
-    await runReplay({
-      prompt: 'last',
-      cwd,
-      quiet: true,
-      model: 'override-model',
-    });
+    await runReplay(
+      mockArgs({
+        prompt: 'last',
+        cwd,
+        quiet: true,
+        model: 'override-model',
+      }),
+    );
 
     assert.equal(model.calls[0].model, 'override-model');
   });
