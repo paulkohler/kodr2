@@ -50,15 +50,20 @@ export async function loadRunRecords(runsDir) {
 
 /**
  * @typedef {object} RunRecord
+ * @property {string} [timestamp]
  * @property {string} [stoppedReason]
  * @property {boolean} [noOpCompletion]
  * @property {boolean} [healed]
+ * @property {number} [healTurns]
  * @property {number} [compactions]
  * @property {number} [retries]
  * @property {boolean} [verified]
  * @property {number} [toolTurns]
  * @property {number} [durationMs]
+ * @property {string[]} [filesChanged]
+ * @property {string[]} [packageCommands]
  * @property {{ prompt: number, completion: number, cost: number }} [usage]
+ * @property {{ message?: string }} [error]
  */
 
 /**

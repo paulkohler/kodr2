@@ -50,7 +50,7 @@ export async function findLatestRunFile(runsDir) {
 
 /**
  * Format a run record's common fields as human-readable lines.
- * @param {object} record - A parsed .kodr/runs/*.json record
+ * @param {import('../src/stats.mjs').RunRecord} record - A parsed .kodr/runs/*.json record
  * @returns {string}
  */
 export function formatRunRecord(record) {
