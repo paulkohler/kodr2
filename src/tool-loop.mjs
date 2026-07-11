@@ -56,7 +56,7 @@ export const MAX_TOOL_TURNS = 20;
  *   each run_command tool call (see specs/tui.yaml). Off by default.
  * @param {function} [params.confirm] - (call) => Promise<{ approved }>; the
  *   approval channel used when approveCommands is on
- * @returns {Promise<{ finalText: string, completed: boolean, stoppedReason: string, toolTurns: number, compactions: number, usage: { prompt: number, completion: number }, retries: number }>}
+ * @returns {Promise<{ finalText: string, completed: boolean, stoppedReason: string, toolTurns: number, compactions: number, usage: { prompt: number, completion: number, cost: number }, retries: number }>}
  */
 export async function runToolLoop(params) {
   const { client, modelId, messages, tools } = params;
