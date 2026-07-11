@@ -53,12 +53,22 @@ function shQuote(value) {
 }
 
 /**
+ * @typedef {object} LmsOptions
+ * @property {string} [cwd]
+ * @property {Record<string, string>} [env]
+ * @property {number} [timeoutMs]
+ * @property {function} [run] - Overridable for tests; defaults to shell.mjs's runShell
+ */
+
+/**
  * Run an lms subcommand and normalize its result. runShell (and any test
  * double standing in for it) returns { stdout, stderr, exitCode } -- this
  * combines stdout/stderr into a single `output` for error messages, while
  * keeping `stdout` alone available for callers (like listLoadedModels)
  * that need to parse it as JSON and can't risk stray stderr noise
  * corrupting that.
+ * @param {string[]} args
+ * @param {LmsOptions} options
  */
 async function runLms(args, { cwd, env, timeoutMs, run = defaultRunShell }) {
   const command = `lms ${args.map(shQuote).join(' ')}`;
@@ -75,7 +85,7 @@ async function runLms(args, { cwd, env, timeoutMs, run = defaultRunShell }) {
 
 /**
  * Unload every currently-loaded model.
- * @param {object} [options]
+ * @param {LmsOptions} [options]
  * @returns {Promise<{ error?: string }>}
  */
 export async function unloadAllModels(options = {}) {
@@ -92,6 +102,10 @@ export async function unloadAllModels(options = {}) {
  * @param {string} options.model - Model key (also used as --identifier)
  * @param {number} [options.contextWindow] - Context length in tokens
  * @param {number} [options.ttlSec] - Seconds of inactivity before auto-unload
+ * @param {string} [options.cwd]
+ * @param {Record<string, string>} [options.env]
+ * @param {number} [options.timeoutMs]
+ * @param {function} [options.run] - Overridable for tests; defaults to shell.mjs's runShell
  * @returns {Promise<{ error?: string }>}
  */
 export async function loadModel(options) {
@@ -119,7 +133,7 @@ export async function loadModel(options) {
 
 /**
  * List models currently loaded in memory.
- * @param {object} [options]
+ * @param {LmsOptions} [options]
  * @returns {Promise<{ models?: Array, error?: string }>}
  */
 export async function listLoadedModels(options = {}) {
@@ -146,6 +160,10 @@ export async function listLoadedModels(options = {}) {
  * @param {number} [options.contextWindow] - Context length in tokens (0 or
  *   omitted skips the context-length check)
  * @param {number} [options.ttlSec] - Seconds of inactivity before auto-unload
+ * @param {string} [options.cwd]
+ * @param {Record<string, string>} [options.env]
+ * @param {number} [options.timeoutMs]
+ * @param {function} [options.run] - Overridable for tests; defaults to shell.mjs's runShell
  * @returns {Promise<{ model?: object, error?: string }>}
  */
 export async function ensureModelLoaded(options) {
