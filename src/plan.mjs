@@ -8,7 +8,7 @@
  */
 
 import { loadPrompt } from './prompts.mjs';
-import { remainingRunBudgetMs } from './tool-loop.mjs';
+import { remainingRunBudgetMs, runToolLoop } from './tool-loop.mjs';
 import { extractBalanced, extractFenced } from './tool-recovery.mjs';
 
 export const DEFAULT_PLAN_MAX_STEPS = 8;
@@ -20,6 +20,7 @@ const TITLE_CAP = 200;
 const DESCRIPTION_CAP = 4_000;
 
 const PLAN_SYSTEM = loadPrompt('plan');
+const PLAN_STEP_ADDENDUM = loadPrompt('plan-step');
 
 /**
  * Whether the planning phase runs, from --plan or KODR_PLAN.
@@ -350,4 +351,147 @@ export function stepRunMs({ startedAt, maxRunMs, stepsRemaining, floorMs }) {
   const remaining = maxRunMs - elapsed;
   const share = Math.max(floorMs, remaining / stepsRemaining);
   return Math.min(maxRunMs, elapsed + share);
+}
+
+/**
+ * One line of the plan as rendered into a step's user message: status,
+ * title, and -- for executed steps -- the handoff summary the next agent
+ * needs. The assigned step is marked so the sub-agent can locate itself.
+ * @param {PlanStep} step
+ * @param {number} currentId
+ * @returns {string}
+ */
+function renderPlanLine(step, currentId) {
+  if (step.id === currentId) {
+    return `${step.id}. [YOUR STEP] ${step.title}`;
+  }
+  if (step.status === 'done') {
+    const handoff = step.summary ? ` — ${step.summary}` : '';
+    return `${step.id}. [done] ${step.title}${handoff}`;
+  }
+  if (step.status === 'failed') {
+    const handoff = step.summary ? ` — ${step.summary}` : '';
+    return `${step.id}. [failed: ${step.stoppedReason}] ${step.title}${handoff}`;
+  }
+  return `${step.id}. [pending] ${step.title}`;
+}
+
+/**
+ * The fresh conversation a step sub-agent starts from: the run's own build
+ * system prompt plus the plan-step addendum, and a user message carrying
+ * the overall goal, the full plan with statuses and prior handoffs, the
+ * files changed so far (a cheap objective handoff supplement), and the
+ * assigned step.
+ * @param {object} params
+ * @param {string} params.systemPrompt - The run's build system prompt
+ * @param {string} params.goal - The original user prompt
+ * @param {Plan} params.plan
+ * @param {PlanStep} params.step - The step to execute
+ * @param {string[]} [params.filesChanged] - Files changed by prior steps
+ * @returns {Array<{ role: string, content: string }>}
+ */
+export function buildStepMessages({
+  systemPrompt,
+  goal,
+  plan,
+  step,
+  filesChanged = [],
+}) {
+  const planLines = plan.steps
+    .map((s) => renderPlanLine(s, step.id))
+    .join('\n');
+  const files =
+    filesChanged.length > 0
+      ? filesChanged.map((file) => `- ${file}`).join('\n')
+      : '(none yet)';
+  const user = [
+    `Overall goal:\n${goal}`,
+    `Full plan:\n${planLines}`,
+    `Files changed by prior steps:\n${files}`,
+    `Your step (${step.id} of ${plan.steps.length}): ${step.title}\n${step.description}`,
+  ].join('\n\n');
+
+  return [
+    { role: 'system', content: `${systemPrompt}\n\n${PLAN_STEP_ADDENDUM}` },
+    { role: 'user', content: user },
+  ];
+}
+
+/**
+ * The step's handoff summary: its loop's own final text truncated to the
+ * cap -- the plan-step prompt makes the final reply the handoff -- or a
+ * deterministic synthesized summary when the step never completed. No
+ * extra summarize call.
+ * @param {{ finalText: string, stoppedReason: string, toolTurns: number }} loop
+ * @param {number} cap
+ * @returns {string}
+ */
+function stepSummaryFrom(loop, cap) {
+  const text = (loop.finalText || '').trim();
+  if (text) {
+    return text.slice(0, cap);
+  }
+  return `step stopped (${loop.stoppedReason}) after ${loop.toolTurns} tool turns`;
+}
+
+/**
+ * Execute one plan step as a fresh sub-agent conversation over the run's
+ * shared tool registry. The loop's own params (budget, hooks, approval)
+ * pass straight through to an unmodified runToolLoop; maxRunMs is the
+ * synthetic per-step deadline from stepRunMs. A thrown loop error
+ * propagates (the harness catch handles it exactly like the single-loop
+ * path).
+ * @param {object} params
+ * @param {import('./provider.mjs').Provider} params.client
+ * @param {string} params.modelId
+ * @param {import('./tools/index.mjs').ToolRegistry} params.tools - The run's shared registry
+ * @param {string} params.systemPrompt - The run's build system prompt
+ * @param {string} params.goal - The original user prompt
+ * @param {Plan} params.plan
+ * @param {PlanStep} params.step
+ * @param {import('./reporter.mjs').Reporter} [params.reporter]
+ * @param {Date} [params.startedAt]
+ * @param {number} [params.maxRunMs] - Synthetic per-step deadline (see stepRunMs)
+ * @param {number} [params.maxToolTurns]
+ * @param {number} [params.contextWindow]
+ * @param {{ PreToolUse: Array, PostToolUse: Array }} [params.toolHooks]
+ * @param {string} [params.cwd]
+ * @param {Record<string, string>} [params.commandEnv]
+ * @param {number} [params.heartbeatMs]
+ * @param {function} [params.onHeartbeat]
+ * @param {function} [params.onDebug]
+ * @param {boolean} [params.approveCommands]
+ * @param {function} [params.confirm]
+ * @param {number} [params.summaryCap]
+ * @returns {Promise<{ status: 'done'|'failed', stoppedReason: string, summary: string, toolTurns: number, compactions: number, usage: { prompt: number, completion: number, cost: number }, retries: number, messages: Array }>}
+ */
+export async function runStep(params) {
+  const { systemPrompt, goal, plan, step, summaryCap, ...loopParams } = params;
+
+  const messages = buildStepMessages({
+    systemPrompt,
+    goal,
+    plan,
+    step,
+    filesChanged: params.tools.filesChanged(),
+  });
+
+  const loop = await runToolLoop({ ...loopParams, messages });
+
+  /** @type {'done'|'failed'} */
+  let status = 'failed';
+  if (loop.stoppedReason === 'complete') {
+    status = 'done';
+  }
+
+  return {
+    status,
+    stoppedReason: loop.stoppedReason,
+    summary: stepSummaryFrom(loop, stepSummaryCap(summaryCap)),
+    toolTurns: loop.toolTurns,
+    compactions: loop.compactions,
+    usage: loop.usage,
+    retries: loop.retries,
+    messages,
+  };
 }

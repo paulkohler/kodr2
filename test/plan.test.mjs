@@ -6,12 +6,14 @@ import {
   DEFAULT_PLAN_TIMEOUT_MS,
   DEFAULT_STEP_MIN_MS,
   DEFAULT_STEP_SUMMARY_CAP,
+  buildStepMessages,
   createPlan,
   fallbackPlan,
   parsePlanResponse,
   planEnabled,
   planMaxSteps,
   planTimeoutMs,
+  runStep,
   stepMaxToolTurns,
   stepMinMs,
   stepRunMs,
@@ -292,6 +294,216 @@ describe('stepRunMs', () => {
     });
     // floor would allow 60s more, but the run budget wins
     assert.equal(result, 100_000);
+  });
+});
+
+/**
+ * A minimal fake ToolRegistry with the surface runStep touches.
+ * @param {string[]} [files]
+ * @returns {import('../src/tools/index.mjs').ToolRegistry}
+ */
+function fakeTools(files = []) {
+  return /** @type {import('../src/tools/index.mjs').ToolRegistry} */ (
+    /** @type {any} */ ({
+      definitions: () => [],
+      dispatch: async () => ({ ok: true }),
+      filesChanged: () => files,
+    })
+  );
+}
+
+/** @returns {import('../src/plan.mjs').Plan} */
+function samplePlan() {
+  return /** @type {import('../src/plan.mjs').Plan} */ ({
+    createdAt: '2026-07-11T00:00:00.000Z',
+    degraded: false,
+    steps: [
+      {
+        id: 1,
+        title: 'Set up',
+        description: 'create the repo',
+        status: 'done',
+        stoppedReason: 'complete',
+        summary: 'repo created at /git/project',
+        toolTurns: 3,
+      },
+      {
+        id: 2,
+        title: 'Write hook',
+        description: 'add the post-receive hook',
+        status: 'failed',
+        stoppedReason: 'tool-limit',
+        summary: 'ran out of turns mid-edit',
+        toolTurns: 20,
+      },
+      {
+        id: 3,
+        title: 'Configure nginx',
+        description: 'serve both branches over https',
+        status: 'pending',
+        stoppedReason: null,
+        summary: '',
+        toolTurns: 0,
+      },
+    ],
+  });
+}
+
+describe('buildStepMessages', () => {
+  it('composes the build system prompt plus the plan-step addendum', () => {
+    const [system] = buildStepMessages({
+      systemPrompt: 'THE BUILD PROMPT',
+      goal: 'the goal',
+      plan: samplePlan(),
+      step: samplePlan().steps[2],
+    });
+    assert.equal(system.role, 'system');
+    assert.ok(system.content.startsWith('THE BUILD PROMPT'));
+    assert.match(system.content, /ONE step of a fixed plan/);
+  });
+
+  it('carries goal, plan statuses, handoffs, files changed, and the assigned step', () => {
+    const plan = samplePlan();
+    const [, user] = buildStepMessages({
+      systemPrompt: 'sys',
+      goal: 'set up a git server',
+      plan,
+      step: plan.steps[2],
+      filesChanged: ['hooks/post-receive'],
+    });
+    assert.equal(user.role, 'user');
+    assert.match(user.content, /Overall goal:\nset up a git server/);
+    assert.match(user.content, /1\. \[done\] Set up — repo created/);
+    assert.match(
+      user.content,
+      /2\. \[failed: tool-limit\] Write hook — ran out/,
+    );
+    assert.match(user.content, /3\. \[YOUR STEP\] Configure nginx/);
+    assert.match(user.content, /- hooks\/post-receive/);
+    assert.match(
+      user.content,
+      /Your step \(3 of 3\): Configure nginx\nserve both branches over https/,
+    );
+  });
+
+  it('marks pending steps and shows (none yet) when nothing changed', () => {
+    const plan = samplePlan();
+    const [, user] = buildStepMessages({
+      systemPrompt: 'sys',
+      goal: 'g',
+      plan,
+      step: plan.steps[0],
+    });
+    assert.match(user.content, /1\. \[YOUR STEP\] Set up/);
+    assert.match(user.content, /3\. \[pending\] Configure nginx/);
+    assert.match(user.content, /\(none yet\)/);
+  });
+});
+
+describe('runStep', () => {
+  function finalTurn(content) {
+    return {
+      message: { role: 'assistant', content },
+      usage: { prompt: 7, completion: 3, cost: 0 },
+      retries: 1,
+    };
+  }
+
+  function toolTurn() {
+    return {
+      message: {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          {
+            id: 'call_1',
+            type: 'function',
+            function: { name: 'read_file', arguments: '{}' },
+          },
+        ],
+      },
+      usage: { prompt: 5, completion: 2, cost: 0 },
+      retries: 0,
+    };
+  }
+
+  it('runs a fresh conversation and returns done with the final text as summary', async () => {
+    const client = scriptedClient([finalTurn('Handoff: created the repo.')]);
+    const plan = samplePlan();
+    const result = await runStep({
+      client,
+      modelId: 'm',
+      tools: fakeTools(['a.mjs']),
+      systemPrompt: 'sys',
+      goal: 'g',
+      plan,
+      step: plan.steps[2],
+    });
+    assert.equal(result.status, 'done');
+    assert.equal(result.stoppedReason, 'complete');
+    assert.equal(result.summary, 'Handoff: created the repo.');
+    assert.deepEqual(result.usage, { prompt: 7, completion: 3, cost: 0 });
+    assert.equal(result.retries, 1);
+    // The step's conversation is fresh: its own system prompt, plus the
+    // files the shared registry reported.
+    const sent = client.calls[0].messages;
+    assert.equal(sent[0].role, 'system');
+    assert.match(sent[1].content, /- a\.mjs/);
+  });
+
+  it('truncates the summary to the cap', async () => {
+    const client = scriptedClient([finalTurn('x'.repeat(5_000))]);
+    const plan = samplePlan();
+    const result = await runStep({
+      client,
+      modelId: 'm',
+      tools: fakeTools(),
+      systemPrompt: 'sys',
+      goal: 'g',
+      plan,
+      step: plan.steps[2],
+      summaryCap: 100,
+    });
+    assert.equal(result.summary.length, 100);
+  });
+
+  it('marks a step failed with a synthesized summary when it hits the turn limit', async () => {
+    const client = scriptedClient([toolTurn()]);
+    const plan = samplePlan();
+    const result = await runStep({
+      client,
+      modelId: 'm',
+      tools: fakeTools(),
+      systemPrompt: 'sys',
+      goal: 'g',
+      plan,
+      step: plan.steps[2],
+      maxToolTurns: 2,
+    });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.stoppedReason, 'tool-limit');
+    assert.equal(
+      result.summary,
+      'step stopped (tool-limit) after 2 tool turns',
+    );
+    assert.equal(result.toolTurns, 2);
+  });
+
+  it('propagates a thrown loop error like the single-loop path', async () => {
+    const client = scriptedClient([new Error('provider down')]);
+    const plan = samplePlan();
+    await assert.rejects(
+      runStep({
+        client,
+        modelId: 'm',
+        tools: fakeTools(),
+        systemPrompt: 'sys',
+        goal: 'g',
+        plan,
+        step: plan.steps[2],
+      }),
+      /provider down/,
+    );
   });
 });
 
