@@ -173,6 +173,7 @@ export function stepMaxToolTurns(option, runMaxToolTurns) {
  * @typedef {object} Plan
  * @property {string} createdAt
  * @property {boolean} degraded - True when the single-step fallback is in use
+ * @property {string|null} degradedReason - Why planning degraded (chat error, timeout, or validation error text); null when not degraded
  * @property {PlanStep[]} steps
  */
 
@@ -180,12 +181,14 @@ export function stepMaxToolTurns(option, runMaxToolTurns) {
  * Build a Plan from validated { title, description } pairs.
  * @param {Array<{ title: string, description: string }>} steps
  * @param {boolean} degraded
+ * @param {string|null} [degradedReason]
  * @returns {Plan}
  */
-function buildPlan(steps, degraded) {
+function buildPlan(steps, degraded, degradedReason = null) {
   return {
     createdAt: new Date().toISOString(),
     degraded,
+    degradedReason,
     steps: steps.map((step, index) => ({
       id: index + 1,
       title: step.title,
@@ -202,10 +205,15 @@ function buildPlan(steps, degraded) {
  * The degraded plan: one step carrying the whole prompt -- behaviorally
  * today's unplanned run.
  * @param {string} prompt
+ * @param {string|null} [reason] - Why planning degraded, for later diagnosis
  * @returns {Plan}
  */
-export function fallbackPlan(prompt) {
-  return buildPlan([{ title: 'Complete the task', description: prompt }], true);
+export function fallbackPlan(prompt, reason = null) {
+  return buildPlan(
+    [{ title: 'Complete the task', description: prompt }],
+    true,
+    reason,
+  );
 }
 
 /**
@@ -335,7 +343,7 @@ export async function createPlan(params) {
     });
   } catch (err) {
     return {
-      plan: fallbackPlan(prompt),
+      plan: fallbackPlan(prompt, err.message),
       usage: { prompt: 0, completion: 0, cost: 0 },
       retries: err.retries ?? 0,
       error: err.message,
@@ -350,7 +358,7 @@ export async function createPlan(params) {
   });
   if (parsed.error) {
     return {
-      plan: fallbackPlan(prompt),
+      plan: fallbackPlan(prompt, parsed.error),
       usage,
       retries,
       error: parsed.error,

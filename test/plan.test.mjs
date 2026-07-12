@@ -161,6 +161,14 @@ describe('fallbackPlan', () => {
     assert.equal(plan.steps[0].status, 'pending');
     assert.equal(plan.steps[0].summary, '');
   });
+
+  it('accepts an optional reason and carries it as degradedReason; omitted, it is null', () => {
+    assert.equal(fallbackPlan('build the thing').degradedReason, null);
+    assert.equal(
+      fallbackPlan('build the thing', 'connection refused').degradedReason,
+      'connection refused',
+    );
+  });
 });
 
 describe('createPlan', () => {
@@ -207,6 +215,7 @@ describe('createPlan', () => {
     assert.equal(result.plan.steps[0].description, 'task');
     assert.equal(result.error, 'connection refused');
     assert.equal(result.retries, 2);
+    assert.equal(result.plan.degradedReason, result.error);
   });
 
   it('degrades to the fallback plan (preserving usage) on an unparseable reply', async () => {
@@ -217,6 +226,7 @@ describe('createPlan', () => {
     assert.equal(result.plan.degraded, true);
     assert.match(result.error, /no JSON/);
     assert.deepEqual(result.usage, { prompt: 10, completion: 5, cost: 0 });
+    assert.equal(result.plan.degradedReason, result.error);
   });
 
   it('degrades to the fallback plan when the plan is over the step cap', async () => {
@@ -228,6 +238,7 @@ describe('createPlan', () => {
     const result = await createPlan({ client, modelId: 'm', prompt: 'task' });
     assert.equal(result.plan.degraded, true);
     assert.match(result.error, /9 steps \(max 8\)/);
+    assert.equal(result.plan.degradedReason, result.error);
   });
 
   it('clamps the planner timeout to the remaining run budget', async () => {

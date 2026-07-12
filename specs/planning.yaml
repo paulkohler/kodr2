@@ -83,12 +83,16 @@ outputs:
   plan:
     type: object
     description: >
-      { createdAt, degraded, steps: [{ id, title, description, status,
-      stoppedReason, summary, toolTurns }] }. status is one of
-      pending | running | done | failed. degraded is true when planning
-      failed and the single-step fallback plan is in use. Attached to
-      the run result (including the error path) and persisted in the
-      run record.
+      { createdAt, degraded, degradedReason, steps: [{ id, title,
+      description, status, stoppedReason, summary, toolTurns }] }. status
+      is one of pending | running | done | failed. degraded is true when
+      planning failed and the single-step fallback plan is in use.
+      degradedReason carries the planner failure text (chat error, timeout,
+      or validation error) when degraded is true, and is null otherwise --
+      the same text previously surfaced only transiently via the reporter
+      notice, now persisted in the run record and --json summary so a
+      degraded plan is diagnosable after the fact. Attached to the run
+      result (including the error path) and persisted in the run record.
   loop:
     type: object
     description: >
@@ -115,6 +119,12 @@ constraints:
     step is the whole prompt — behaviorally today's unplanned run —
     with degraded true and a reporter notice. Planner token usage is
     still counted.
+  - >
+    A degraded plan's fallback carries the failure reason as
+    degradedReason (chat error, timeout, or validation-error text) so it
+    survives into the run record and --json summary, not just the live
+    reporter notice — the same observability standard as
+    stoppedReason/filesChanged.
   - >
     The plan is fixed once created. No mid-run plan mutation, and no
     plan tool is offered to any model.
@@ -209,7 +219,9 @@ tests:
     - parsePlanResponse returns an error on malformed JSON, non-array steps, empty steps, missing or non-string title/description, and step count over maxSteps
     - parsePlanResponse truncates over-length titles and descriptions
     - fallbackPlan yields a single-step degraded plan carrying the whole prompt
+    - fallbackPlan accepts an optional reason and carries it as degradedReason; omitted, it is null
     - createPlan degrades to the fallback plan (preserving usage) when the chat call throws or the reply is unparseable
+    - createPlan's fallback plan carries the chat-error/timeout/validation-error text as degradedReason
     - stepRunMs splits the remaining budget equally with a floor, recomputes from actual remaining time, clamps to the real run budget, and returns 0 when no budget is set
     - runStep composes a fresh conversation from the build system prompt plus the plan-step addendum, with goal, plan, handoffs, files changed, and the assigned step in the user message
     - buildStepMessages appends the closing self-check addendum only when isFinalStep is set

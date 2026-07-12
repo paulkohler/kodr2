@@ -958,6 +958,7 @@ describe('runPlannedBuild', () => {
     return {
       createdAt: '2026-07-11T00:00:00.000Z',
       degraded: false,
+      degradedReason: null,
       steps: titles.map((title, index) => ({
         id: index + 1,
         title,
@@ -1175,6 +1176,7 @@ describe('runPlannedBuild', () => {
   it('notices a degraded plan and still runs its single step', async () => {
     const plan = makePlan(['whole task']);
     plan.degraded = true;
+    plan.degradedReason = 'planner reply is not valid JSON';
     const { reporter, events } = createCaptureReporter();
     const result = await runPlannedBuild({
       ...baseParams,
@@ -1194,6 +1196,7 @@ describe('runPlannedBuild', () => {
     const planEvent = events.find((e) => e.type === 'plan');
     assert.equal(/** @type {any} */ (planEvent).payload.degraded, true);
     assert.equal(result.completed, true);
+    assert.equal(result.plan.degradedReason, 'planner reply is not valid JSON');
   });
 
   it('attaches accumulated accounting and the plan to a thrown step error', async () => {
