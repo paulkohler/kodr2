@@ -422,6 +422,8 @@ describe('buildStepMessages', () => {
     assert.match(final.content, /last step of the plan/);
     assert.match(final.content, /run that exact workflow yourself/);
     assert.doesNotMatch(notFinal.content, /run that exact workflow yourself/);
+    assert.match(final.content, /already correct/);
+    assert.doesNotMatch(notFinal.content, /already correct/);
     assert.ok(
       final.content.indexOf('ONE step of a fixed plan') <
         final.content.indexOf('last step of the plan'),
