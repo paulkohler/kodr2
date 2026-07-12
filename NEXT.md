@@ -1,6 +1,6 @@
 # Next
 
-## The plan — implemented, re-dogfood surfaced new gaps (not yet fixed)
+## The plan — investigation closed, no prompt rework needed
 
 Threads A (prescriptive workflow-running) and B (verification-scoped editing)
 are implemented, committed, and tested: `prompts/plan-step-final.md`,
@@ -8,32 +8,43 @@ are implemented, committed, and tested: `prompts/plan-step-final.md`,
 `test/plan.test.mjs` assertions all landed across `7eade86`..`3c68911`. Thread C
 is deferred in `specs/BACKLOG.md` as designed.
 
-**Re-dogfood result (2026-07-12, `google/gemma-4-26b-a4b`, full writeup in
-`../kodr-terminal-bench/RESULTS.md`): 1/4 pass** — worse than non-plan mode's
-3/4 on the same tasks. `fix-git` passed cleanly (thread B's guard held, no
-lossy rewrite). `git-multibranch` failed twice and `configure-git-webserver`
-once, for three different reasons, none of them a regression in threads A/B
-themselves:
+The 2026-07-12 re-dogfood initially hit 1/4 on `google/gemma-4-26b-a4b`
+(worse than non-plan mode's 3/4 the day before). Full investigation and
+final numbers in `../kodr-terminal-bench/RESULTS.md`. Three suspected causes,
+now resolved:
 
-1. **Implicit service-startup deps aren't surfaced.** Neither `git-multibranch`
-   plan (two different step decompositions) ever started `sshd`, and the
-   final-step self-check didn't catch it either — one run's final step never
-   attempted the client workflow at all despite the addendum instructing it
-   to; the other ran `curl` checks but never `git clone`/`push`, so it
-   verified the HTTP delivery path and missed the SSH ingestion path. Thread
-   A's "run that exact workflow yourself" isn't reliably running the *whole*
-   workflow.
-2. **Planner degradation is a black box.** `configure-git-webserver`'s planner
-   call failed and fell back to a single generic step (`plan.degraded: true`),
-   but `reporter.notice(...)`'s reason isn't persisted anywhere recoverable
-   (not in the `--json` summary, not in the saved transcript) — the same
-   observability gap `stoppedReason`/`filesChanged` etc. were built to close,
-   just not yet extended to the planner path.
-3. **A degraded single step gets no step-budget split** and runs at the bare
-   `MAX_TOOL_TURNS` default (20) — plausibly too low for a full multi-service
-   sysadmin task attempted as one step.
+1. **Turn-budget confound (confirmed, no code fix needed).** The re-dogfood
+   batch never passed `--max-tool-turns`, so `--plan` mode silently ran at
+   kodr2's bare `MAX_TOOL_TURNS=20` default while every non-plan comparison
+   run this session used 50-200. Re-running `configure-git-webserver` with
+   an explicit 50-turn budget flipped it from a degraded-plan `tool-limit`
+   failure to a clean pass with a well-formed 3-step plan. This was a test
+   *configuration* gap in `kodr-terminal-bench`, not a kodr2 defect.
+2. **Planner-degradation observability (fixed, `307a237`).**
+   `Plan.degradedReason` now persists the chat-error/timeout/validation-error
+   text into the saved transcript and `--json` summary, closing the same gap
+   `stoppedReason`/`filesChanged` were built to close.
+3. **Model specificity (confirmed).** A `qwen/qwen3.6-35b-a3b` control run
+   passed `git-multibranch`, `configure-git-webserver`, and `fix-git` 3/3
+   under `--plan` with the corrected budget — including a final step that
+   explicitly started `sshd`, diagnosed an auth failure, installed
+   `sshpass`, and verified both the SSH and HTTPS paths end to end, exactly
+   the behavior thread A calls for. A final re-dogfood on
+   `google/gemma-4-26b-a4b` with the corrected budget still failed
+   `git-multibranch` the same way (no `sshd` start attempt, final step
+   burned its full turn budget without completing verification) —
+   reproducible, not a fluke.
 
-Open question: is this model-specific (weaker instruction-following than
-whatever model the original A/B dogfooding used) rather than a prompt-design
-flaw? A control run on `qwen/qwen3.6-35b-a3b` would tell us before reworking
-threads A/B further.
+**Conclusion: `prompts/plan-step-final.md` is not reworked.** The 1/4 result
+was a test-configuration confound (turn budget) plus a genuine but
+model-specific capability gap in `google/gemma-4-26b-a4b`'s self-directed
+verification, not a flaw in threads A/B's design — a stronger local model
+handles the identical task and prompt correctly. Revisit only if a
+stronger/different model shows the same gap.
+
+Also found and fixed along the way (`kodr-terminal-bench` `267c41b`): the
+adapter's exec-timeout margin (`max_run_ms` + fixed padding, guarding
+against Harbor's own docker-exec timeout firing before Kodr's internal
+deadline handling) was too tight at 120s for a large local model's
+in-flight-request tail latency — widened to 300s, now overridable via
+`KODR_ADAPTER_EXEC_MARGIN_SEC`.
