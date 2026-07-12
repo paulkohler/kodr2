@@ -30,6 +30,16 @@ Deliberate v1 scope cuts, not bugs:
   call, build model loads back on step 1). Kodr-owned load/unload/verify
   sequencing à la `--review-model` (specs/lms.yaml) would avoid double
   JIT loads and control the context size.
+- **Equal-share step budget vs. continuous-investigation tasks** — dogfooding
+  (2026-07-11/12, kodr-terminal-bench `vulnerable-secret`) suggests
+  `stepRunMs`'s equal-share-with-floor split can starve a step that needs to
+  investigate continuously rather than in discrete chunks. Single-sample
+  evidence so far — do not special-case `stepRunMs` on it, that mechanism is
+  deliberate and spec-documented (specs/planning.yaml) and per-step
+  special-casing risks a tri-state/"auto" mode. If a second sample confirms
+  it, the lighter-touch lever is a `prompts/plan.md` nudge toward
+  single-step plans for investigation-shaped tasks — a single-step plan
+  already gets the whole run budget for free, no code change needed.
 
 ## Fixed
 
