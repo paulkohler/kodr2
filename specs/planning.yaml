@@ -131,14 +131,17 @@ constraints:
   - >
     The final step additionally receives a closing self-check addendum
     (prompts/plan-step-final.md): after finishing its own step it
-    re-checks the overall goal against the whole plan and completes,
-    with tools, any goal requirement no step covered — the last net
-    before verify/heal. This is passed as an explicit isFinalStep
-    boolean (step.id === total; a single-step plan's only step is
-    final), threaded from runPlannedBuild through runStep into
-    buildStepMessages. The self-check spends tool calls within the
-    final step's own execution only — it never mutates the plan, and no
-    plan tool is offered, consistent with the plan being fixed.
+    verifies the overall goal against the whole plan with tools rather
+    than by reasoning alone — when the goal describes a workflow a
+    client will run against the result (clone, push, curl, connect,
+    invoke the program), it runs that exact workflow itself and
+    confirms it succeeds end to end, the last check before verify/heal.
+    This is passed as an explicit isFinalStep boolean (step.id ===
+    total; a single-step plan's only step is final), threaded from
+    runPlannedBuild through runStep into buildStepMessages. The
+    self-check spends tool calls within the final step's own execution
+    only — it never mutates the plan, and no plan tool is offered,
+    consistent with the plan being fixed.
   - >
     Every step gets the full build tool set via the run's single shared
     registry, so filesChanged/commandsRun/packageCommands aggregate
@@ -206,6 +209,7 @@ tests:
     - stepRunMs splits the remaining budget equally with a floor, recomputes from actual remaining time, clamps to the real run budget, and returns 0 when no budget is set
     - runStep composes a fresh conversation from the build system prompt plus the plan-step addendum, with goal, plan, handoffs, files changed, and the assigned step in the user message
     - buildStepMessages appends the closing self-check addendum only when isFinalStep is set
+    - buildStepMessages' closing self-check addendum instructs running the client-facing workflow end to end, not just reasoning about the goal, only when isFinalStep is set
     - runStep threads isFinalStep into the final step's system prompt
     - runPlannedBuild marks only the last step as the final step (isFinalStep), including a single-step plan
     - runStep's summary is finalText truncated to summaryCap, or a synthesized stop summary when the step did not complete
