@@ -53,6 +53,12 @@ constraints:
     readline line-mode. The TUI owns the input buffer and cursor: printable
     insert, backspace, left/right/home/end, Enter to submit, and Tab to complete
     a partially-typed slash command (see specs/tui-slash-commands.yaml).
+  - stdin/stdout default to the process streams but are injectable
+    (options.stdin/stdout) so the input loop, command dispatch, and render
+    pipeline can be driven in-process by a test -- writing keystrokes in and
+    reading rendered frames out -- without spawning a real PTY. Model-free
+    commands (/help, autocomplete, Ctrl-C, /quit) exercise the whole shell with
+    no network (test/tui-driver.test.mjs).
   - Streamed assistant text is buffered and flushed into scrollback ahead of
     the next discrete event (tool call/result, notice, verification, heal,
     summary, phase), so text emitted before a tool call is ordered above it.
@@ -114,3 +120,6 @@ tests:
     - renderMarkdown turns list markers into bullets and headings into bold
     - renderMarkdown leaves snake_case identifiers and prose stars alone
     - the tui reporter renders Markdown in streamed assistant text on flush
+  integration:
+    - driving runTui with injected streams, typing /help lists the commands and /quit exits cleanly
+    - typing a partial command shows autocomplete, and two Ctrl-C are needed to quit

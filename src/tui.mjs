@@ -49,9 +49,12 @@ const QUIT_CONFIRM_MS = 3000;
 
 /**
  * TUI options: everything run() takes, plus TUI-only settings consumed here and
- * never forwarded to run().
+ * never forwarded to run(). stdin/stdout default to the process streams and are
+ * injected only by the in-process driver test (test/tui-driver.test.mjs).
  * @typedef {import('./harness.mjs').RunOptions & {
  *   quitConfirmMs?: number,
+ *   stdin?: NodeJS.ReadableStream,
+ *   stdout?: NodeJS.WritableStream,
  * }} TuiOptions
  */
 
@@ -62,8 +65,14 @@ const QUIT_CONFIRM_MS = 3000;
  * @returns {Promise<void>}
  */
 export function runTui(firstPrompt, options) {
-  const stdin = process.stdin;
-  const stdout = process.stdout;
+  // Cast back to the tty stream types: production passes process.stdin/stdout,
+  // and the driver test injects streams that duck-type a TTY.
+  const stdin = /** @type {import('node:tty').ReadStream} */ (
+    options.stdin || process.stdin
+  );
+  const stdout = /** @type {import('node:tty').WriteStream} */ (
+    options.stdout || process.stdout
+  );
   const state = createTuiState({ model: options.model });
 
   let lastMessages = options.priorMessages || null;
