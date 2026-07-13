@@ -53,6 +53,9 @@ Rules for AI agents working in this repo.
   this to specs."
 - Spec status: proposed → accepted → implemented → deprecated.
 - Tests listed in the spec are the contract.
+- `npm run check:specs` warns (advisory, exit 0) when a spec is missing a
+  `name`/`status`/`description` or carries an off-lifecycle status; add
+  `--strict` to make it fail.
 
 ## Workflow
 
