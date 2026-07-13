@@ -178,6 +178,14 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  *   run_command tool call (see specs/tui.yaml). Off by default.
  * @param {function} [options.confirm] - (call) => Promise<{ approved }>; the approval
  *   channel used when approveCommands is on (the TUI supplies this)
+ * @param {AbortSignal} [options.signal] - Cancellation signal (see specs/cancel.yaml).
+ *   When it fires, the in-flight model request's socket is destroyed and the run
+ *   stops with stoppedReason "cancelled" — the CLI wires it to SIGINT, the ACP
+ *   front-end to session/cancel.
+ * @param {import('./tools/backend.mjs').ToolBackend} [options.backend] - Filesystem/exec
+ *   backend for the file and command tools (see specs/acp.yaml). Defaults to the
+ *   local, in-process backend; the ACP front-end injects one that delegates to the
+ *   editor's fs/* and terminal/* when the client advertises those capabilities.
  * @returns {Promise<RunResult>}
  */
 export async function run(prompt, options) {
@@ -295,6 +303,7 @@ export async function run(prompt, options) {
     maxRunMs,
     vision: options.vision,
     initialFilesChanged: priorFilesChanged,
+    backend: options.backend,
   });
   const commandEnv = buildEnv(envPassthrough);
   // Read once and pass the same content to both buildSystemPrompt and the
@@ -413,6 +422,7 @@ export async function run(prompt, options) {
       onDebug: onModelDebug,
       approveCommands: options.approveCommands,
       confirm: options.confirm,
+      signal: options.signal,
     });
     const totalUsage = loop.usage;
     const { completed, stoppedReason, toolTurns } = loop;
@@ -538,6 +548,7 @@ export async function run(prompt, options) {
           onDebug: onModelDebug,
           approveCommands: options.approveCommands,
           confirm: options.confirm,
+          signal: options.signal,
         });
 
         result.healed = healResult.healed;
@@ -1125,6 +1136,9 @@ export async function resolveContextWindow(params) {
 }
 
 function formatStopReason(stoppedReason, maxToolTurns) {
+  if (stoppedReason === 'cancelled') {
+    return 'cancelled';
+  }
   if (stoppedReason === 'budget-exceeded') {
     return 'stopped after run budget';
   }

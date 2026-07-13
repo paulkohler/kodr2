@@ -34,6 +34,8 @@ const DEFAULT_MAX_TURNS = 3;
  * @param {function} [params.onDebug] - Forwarded to the tool loop (see specs/debug-log.yaml)
  * @param {boolean} [params.approveCommands] - Require confirm() approval before each run_command call
  * @param {function} [params.confirm] - (call) => Promise<{ approved }>; used when approveCommands is on
+ * @param {AbortSignal} [params.signal] - Cancellation signal (see specs/cancel.yaml); forwarded to
+ *   the tool loop, and a cancelled loop stops the repair early
  * @returns {Promise<{ healed: boolean, turns: number, verification: { passed: boolean, output: string }, compactions: number, usage: { prompt: number, completion: number, cost: number }, retries: number }>}
  */
 export async function heal(params) {
@@ -59,6 +61,7 @@ export async function heal(params) {
     onDebug,
     approveCommands,
     confirm,
+    signal,
   } = params;
 
   let lastOutput = failure.output;
@@ -104,12 +107,27 @@ ${lastOutput}
       onDebug,
       approveCommands,
       confirm,
+      signal,
     });
     totalUsage.prompt += loop.usage.prompt;
     totalUsage.completion += loop.usage.completion;
     totalUsage.cost += loop.usage.cost || 0;
     compactions += loop.compactions || 0;
     totalRetries += loop.retries || 0;
+
+    // Cancelled mid-repair: stop now rather than spend the (possibly long)
+    // verify command on a run the user already asked to abort. Report the last
+    // verification seen, or the initial failure if this was the first turn.
+    if (loop.stoppedReason === 'cancelled' || signal?.aborted) {
+      return {
+        healed: false,
+        turns: turn,
+        verification: lastResult ?? failure,
+        compactions,
+        usage: totalUsage,
+        retries: totalRetries,
+      };
+    }
 
     // Re-verify
     const result = await verifyFn();

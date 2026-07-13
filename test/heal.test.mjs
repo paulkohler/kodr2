@@ -91,6 +91,49 @@ describe('healing', () => {
     assert.equal(result.verification.output, 'still failing (attempt 1)');
   });
 
+  it('stops without re-verifying when the tool loop was cancelled', async () => {
+    // An already-aborted signal makes the tool loop return stoppedReason
+    // "cancelled" before it calls the model; heal must then bail immediately
+    // rather than spend the (possibly long) verify command on an aborted run.
+    let modelCalled = false;
+    let verifyCalls = 0;
+    const client = /** @type {import('../src/provider.mjs').Provider} */ (
+      /** @type {any} */ ({
+        async chat() {
+          modelCalled = true;
+          return {
+            message: { role: 'assistant', content: 'x' },
+            usage: { prompt: 1, completion: 1 },
+          };
+        },
+      })
+    );
+    const tools = /** @type {import('../src/tools/index.mjs').ToolRegistry} */ (
+      /** @type {any} */ ({ definitions: () => [] })
+    );
+    const controller = new AbortController();
+    controller.abort();
+    const result = await heal({
+      client,
+      modelId: 'unused',
+      messages: [],
+      tools,
+      verifyFn: async () => {
+        verifyCalls++;
+        return { passed: true, output: '' };
+      },
+      failure: { passed: false, output: 'initial failure' },
+      maxTurns: 3,
+      signal: controller.signal,
+    });
+
+    assert.equal(modelCalled, false);
+    assert.equal(verifyCalls, 0, 'a cancelled loop skips the verify command');
+    assert.equal(result.healed, false);
+    assert.equal(result.turns, 1);
+    assert.equal(result.verification.output, 'initial failure');
+  });
+
   it('forwards heartbeatMs and onHeartbeat to the model client', async () => {
     const calls = [];
     const client = /** @type {import('../src/provider.mjs').Provider} */ (

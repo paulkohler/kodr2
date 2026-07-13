@@ -155,6 +155,15 @@ instruction), replay starts over with the _same original prompt_:
 $ kodr replay last
 ```
 
+`kodr acp` serves Kodr as an [Agent Client Protocol](https://agentclientprotocol.com)
+agent over stdio, so an ACP-speaking editor (e.g. Zed) can drive it against a
+local or hosted model, rendering the stream, tool calls, and command-approval
+prompts in its own UI. It speaks JSON-RPC on stdin/stdout and takes no prompt
+(the editor sends prompts as `session/prompt` requests); each prompt is one
+`run()`, and `run_command` is gated through the client's permission request.
+See [docs/acp.md](docs/acp.md) for how to use it (including from VS Code) and
+the design, and [specs/acp.yaml](specs/acp.yaml) for the contract.
+
 ## Tools
 
 The model has these tools available:
@@ -344,9 +353,14 @@ src/
   context.mjs          System prompt assembly
   verify.mjs           Test/check runner
   heal.mjs             Repair loop
+  acp.mjs              ACP (Agent Client Protocol) front-end over stdio
+  acp-protocol.mjs     ACP JSON-RPC plumbing and message helpers (pure)
+  acp-reporter.mjs     ACP reporter: run events -> session/update
+  acp-backend.mjs      ACP fs/terminal delegation to the client
   format.mjs           Terminal output formatting
   tools/
     index.mjs          Tool registry
+    backend.mjs        Local fs/exec backend behind the file/command tools
     read-file.mjs      Read file tool
     write-file.mjs     Write file tool
     edit-file.mjs      Edit file tool

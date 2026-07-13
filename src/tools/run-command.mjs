@@ -6,7 +6,8 @@ import { readdir, stat } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 import { buildEnv } from '../env.mjs';
 import { shouldIgnoreEntry } from '../ignore.mjs';
-import { DEFAULT_TIMEOUT, runShell } from '../shell.mjs';
+import { DEFAULT_TIMEOUT } from '../shell.mjs';
+import { localBackend } from './backend.mjs';
 
 export const DEFAULT_SNAPSHOT_CAP = 1000;
 
@@ -66,8 +67,14 @@ export default {
     }
     const cap = snapshotCap(context);
     const before = await snapshotWorkspace(context.cwd, cap);
+    // The before/after snapshot stays local: for a co-located ACP client the
+    // command runs against the same working tree, so changed-file tracking (and
+    // the commit that follows) still sees what the command touched even when the
+    // execution itself was delegated to the editor's terminal.
+    const backend = context.backend ?? localBackend;
     /** @type {{ stdout: string, stderr: string, exitCode: number, filesChanged?: string[] }} */
-    const result = await runShell(command, context.cwd, {
+    const result = await backend.runCommand(command, {
+      cwd: context.cwd,
       env: buildEnv(context.envPassthrough),
       timeout: commandTimeout(context),
     });

@@ -3,9 +3,11 @@ import { createServer } from 'node:http';
 import { after, afterEach, describe, it } from 'node:test';
 
 import {
+  abortError,
   assembleResponse,
   createClient,
   hasContextHeadroom,
+  isAbortError,
   isRetryableConnectionError,
   isRetryableServerError,
   isTimeoutError,
@@ -793,6 +795,84 @@ describe('hasContextHeadroom', () => {
     assert.equal(hasContextHeadroom(null, 262144), false);
     assert.equal(hasContextHeadroom(8192, null), false);
     assert.equal(hasContextHeadroom(0, 262144), false);
+  });
+});
+
+describe('abort signal', () => {
+  afterEach(async () => {
+    while (servers.length) {
+      await closeServer(servers.pop());
+    }
+  });
+
+  it('tags an abort with a code isAbortError recognizes', () => {
+    const err = abortError();
+    assert.equal(/** @type {NodeJS.ErrnoException} */ (err).code, 'ABORT_ERR');
+    assert.equal(isAbortError(err), true);
+    assert.equal(isAbortError(new Error('other')), false);
+    assert.equal(isAbortError(undefined), false);
+  });
+
+  it('aborts an in-flight chat request when the signal fires', async () => {
+    // A server that starts streaming but never ends: the only way this chat
+    // settles is the abort tearing the socket down.
+    const baseUrl = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write('data: {"choices":[{"delta":{"content":"work"}}]}\n\n');
+    });
+    const client = createClient({ baseUrl, model: 'test', timeout: 60_000 });
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 20);
+    await assert.rejects(
+      client.chat({ messages: [], signal: controller.signal }),
+      (err) => {
+        assert.equal(isAbortError(/** @type {NodeJS.ErrnoException} */ (err)), true);
+        return true;
+      },
+    );
+  });
+
+  it('rejects immediately when the signal is already aborted', async () => {
+    let handled = false;
+    const baseUrl = await startServer((_req, res) => {
+      handled = true;
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end('data: [DONE]\n\n');
+    });
+    const client = createClient({ baseUrl, model: 'test', timeout: 60_000 });
+    const controller = new AbortController();
+    controller.abort();
+    await assert.rejects(
+      client.chat({ messages: [], signal: controller.signal }),
+      (err) => isAbortError(/** @type {NodeJS.ErrnoException} */ (err)),
+    );
+    assert.equal(
+      handled,
+      false,
+      'the destroyed request never reached the server',
+    );
+  });
+
+  it('does not retry an aborted request', async () => {
+    let requests = 0;
+    const baseUrl = await startServer((_req, res) => {
+      requests++;
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write('data: {"choices":[{"delta":{"content":"x"}}]}\n\n');
+    });
+    const client = createClient({
+      baseUrl,
+      model: 'test',
+      maxRetries: 3,
+      timeout: 60_000,
+    });
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 20);
+    await assert.rejects(
+      client.chat({ messages: [], signal: controller.signal }),
+      (err) => isAbortError(/** @type {NodeJS.ErrnoException} */ (err)),
+    );
+    assert.equal(requests, 1, 'an abort is terminal, not retried');
   });
 });
 

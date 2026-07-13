@@ -18,7 +18,7 @@ import {
 } from './compact.mjs';
 import { runPostToolHooks, runPreToolHooks } from './hooks.mjs';
 import { createNullReporter } from './reporter.mjs';
-import { isTimeoutError } from './model.mjs';
+import { isAbortError, isTimeoutError } from './model.mjs';
 import {
   isUnparseableArgs,
   recoverToolCalls,
@@ -67,6 +67,9 @@ export const MAX_TOOL_TURNS = 20;
  *   each run_command tool call (see specs/tui.yaml). Off by default.
  * @param {function} [params.confirm] - (call) => Promise<{ approved }>; the
  *   approval channel used when approveCommands is on
+ * @param {AbortSignal} [params.signal] - Cancellation signal (see specs/cancel.yaml).
+ *   Checked between turns and passed to each chat request: an abort mid-request
+ *   destroys the socket and the loop stops with stoppedReason "cancelled".
  * @returns {Promise<{ finalText: string, completed: boolean, stoppedReason: string, toolTurns: number, compactions: number, usage: { prompt: number, completion: number, cost: number }, retries: number }>}
  */
 export async function runToolLoop(params) {
@@ -74,7 +77,7 @@ export async function runToolLoop(params) {
   const { reporter = createNullReporter() } = params;
   const { startedAt, maxRunMs = 0, maxToolTurns = MAX_TOOL_TURNS } = params;
   const { contextWindow = 0, compactThreshold = COMPACTION_THRESHOLD } = params;
-  const { heartbeatMs = 0, onHeartbeat, onDebug } = params;
+  const { heartbeatMs = 0, onHeartbeat, onDebug, signal } = params;
   const hookCtx = buildHookCtx(params);
   // Approval gate: only active when both opted in and given a channel, so the
   // default (and every non-TUI run) executes commands exactly as before.
@@ -98,7 +101,16 @@ export async function runToolLoop(params) {
     // because the budget is spent -- that is a clean budget-exceeded stop, not
     // a crash. Relabel it rather than reporting a hard error for what is just
     // the run running out of wall-clock.
-    if (isTimeoutError(err) && isRunBudgetExceeded(startedAt, maxRunMs)) {
+    if (isAbortError(err)) {
+      // A deliberate cancellation mid-request (Ctrl-C, ACP session/cancel).
+      // The turn's assistant message was never pushed (chat threw before
+      // returning), so the conversation stays well-formed and the loop just
+      // returns what it accumulated with a clean cancelled stop.
+      stoppedReason = 'cancelled';
+    } else if (
+      isTimeoutError(err) &&
+      isRunBudgetExceeded(startedAt, maxRunMs)
+    ) {
       stoppedReason = 'budget-exceeded';
     } else {
       // Preserve the accounting done before the failure. runToolLoop returns
@@ -127,6 +139,14 @@ export async function runToolLoop(params) {
 
   async function runLoopBody() {
     while (toolTurns < maxToolTurns) {
+      // Cancelled before starting a new turn: stop cleanly rather than begin
+      // another (paid) model request. An abort mid-request is caught by the
+      // try/catch above; this covers a cancel that landed between turns (e.g.
+      // during a tool call, which finishes before we re-check here).
+      if (signal?.aborted) {
+        stoppedReason = 'cancelled';
+        break;
+      }
       if (isRunBudgetExceeded(startedAt, maxRunMs)) {
         stoppedReason = 'budget-exceeded';
         break;
@@ -146,6 +166,7 @@ export async function runToolLoop(params) {
         heartbeatMs,
         onHeartbeat,
         onDebug,
+        signal,
       });
 
       usage.prompt += turnUsage.prompt;

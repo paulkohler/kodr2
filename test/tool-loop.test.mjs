@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
+import { abortError } from '../src/model.mjs';
 import { createNullReporter } from '../src/reporter.mjs';
 import { createCaptureReporter } from './capture-reporter.mjs';
 import {
@@ -366,6 +367,48 @@ describe('runToolLoop', () => {
     assert.equal(loop.stoppedReason, 'budget-exceeded');
     assert.equal(loop.toolTurns, 0);
     assert.equal(client.calls.length, 0);
+  });
+
+  it('stops with cancelled when the signal is already aborted, before calling the model', async () => {
+    const client = scriptedClient([finalTurn('x')]);
+    const controller = new AbortController();
+    controller.abort();
+    const loop = await runToolLoop({
+      client,
+      modelId: 'm',
+      messages: [],
+      tools: stubTools,
+      signal: controller.signal,
+    });
+
+    assert.equal(loop.completed, false);
+    assert.equal(loop.stoppedReason, 'cancelled');
+    assert.equal(loop.toolTurns, 0);
+    assert.equal(client.calls.length, 0);
+  });
+
+  it('returns a clean cancelled stop (not a throw) when a chat aborts mid-request', async () => {
+    // The client rejects the first turn with an abort error, as the real model
+    // client does when its socket is destroyed. The loop must swallow it into a
+    // cancelled stop and preserve the accounting, not propagate the throw.
+    const client = /** @type {any} */ ({
+      calls: [],
+      async chat(params) {
+        this.calls.push(params);
+        throw abortError();
+      },
+    });
+    const loop = await runToolLoop({
+      client,
+      modelId: 'm',
+      messages: [],
+      tools: stubTools,
+    });
+
+    assert.equal(loop.completed, false);
+    assert.equal(loop.stoppedReason, 'cancelled');
+    assert.equal(loop.toolTurns, 0);
+    assert.deepEqual(loop.usage, { prompt: 0, completion: 0, cost: 0 });
   });
 
   it('caps each chat call to the remaining run budget, not the full budget', async () => {

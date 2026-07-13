@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  createSigintCanceller,
   exitCodeFor,
   main,
   parseArgs,
@@ -461,6 +462,46 @@ describe('shouldFailProcess', () => {
 
   it('fails the CLI process when the run did not complete', () => {
     assert.equal(shouldFailProcess({ stoppedReason: 'budget-exceeded' }), true);
+  });
+
+  it('fails the CLI process when the run was cancelled', () => {
+    assert.equal(shouldFailProcess({ stoppedReason: 'cancelled' }), true);
+  });
+});
+
+describe('createSigintCanceller', () => {
+  it('aborts the controller on the first Ctrl-C and does not exit', () => {
+    const controller = new AbortController();
+    const notices = [];
+    let exited = null;
+    const handler = createSigintCanceller(
+      controller,
+      { write: (s) => notices.push(s) },
+      (code) => {
+        exited = code;
+      },
+    );
+
+    handler();
+    assert.equal(controller.signal.aborted, true);
+    assert.equal(exited, null, 'the first Ctrl-C does not force-quit');
+    assert.match(notices.join(''), /again to force quit/i);
+  });
+
+  it('force-quits on the second Ctrl-C', () => {
+    const controller = new AbortController();
+    let exited = null;
+    const handler = createSigintCanceller(
+      controller,
+      { write: () => {} },
+      (code) => {
+        exited = code;
+      },
+    );
+
+    handler();
+    handler();
+    assert.equal(exited, 130);
   });
 });
 

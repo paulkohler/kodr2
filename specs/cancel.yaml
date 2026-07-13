@@ -1,0 +1,75 @@
+name: cancel
+status: implemented
+description: >
+  Cooperative run cancellation via an AbortSignal threaded through the harness.
+  When the signal fires, the in-flight model request's socket is destroyed and
+  the run unwinds to a clean result with stoppedReason "cancelled" -- not a
+  crash, not a hang until the current request would have finished on its own.
+
+  One seam, three front-ends. run(prompt, { signal }) is the injection point;
+  the tool loop and heal both honor it, and every chat request carries it so a
+  cancel lands mid-request rather than only between turns. The CLI wires it to
+  SIGINT (Ctrl-C), and the ACP front-end (specs/acp.yaml) wires it to
+  session/cancel. The signal is created by the front-end, never by run() itself,
+  so the front-end owns when to fire it.
+
+inputs:
+  signal:
+    type: AbortSignal
+    optional: true
+    description: >
+      Passed as run()'s options.signal. Omitted means no cancellation (today's
+      default for every non-interactive path). run() forwards it to runToolLoop
+      and heal, and each client.chat() call receives it.
+
+outputs:
+  stoppedReason:
+    type: string
+    description: >
+      "cancelled" when the run stopped because the signal fired. Treated like any
+      other non-complete stop: verify, heal, review, and memory are skipped (they
+      gate on "complete"), and the CLI exits non-zero (shouldFailProcess).
+
+constraints:
+  - The model client (src/model.mjs) accepts a per-call signal on chat(). When it
+    fires, streamRequest destroys the underlying request socket -- the same
+    teardown the hard timeout already performs -- and the call rejects with a
+    tagged abortError (isAbortError true, code ABORT_ERR). The settled guard makes
+    the socket's subsequent error event a no-op, so the rejection stays the tagged
+    abort rather than a stray ECONNRESET.
+  - An abort is terminal, never retried: streamRequestWithRetry does not treat
+    abortError as retryable (it is neither a 5xx nor a retryable connection error),
+    and a signal already aborted makes every further attempt reject at once.
+  - A signal already aborted before the request is sent rejects immediately and the
+    request never goes out (the destroyed socket is never written).
+  - The tool loop (src/tool-loop.mjs) checks signal.aborted at the top of each turn
+    -- so a cancel that landed during a tool call stops the loop before the next
+    (paid) model request -- and maps an abortError thrown by chat() to a clean
+    stoppedReason "cancelled" without rethrowing. Because chat() throws before its
+    assistant message is pushed, the conversation stays well-formed (no dangling
+    tool_calls), which matters for ACP multi-turn continuation via priorMessages.
+  - heal (src/heal.mjs) forwards the signal to its tool loop and, when the loop
+    comes back cancelled (or the signal is aborted), returns immediately rather
+    than spending the (possibly long) verify command on a run the user aborted.
+  - The CLI installs a SIGINT handler (createSigintCanceller) only around the
+    foreground run(): the first Ctrl-C aborts the run's controller and prints a
+    notice; a second force-quits (exit 130) in case the graceful unwind hangs. The
+    handler is removed in a finally so it never outlives the run.
+  - The ACP front-end creates a fresh AbortController per session/prompt, stores it
+    on the session, and clears it in a finally. session/cancel aborts that
+    controller (and sets the cancelled flag), so a cancel interrupts the in-flight
+    model request; a session/cancel arriving after the prompt already settled finds
+    a null controller and is a no-op.
+
+tests:
+  unit:
+    - abortError is tagged with a code isAbortError recognizes
+    - chat aborts an in-flight request when the signal fires (rejects with isAbortError)
+    - chat rejects immediately when the signal is already aborted and never hits the server
+    - an aborted chat is not retried even with maxRetries > 0
+    - the tool loop stops with cancelled when the signal is already aborted, before calling the model
+    - the tool loop returns a clean cancelled stop (not a throw) when a chat aborts mid-request
+    - session/cancel aborts the in-flight run via its AbortSignal and resolves cancelled
+    - the ACP session controller is cleared after a prompt settles (a late cancel is a no-op)
+    - createSigintCanceller aborts on the first Ctrl-C and force-quits on the second
+    - shouldFailProcess fails the CLI process when the run was cancelled

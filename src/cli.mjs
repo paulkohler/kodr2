@@ -109,6 +109,11 @@ export async function main(argv) {
     return;
   }
 
+  if (args.command === 'acp') {
+    await runAcpCommand(args);
+    return;
+  }
+
   if (tuiRequested(args)) {
     const tuiError = validateTui(args);
     if (tuiError) {
@@ -296,7 +301,19 @@ export async function main(argv) {
   }
 
   try {
-    const result = await run(args.prompt, options);
+    // Ctrl-C cancels the in-flight run (specs/cancel.yaml): the first SIGINT
+    // aborts the current model request and lets run() unwind to a cancelled
+    // result; a second forces a hard exit if the graceful stop hangs.
+    const controller = new AbortController();
+    options.signal = controller.signal;
+    const onSigint = createSigintCanceller(controller);
+    process.on('SIGINT', onSigint);
+    let result;
+    try {
+      result = await run(args.prompt, options);
+    } finally {
+      process.removeListener('SIGINT', onSigint);
+    }
     if (args.json) {
       process.stdout.write(`${JSON.stringify(summarizeResult(result))}\n`);
     }
@@ -313,6 +330,33 @@ export async function main(argv) {
       process.exitCode = 1;
     }
   }
+}
+
+/**
+ * A SIGINT handler that cancels the in-flight run gracefully on the first
+ * Ctrl-C (aborting the current model request via the run's AbortController) and
+ * force-quits on the second, in case the graceful unwind itself hangs. Returned
+ * as a closure over a per-run controller and press counter so it is unit-
+ * testable without sending real signals. `exit` is injectable for the same
+ * reason (defaults to process.exit).
+ * @param {AbortController} controller
+ * @param {{ write: (s: string) => void }} [err] - Where notices go (default stderr)
+ * @param {(code: number) => void} [exit] - Hard-exit fn (default process.exit)
+ * @returns {() => void}
+ */
+export function createSigintCanceller(controller, err = process.stderr, exit) {
+  const hardExit = exit || ((code) => process.exit(code));
+  let presses = 0;
+  return () => {
+    presses++;
+    if (presses === 1) {
+      err.write('\nCancelling — press Ctrl-C again to force quit.\n');
+      controller.abort();
+      return;
+    }
+    err.write('\nForce quit.\n');
+    hardExit(130);
+  };
 }
 
 /**
@@ -707,6 +751,10 @@ export function parseArgs(argv) {
     // `kodr tui ["prompt"]` — launch the interactive TUI; the prompt is
     // optional (typed into the input box otherwise), so don't shorthand a
     // bare `kodr tui` into a run with prompt "tui".
+  } else if (args.command === 'acp') {
+    // `kodr acp` — launch the ACP front-end over stdio (specs/acp.yaml). Takes
+    // no prompt (the client sends prompts as session/prompt requests), so don't
+    // shorthand a bare `kodr acp` into a run with prompt "acp".
   } else if (args.command && !args.prompt) {
     // Treat the command as the prompt (shorthand)
     args.prompt = args.command;
@@ -727,6 +775,7 @@ Usage:
   kodr doctor                     Preflight checks: LM Studio, a loaded model, git, Node.js version
   kodr stats                      Aggregate rates (heal, retry, compaction, verify) across saved runs
   kodr replay <last|path>         Re-run a saved run's original prompt fresh, to check reproducibility
+  kodr acp                        Serve Kodr as an ACP agent over stdio for an editor (specs/acp.yaml)
 
 Options:
   --cwd <path>                    Workspace directory (default: .)
@@ -940,6 +989,84 @@ export async function runReplay(args) {
       process.exitCode = 1;
     }
   }
+}
+
+/**
+ * `kodr acp` — launch the Agent Client Protocol front-end over stdio
+ * (specs/acp.yaml). It owns stdin/stdout as a JSON-RPC channel, so it is
+ * mutually exclusive with the output modes that scrape or silence them, and
+ * needs no TTY (a client drives it as a subprocess). cwd comes per-session
+ * from the client's session/new, so it isn't set on the base options here.
+ * @param {CliArgs} args
+ */
+export async function runAcpCommand(args) {
+  if (args.json || args.quiet || args.events || args.tui) {
+    process.stderr.write(
+      'kodr acp cannot be combined with --json, --quiet, --events, or --tui.\n',
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const providerName = resolveProviderName(args.provider);
+  if (!['lmstudio', 'openrouter', 'ollama'].includes(providerName)) {
+    process.stderr.write(
+      `Unknown provider "${providerName}" -- must be one of: lmstudio, openrouter, ollama.\n`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const options = {
+    cwd: resolve(args.cwd || '.'),
+    provider: args.provider,
+    baseUrl: args.baseUrl,
+    model: args.model,
+    reasoning: args.reasoning,
+    vision: visionEnabled(args),
+    noZdr: args.openrouterNoZdr,
+    allowDataCollection: args.openrouterAllowDataCollection,
+    providerOrder: args.openrouterProviderOnly,
+    testCommand: args.test,
+    maxHealTurns: args.healTurns,
+    maxRunMs: args.maxRunMs,
+    maxToolTurns: args.maxToolTurns,
+    heartbeatMs: args.heartbeatMs,
+    incidentHeartbeatMs: args.incidentHeartbeatMs,
+    maxRetries: args.modelRetries,
+    envPassthrough: args.env,
+    runsDir: args.runsDir,
+    noSave: args.noSave,
+    debug: args.debug,
+  };
+  if (args.contextWindow !== null) {
+    options.contextWindow = args.contextWindow;
+  }
+
+  // `--continue <ref>` seeds the first ACP session with a prior run's
+  // conversation (specs/acp.yaml), so the model resumes it across an editor
+  // relaunch — the same continuation the CLI's own --continue uses. One-shot:
+  // later sessions started in this process begin fresh. An unresolvable ref is
+  // an error rather than a silent fresh start.
+  if (args.continue) {
+    const prior = await loadPriorRun(
+      options.cwd,
+      args.continue,
+      resolveRunsDir(options.cwd, args.runsDir),
+    );
+    if (!prior) {
+      process.stderr.write('No prior run found to continue from.\n');
+      process.exitCode = 1;
+      return;
+    }
+    options.continueSeed = {
+      priorMessages: prior.messages,
+      priorFilesChanged: prior.filesChanged || [],
+    };
+  }
+
+  const { runAcp } = await import('./acp.mjs');
+  await runAcp(options);
 }
 
 async function printVersion() {

@@ -382,6 +382,50 @@ describe('no-op completion', () => {
   });
 });
 
+describe('cancellation', () => {
+  it('returns stoppedReason cancelled when the signal aborts an in-flight run', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'kodr-cancel-'));
+    // Streams a first chunk then holds the response open forever, so the only
+    // way run() settles is the abort tearing the socket down.
+    const server = createServer((req, res) => {
+      if (req.url === '/api/v0/models') {
+        res.writeHead(404);
+        res.end('not found');
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write('data: {"choices":[{"delta":{"content":"working"}}]}\n\n');
+    });
+    await new Promise((resolve) =>
+      server.listen(0, '127.0.0.1', () => resolve(undefined)),
+    );
+    const { port } = /** @type {import('node:net').AddressInfo} */ (
+      server.address()
+    );
+
+    try {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 50);
+      const result = await run('do work', {
+        cwd,
+        baseUrl: `http://127.0.0.1:${port}`,
+        model: 'test',
+        quiet: true,
+        signal: controller.signal,
+      });
+
+      assert.equal(result.stoppedReason, 'cancelled');
+      // A cancel is not a completion: verify/heal never run.
+      assert.equal(result.verification, undefined);
+      assert.equal(result.healed ?? false, false);
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 function git(cwd, args) {
   return new Promise((resolve, reject) => {
     execFile('git', args, { cwd }, (err, stdout, stderr) => {

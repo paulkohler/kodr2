@@ -2,8 +2,9 @@
  * read_file tool — read file contents, path-jailed to workspace.
  */
 
-import { readFile, stat } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 import { resolveExistingPath } from '../path-jail.mjs';
+import { localBackend } from './backend.mjs';
 
 const MAX_SIZE = 1024 * 1024; // 1 MB
 
@@ -54,15 +55,25 @@ export default {
       return { error: `file not found: ${path}` };
     }
 
-    try {
-      const content = await readFile(resolved, 'utf8');
-      if (isBinary(content)) {
-        return { error: 'binary file — cannot read as text' };
-      }
-      return { content };
-    } catch (e) {
-      return { error: e.message };
+    // The stat above is Kodr's own view of the file; only the byte read is
+    // delegable, so an ACP client can return the content of an unsaved editor
+    // buffer instead of what's on disk.
+    const backend = context.backend ?? localBackend;
+    const read = await backend.readTextFile(resolved);
+    if (read.error) {
+      return { error: read.error };
     }
+    // Re-apply the size cap to what was actually read: a delegated read can
+    // return an unsaved buffer far larger than the on-disk stat above, so the
+    // local stat alone can't bound what enters the context.
+    const bytes = Buffer.byteLength(read.content, 'utf8');
+    if (bytes > MAX_SIZE) {
+      return { error: `file too large: ${bytes} bytes (max ${MAX_SIZE})` };
+    }
+    if (isBinary(read.content)) {
+      return { error: 'binary file — cannot read as text' };
+    }
+    return { content: read.content };
   },
 };
 

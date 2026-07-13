@@ -74,6 +74,10 @@ export function createClient(options = {}) {
    *   { url, requestBody, rawResponse, error? } -- the exact request sent and
    *   the raw, unparsed response text, for diagnosing a malformed response
    *   after the fact. A retried request calls this once per attempt.
+   * @param {AbortSignal} [params.signal] - Abort the in-flight request. When it
+   *   fires the underlying socket is destroyed and the call rejects with an
+   *   abort error (isAbortError), which the tool loop maps to a clean cancelled
+   *   stop rather than a crash. Not retried.
    * @returns {Promise<{ message: object, usage: object, retries: number }>}
    */
   async function chat(params) {
@@ -107,6 +111,7 @@ export function createClient(options = {}) {
       },
       maxRetries,
       headers,
+      params.signal,
     );
   }
 
@@ -399,6 +404,7 @@ async function streamRequestWithRetry(
   callbacks,
   maxRetries,
   headers = {},
+  signal,
 ) {
   let lastErr;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -409,9 +415,13 @@ async function streamRequestWithRetry(
         timeout,
         callbacks,
         headers,
+        signal,
       );
       return { ...result, retries: attempt };
     } catch (err) {
+      // An abort is a deliberate cancellation, not a transient failure -- never
+      // retry it (isRetryableError already excludes it, but an aborted signal
+      // also means every retry would reject immediately anyway).
       if (attempt === maxRetries || !isRetryableError(err)) {
         err.retries = attempt;
         throw err;
@@ -449,6 +459,26 @@ export function isTimeoutError(err) {
 }
 
 /**
+ * An abort error, tagged with a stable code so callers can tell a deliberate
+ * cancellation (a user hitting Ctrl-C, an ACP session/cancel) apart from a
+ * timeout or a transport failure without matching on the message text. Never
+ * retried.
+ * @returns {Error}
+ */
+export function abortError() {
+  return Object.assign(new Error('Request aborted'), { code: 'ABORT_ERR' });
+}
+
+/**
+ * Whether an error is a deliberate abort raised by this client's signal wiring.
+ * @param {NodeJS.ErrnoException} [err]
+ * @returns {boolean}
+ */
+export function isAbortError(err) {
+  return err?.code === 'ABORT_ERR';
+}
+
+/**
  * Whether an error from streamRequest is a 5xx HTTP status -- the class of
  * failure a local backend crash produces, as opposed to a 4xx (a bad request
  * that would fail the same way again) or a timeout.
@@ -474,7 +504,7 @@ export function isRetryableConnectionError(err) {
   return RETRYABLE_CONNECTION_ERROR_CODES.has(err.code);
 }
 
-function streamRequest(url, body, timeout, callbacks, headers = {}) {
+function streamRequest(url, body, timeout, callbacks, headers = {}, signal) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const payload = JSON.stringify(body);
@@ -490,12 +520,27 @@ function streamRequest(url, body, timeout, callbacks, headers = {}) {
       }, callbacks.heartbeatMs);
     }
 
+    // Cancellation: destroying the socket is the same teardown the hard
+    // timeout already uses (below), just triggered by an external signal
+    // instead of the clock. finish()'s settled guard makes the later
+    // req 'error' from the destroy a no-op, so the rejection stays the tagged
+    // abortError rather than a stray ECONNRESET.
+    function onAbort() {
+      if (req) {
+        req.destroy();
+      }
+      finish(reject, abortError());
+    }
+
     function finish(fn, value) {
       if (settled) return;
       settled = true;
       clearTimeout(hardTimer);
       if (heartbeatTimer) {
         clearInterval(heartbeatTimer);
+      }
+      if (signal) {
+        signal.removeEventListener('abort', onAbort);
       }
       if (callbacks.onDebug) {
         callbacks.onDebug({
@@ -598,6 +643,17 @@ function streamRequest(url, body, timeout, callbacks, headers = {}) {
     });
     req.write(payload);
     req.end();
+
+    // Registered last, once req and the timers exist, so onAbort's finish()
+    // can tear all of them down. A signal already aborted before we got here
+    // still resolves immediately -- the destroyed request never goes out.
+    if (signal) {
+      if (signal.aborted) {
+        onAbort();
+      } else {
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+    }
   });
 }
 

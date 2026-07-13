@@ -1,0 +1,193 @@
+name: acp
+status: implemented
+description: >
+  An Agent Client Protocol (ACP, https://agentclientprotocol.com) front-end for
+  Kodr: lets an ACP client (an editor such as Zed) drive Kodr as an embeddable
+  coding agent over JSON-RPC 2.0 on stdio, instead of the CLI or TUI. See
+  docs/acp.md for how to use it (including from VS Code) and the design rationale.
+
+  ACP is a second remote consumer of the same two seams the interactive TUI
+  (specs/tui.yaml) already uses: the reporter output channel (specs/reporter.yaml)
+  and the injected command-approval `confirm` channel. An ACP session maps to a
+  Kodr run(); the run loop, providers, verify, heal, review, and memory are
+  untouched. This is a front-end and an output adapter, nothing deeper.
+
+  Three modules, mirroring the TUI's pure-core / imperative-shell split:
+    - src/acp-protocol.mjs  -- pure, I/O-free: JSON-RPC message plumbing
+      (createJsonRpcConnection, send injected), the StopReason map, the
+      capability descriptor, prompt-text extraction, and the tool-kind map.
+    - src/acp-reporter.mjs   -- createAcpReporter: the fifth reporter, mapping
+      reporter methods to ACP `session/update` notifications.
+    - src/acp.mjs            -- runAcp: the imperative shell (stdin/stdout wiring)
+      and createAcpAgent, the method dispatcher that owns sessions and drives
+      run() per prompt. Launched by `kodr acp`.
+
+inputs:
+  options:
+    type: object
+    description: >
+      The same options object run() takes (provider, baseUrl, model, testCommand,
+      etc.). cwd comes per-session from the ACP client's session/new request, not
+      from this object. The ACP front-end supplies its own reporter and confirm,
+      and forces approveCommands on so every run_command is gated through the
+      client's session/request_permission.
+
+outputs:
+  exitCode:
+    type: number
+    description: Process exit code; 0 when stdin closes cleanly.
+
+constraints:
+  - Transport is line-delimited JSON-RPC 2.0 on stdio: one JSON object per line
+    read from stdin, one per line written to stdout. Zero runtime dependencies --
+    node:readline over process.stdin only, like the TUI.
+  - createJsonRpcConnection({ send }) is transport-agnostic and pure (send is
+    injected). It routes an incoming message by shape: a method with an id is a
+    request (dispatched to a registered handler, whose return value or thrown
+    error becomes the JSON-RPC response); a method without an id is a
+    notification (dispatched, no response); an id with result/error is a response
+    to a request this side sent (resolves/rejects the pending promise). It can
+    send requests (request(): returns a promise) and notifications (notify()).
+  - A handler that throws yields a JSON-RPC error response (code -32603); an
+    unknown method yields -32601; an unparseable stdin line yields -32700.
+  - Methods handled (client -> agent): initialize, authenticate, session/new,
+    session/prompt, and the session/cancel notification. initialize returns the
+    protocol version, agentCapabilities, and an empty authMethods list.
+    authenticate is a no-op success (Kodr needs no ACP-level auth; provider keys
+    come from the environment).
+  - agentCapabilities advertised: loadSession false (Kodr does not resume a
+    session by id across processes; --continue is the CLI's own mechanism) and
+    promptCapabilities image/audio/embeddedContext all false (Kodr takes text
+    prompts). Honest about what is implemented rather than aspirational.
+  - session/new records the client-provided cwd and returns a fresh, deterministic
+    sessionId (sess_<n>, a per-process counter -- no randomness). Sessions live in
+    memory for the process lifetime.
+  - session/prompt extracts the text from the prompt's content blocks (type
+    "text"; other block types are ignored in this version) and runs exactly one
+    run() for that session, with cwd from the session, the ACP reporter, the ACP
+    confirm, approveCommands on, and priorMessages set to the session's prior
+    run's messages so multi-turn prompts continue the conversation (the same
+    continuation the CLI's --continue uses). The response is a StopReason.
+  - StopReason mapping from RunResult.stoppedReason: complete -> end_turn,
+    budget-exceeded -> max_turn_requests, tool-limit -> max_turn_requests,
+    error -> refusal, and a session that was cancelled -> cancelled. A run() that
+    throws yields a JSON-RPC error response for that prompt rather than a
+    StopReason.
+  - session/cancel aborts the run's AbortController (see specs/cancel.yaml) and
+    marks the session cancelled, so the in-flight model request's socket is
+    destroyed and the prompt resolves with the cancelled StopReason. A fresh
+    controller is created per session/prompt and cleared when the prompt settles,
+    so a session/cancel arriving after the prompt already resolved is a no-op. A
+    cancel that lands during a run_command (not itself interruptible by the signal)
+    is observed at the next between-turn check rather than mid-command.
+  - The ACP reporter is total (every specs/reporter.yaml method exists) but maps
+    only the subset with a faithful ACP representation; the rest are no-ops:
+      * token -> session/update agent_message_chunk (a text content chunk);
+        empty deltas are skipped.
+      * toolCall -> session/update tool_call (status pending), with a per-turn
+        toolCallId (call_<n>), the tool name as title, a kind from the tool-kind
+        map, and the args as rawInput.
+      * toolResult -> session/update tool_call_update for the same toolCallId,
+        status completed (or failed when the result carries an error), with the
+        result as rawOutput.
+      * phase -> session/update plan: an accumulating plan whose entries are the
+        phases seen so far, the current one in_progress and earlier ones
+        completed.
+      * turnEnd, toolActivity, notice, heartbeat, compaction, verification,
+        healTurn, summary -> no-op (no clean ACP representation in this version).
+  - toolCall and toolResult are paired by a shared per-turn counter, relying on
+    the tool loop executing calls sequentially (toolCall strictly precedes its
+    toolResult before the next toolCall) -- the same ordering the loop already
+    guarantees. The confirm channel reads the current toolCallId from shared turn
+    state so a session/request_permission refers to the tool_call already streamed.
+  - confirm(call) (only run_command is gated) sends session/request_permission
+    with the current tool_call and two options -- allow (kind allow_once) and
+    reject (kind reject_once) -- and resolves { approved: true } only when the
+    client selects the allow option; a rejected option or a cancelled outcome
+    resolves { approved: false }, and the tool loop returns the not-approved
+    error to the model.
+  - The tool-kind map: read_file/list_files/search/view_image -> read,
+    write_file/edit_file -> edit, run_command -> execute, load_skill -> other.
+  - Filesystem/terminal delegation: the file and command tools do their byte I/O
+    through an injectable ToolBackend (src/tools/backend.mjs) instead of touching
+    node:fs / the shell directly. The default is the local, in-process backend, so
+    a run with no override is byte-for-byte unchanged. run() forwards options.backend
+    to the tool registry.
+  - The ACP front-end captures the client's clientCapabilities at initialize and, per
+    prompt, injects createAcpBackend (src/acp-backend.mjs): reads delegate to the
+    client's fs/read_text_file, writes to fs/write_text_file, and run_command to
+    terminal/create -> wait_for_exit -> output -> release (the command wrapped in
+    /bin/sh -c, env sent as ACP's array-of-{name,value}, a timeout killing the
+    terminal). Delegation is per-capability -- an op the client did not advertise
+    (fs.readTextFile, fs.writeTextFile, terminal) falls back to the local backend, so
+    a client that advertises nothing gets today's fully-local behavior.
+  - The seam is narrow on purpose: path-jail resolution, the read size/binary guards,
+    edit_file's uniqueness check, run_command's changed-file snapshot, and all
+    tracking stay in the tools regardless of backend. The path jail always runs
+    (model output is untrusted whether the write lands locally or via the client);
+    the backend only receives already-jailed absolute paths. The changed-file
+    snapshot stays local, which is correct for a co-located editor sharing the
+    working tree. A brand-new file that exists only in an unsaved client buffer is
+    not readable in this version (read_file's local stat guard runs first).
+  - `kodr acp` (a subcommand, no prompt) launches the front-end. It is mutually
+    exclusive with --tui, --json, --quiet, and --events (it owns stdio as a
+    JSON-RPC channel), and needs no TTY (a client drives it as a subprocess).
+  - `kodr acp --continue <ref>` resolves a prior run (loadPriorRun, the same
+    mechanism the CLI's own --continue uses -- "last" or a run id) and seeds the
+    FIRST session created with its priorMessages/priorFilesChanged, so the model
+    resumes that conversation across an editor relaunch. The seed is one-shot:
+    later sessions in the process start fresh. An unresolvable ref is an error
+    (stderr + non-zero exit), not a silent fresh start. This gives the model
+    memory, not visible history -- it does not replay the prior turns to the
+    client as session/update notifications (that is session/load, which stays
+    unimplemented; loadSession is advertised false). Within a session, each
+    prompt already threads the prior run's messages forward the same way.
+
+tests:
+  unit:
+    - stopReasonFor maps complete/budget-exceeded/tool-limit/error and a cancelled flag
+    - agentCapabilities reports loadSession false and no prompt capabilities
+    - extractPromptText concatenates text blocks and ignores non-text blocks
+    - toolKindFor maps each tool name to its ACP kind and unknown names to other
+    - createJsonRpcConnection notify writes a params notification with no id
+    - createJsonRpcConnection request writes an id and resolves on the matching response
+    - createJsonRpcConnection routes an incoming request to its handler and writes the result
+    - createJsonRpcConnection returns a -32601 error for an unknown method
+    - createJsonRpcConnection returns a -32603 error when a handler throws
+    - createAcpReporter is total over REPORTER_METHODS
+    - createAcpReporter token emits an agent_message_chunk and skips empty deltas
+    - createAcpReporter toolCall/toolResult emit paired tool_call and tool_call_update with one id
+    - createAcpReporter phase emits an accumulating plan marking the current phase in_progress
+    - the agent answers initialize with the protocol version and capabilities
+    - session/new returns a deterministic sessionId and records the cwd
+    - session/prompt runs one run() with the session cwd and streams updates, resolving with a StopReason
+    - session/prompt threads the prior run's messages into the next prompt as priorMessages
+    - a gated run_command sends session/request_permission and approves on the allow option
+    - a rejected permission resolves confirm as not approved
+    - session/cancel makes the prompt resolve with the cancelled StopReason
+    - session/cancel aborts the in-flight run via its AbortSignal (see specs/cancel.yaml)
+    - the ACP session controller is cleared after a prompt settles
+    - createAcpBackend delegates reads/writes to fs/* when the client advertises them
+    - createAcpBackend falls back to the local backend for un-advertised fs ops
+    - createAcpBackend runs a command through terminal/* and kills it on timeout
+    - createAcpBackend reports a wait_for_exit rejection as a command error and still releases
+    - requestPermission resolves not-approved when the client fails the request
+    - dispatchNotification swallows a throwing notification handler instead of rejecting
+    - read_file rejects an oversized delegated read even when the on-disk file is small
+    - the file/command tools route their I/O through context.backend when set
+    - initialize captures clientCapabilities so a prompt's backend delegates fs reads
+    - a --continue seed resumes the first session and later sessions start fresh
+    - an unknown method gets a -32601 error response
+  # Real-stdio transport, over an actual `kodr acp` subprocess, model-free so it
+  # runs in CI (test/acp-stdio.test.mjs). Uses the reusable ACP client in
+  # eval/support/acp-client.mjs.
+  stdio:
+    - negotiates initialize and issues deterministic session ids over real stdio
+    - answers an unknown method with -32601 and a malformed line with -32700
+    - ignores a cancel for an unknown session without crashing
+  # Live end-to-end against a real model, skip-gated on LM Studio
+  # (eval/acp.eval.mjs). Non-deterministic -- track pass rates.
+  integration:
+    - a real prompt delegates fs reads and writes to the client
+    - a real run_command gates through the client and executes via terminal/*
+    - session/cancel interrupts a live in-flight generation, resolving cancelled

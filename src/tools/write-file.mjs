@@ -2,9 +2,8 @@
  * write_file tool — create or overwrite a file, path-jailed to workspace.
  */
 
-import { writeFile, mkdir } from 'node:fs/promises';
-import { dirname } from 'node:path';
 import { resolveWritePath } from '../path-jail.mjs';
+import { localBackend } from './backend.mjs';
 
 export default {
   definition: {
@@ -46,13 +45,12 @@ export default {
       return { error: 'path escapes workspace root' };
     }
 
-    try {
-      await mkdir(dirname(resolved), { recursive: true });
-      await writeFile(resolved, content, 'utf8');
-      context.trackWrite(path);
-      return { written: true, path };
-    } catch (e) {
-      return { error: e.message };
+    const backend = context.backend ?? localBackend;
+    const written = await backend.writeTextFile(resolved, content);
+    if (written.error) {
+      return { error: written.error };
     }
+    context.trackWrite(path);
+    return { written: true, path };
   },
 };

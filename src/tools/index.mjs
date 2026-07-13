@@ -2,6 +2,7 @@
  * Tool registry — collects tools, generates API schemas, dispatches calls.
  */
 
+import { localBackend } from './backend.mjs';
 import editFile from './edit-file.mjs';
 import listFiles from './list-files.mjs';
 import loadSkill from './load-skill.mjs';
@@ -54,6 +55,10 @@ const VISION_TOOLS = [viewImage];
  *   not just what this specific process touches.
  * @param {boolean} [options.vision] - Offer the view_image tool (see specs/vision.yaml)
  * @param {number} [options.maxImageBytes] - Size cap for view_image reads
+ * @param {import('./backend.mjs').ToolBackend} [options.backend] - Filesystem/exec
+ *   backend for the file and command tools (see specs/acp.yaml). Defaults to the
+ *   local, in-process backend; the ACP front-end injects one that delegates
+ *   reads/writes/commands to the editor when it advertises fs/* and terminal/*.
  * @returns {ToolRegistry}
  */
 export function createToolRegistry(cwd, options = {}) {
@@ -69,6 +74,7 @@ export function createToolRegistry(cwd, options = {}) {
     startedAt: options.startedAt,
     maxRunMs: options.maxRunMs ?? 0,
     maxImageBytes: options.maxImageBytes,
+    backend: options.backend ?? localBackend,
     trackWrite(path) {
       if (!filesChanged.includes(path)) {
         filesChanged.push(path);

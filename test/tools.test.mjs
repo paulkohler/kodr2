@@ -683,3 +683,87 @@ describe('run_command', () => {
     assert.equal(snapshot.size, 5);
   });
 });
+
+// --- backend seam (specs/acp.yaml) ---
+
+describe('tool backend seam', () => {
+  beforeEach(setup);
+  afterEach(teardown);
+
+  it('read_file routes the byte read through context.backend', async () => {
+    // The file exists on disk with one content; the injected backend returns
+    // another. The tool must return the backend's content (as an ACP client
+    // returns an unsaved buffer), while its local stat guards still apply.
+    await writeFile(join(tmpDir, 'a.txt'), 'on disk');
+    const calls = [];
+    context.backend = {
+      readTextFile: async (absPath) => {
+        calls.push(absPath);
+        return { content: 'from backend' };
+      },
+      writeTextFile: async () => ({}),
+      runCommand: async () => ({ stdout: '', stderr: '', exitCode: 0 }),
+    };
+
+    const result = await readFileTool.execute({ path: 'a.txt' }, context);
+    assert.equal(result.content, 'from backend');
+    assert.equal(calls.length, 1);
+    assert.match(calls[0], /a\.txt$/);
+  });
+
+  it('write_file routes the write through context.backend and tracks it', async () => {
+    const writes = [];
+    context.backend = {
+      readTextFile: async () => ({ content: '' }),
+      writeTextFile: async (absPath, content) => {
+        writes.push({ absPath, content });
+        return {};
+      },
+      runCommand: async () => ({ stdout: '', stderr: '', exitCode: 0 }),
+    };
+
+    const result = await writeFileTool.execute(
+      { path: 'out.txt', content: 'hi' },
+      context,
+    );
+    assert.equal(result.written, true);
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].content, 'hi');
+    // The write went to the backend, not node:fs, so nothing hit disk.
+    assert.deepEqual(context._writes, ['out.txt']);
+  });
+
+  it('read_file rejects an oversized delegated read even when the on-disk file is small', async () => {
+    // The local stat guard sees a tiny file, but the delegated read returns a
+    // huge unsaved buffer; the size cap must still catch it so it can't blow
+    // out the context.
+    await writeFile(join(tmpDir, 'small.txt'), 'x');
+    const huge = 'a'.repeat(1024 * 1024 + 10);
+    context.backend = {
+      readTextFile: async () => ({ content: huge }),
+      writeTextFile: async () => ({}),
+      runCommand: async () => ({ stdout: '', stderr: '', exitCode: 0 }),
+    };
+
+    const result = await readFileTool.execute({ path: 'small.txt' }, context);
+    assert.match(result.error, /file too large/);
+  });
+
+  it('run_command routes execution through context.backend', async () => {
+    let ran = null;
+    context.backend = {
+      readTextFile: async () => ({ content: '' }),
+      writeTextFile: async () => ({}),
+      runCommand: async (command, opts) => {
+        ran = { command, cwd: opts.cwd };
+        return { stdout: 'delegated', stderr: '', exitCode: 0 };
+      },
+    };
+
+    const result = asRunOk(
+      await runCommandTool.execute({ command: 'echo hi' }, context),
+    );
+    assert.equal(result.stdout, 'delegated');
+    assert.deepEqual(ran, { command: 'echo hi', cwd: tmpDir });
+  });
+});

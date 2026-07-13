@@ -2,8 +2,8 @@
  * edit_file tool — targeted search/replace edit on an existing file.
  */
 
-import { readFile, writeFile } from 'node:fs/promises';
 import { resolveExistingPath } from '../path-jail.mjs';
+import { localBackend } from './backend.mjs';
 
 export default {
   definition: {
@@ -52,12 +52,12 @@ export default {
       return { error: 'path escapes workspace root' };
     }
 
-    let content;
-    try {
-      content = await readFile(resolved, 'utf8');
-    } catch {
+    const backend = context.backend ?? localBackend;
+    const read = await backend.readTextFile(resolved);
+    if (read.error) {
       return { error: `file not found: ${path}` };
     }
+    const content = read.content;
 
     const count = countOccurrences(content, old_string);
     if (count === 0) {
@@ -74,13 +74,12 @@ export default {
     // already verified unique, so this replaces exactly that one occurrence.
     const updated = content.replace(old_string, () => new_string);
 
-    try {
-      await writeFile(resolved, updated, 'utf8');
-      context.trackWrite(path);
-      return { edited: true, path };
-    } catch (e) {
-      return { error: e.message };
+    const written = await backend.writeTextFile(resolved, updated);
+    if (written.error) {
+      return { error: written.error };
     }
+    context.trackWrite(path);
+    return { edited: true, path };
   },
 };
 
