@@ -826,7 +826,10 @@ describe('abort signal', () => {
     await assert.rejects(
       client.chat({ messages: [], signal: controller.signal }),
       (err) => {
-        assert.equal(isAbortError(/** @type {NodeJS.ErrnoException} */ (err)), true);
+        assert.equal(
+          isAbortError(/** @type {NodeJS.ErrnoException} */ (err)),
+          true,
+        );
         return true;
       },
     );
