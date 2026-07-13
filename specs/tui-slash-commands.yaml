@@ -1,0 +1,133 @@
+name: tui-slash-commands
+status: proposed
+description: >
+  Slash commands for the interactive TUI (specs/tui.yaml): meta-commands that
+  act on the session -- the conversation, the per-session config, the view --
+  rather than being sent to the model as a prompt. Today the TUI has exactly
+  one: `/compact`, which works only because each TUI turn is a full run() and
+  the harness intercepts a `/compact` prompt before starting a task
+  (src/compact.mjs isCompactCommand, wired in src/harness.mjs). That is an
+  accident of the run() intercept, not a TUI feature: it costs a model round
+  trip to compact, and no other command can be added the same way without the
+  harness knowing about it.
+
+  This spec proposes a first-class slash-command layer owned by the TUI input
+  loop. When the trimmed input begins with `/` and its first word matches a
+  known command, the TUI dispatches it locally instead of calling submit();
+  an unknown `/word` is either reported ("unknown command; /help for the
+  list") or, to stay safe, sent to the model as an ordinary prompt. Commands
+  are pure where possible (a dispatch function over tui-state, mirroring the
+  tui-state.mjs / tui-render.mjs split) so they unit-test without a terminal.
+
+  This is a design sketch to be pruned and accepted, not a finished contract.
+  The command set below is the starting point for that discussion. Nothing
+  here is implemented beyond `/compact`.
+
+inputs:
+  input:
+    type: string
+    description: >
+      The raw input-box contents at submit time. Treated as a slash command
+      only when trim() starts with `/` and the first whitespace-delimited word
+      is a known command name (case-insensitive). Everything after the command
+      word is the argument string.
+  state:
+    type: object
+    description: The TUI state (see specs/tui.yaml) the command reads/mutates.
+
+outputs:
+  handled:
+    type: boolean
+    description: >
+      True when the input was a recognized slash command and was dispatched
+      locally (so the TUI must not also submit() it as a prompt).
+  effect:
+    type: string
+    description: >
+      What the dispatch asks the shell to do: none (state-only, just redraw),
+      quit, start-run (e.g. /retry re-runs a prompt), cancel-run (/stop), or
+      compact.
+
+constraints:
+  # Recognition and dispatch
+  - A slash command is recognized only when the trimmed input starts with `/`
+    and its first word is a known command; matching is case-insensitive.
+  - Command names never collide with a leading-slash path or a prose sentence
+    the user might legitimately send -- an unknown `/word` is NOT swallowed.
+    Default to sending an unknown `/word` to the model as a normal prompt so
+    typing is never silently eaten; `/help` lists what is actually recognized.
+  - Dispatch is a pure function of (input, state) returning { handled, effect,
+    lines } -- lines are scrollback lines to push -- so it unit-tests without a
+    terminal, mirroring the tui-state/tui-render split.
+  - A slash command entered while a run is active is dispatched immediately
+    (it is a session command, not a queued follow-up); only `/stop` and
+    view/inspection commands are meaningful mid-run, and `/model`, `/clear`,
+    etc. that would corrupt an in-flight run are rejected with a notice while
+    busy rather than applied.
+
+  # The proposed command set (names, aliases, behavior)
+  - "/help (/?): list the recognized commands and one-line descriptions into
+    scrollback. State-only."
+  - "/compact: the existing behavior, but routed through the slash layer
+    instead of the run() prompt intercept -- compress the conversation into a
+    summary and continue. Effect: compact."
+  - "/clear (/new): drop priorMessages so the next prompt starts a fresh
+    conversation; keep the scrollback but mark the reset. Rejected while busy."
+  - "/retry: re-run the last submitted prompt fresh (no continuation),
+    discarding that turn's result -- the TUI-local equivalent of `kodr
+    replay`. Effect: start-run. Rejected while busy or with no prior prompt."
+  - "/stop (/cancel): abort the in-flight run via the existing cancel path
+    (specs/cancel.yaml) without leaving the TUI. No-op with a notice when
+    idle. Effect: cancel-run."
+  - "/model [id]: with no argument, print the current model; with an id, set
+    the model for subsequent turns. Rejected while busy."
+  - "/provider [name]: with no argument, print the current provider. Switching
+    provider mid-session is out of scope for the first cut (print-only)."
+  - "/context (/tokens): print the context window and the latest token counts
+    for the session. State-only."
+  - "/cost: print accumulated cost (real on OpenRouter; $0 on local
+    providers). State-only."
+  - "/diff: run `git diff` in the workspace and page the result into
+    scrollback, so the user can see what the session changed. Read-only."
+  - "/history (/messages): print a compact view of the conversation so far
+    (roles and truncated content). State-only."
+  - "/test [command]: with no argument, print the current verification
+    command; with one, set it for subsequent turns. Rejected while busy."
+  - "/approve: toggle per-command approval (options.approveCommands) on/off
+    for subsequent run_command calls. State-only."
+  - "/reasoning: toggle reasoning tokens where the provider supports it; a
+    no-op with a notice on providers that don't."
+  - "/memory: review and apply proposed memory notes for this workspace
+    (specs/memory.yaml), reusing the same human-decision path."
+  - "/doctor: run the preflight checks (specs/doctor.yaml) and print the
+    report inline. Read-only."
+  - "/quit (/exit): leave the TUI cleanly -- the same teardown as Ctrl-C.
+    Effect: quit."
+
+  # Rendering / UX
+  - A dispatched command echoes its own line into scrollback (like a submitted
+    prompt does), so the transcript shows what was run.
+  - Commands that only print (/help, /context, /cost, /history, /diff,
+    /doctor) never touch priorMessages or start a run.
+  - Argument parsing is minimal: the command word, then the remainder as a
+    single trimmed string. No flag parsing inside the TUI.
+
+tests:
+  unit:
+    - parseCommand recognizes a known leading-slash word and splits off its argument
+    - parseCommand is case-insensitive on the command name
+    - parseCommand returns handled=false for a non-slash input
+    - an unknown /word is not handled (falls through to a normal prompt submit)
+    - /help returns lines listing every recognized command
+    - /clear marks priorMessages for reset and is rejected while a run is active
+    - /retry with a prior prompt returns effect=start-run and the prompt to re-run
+    - /retry with no prior prompt is a no-op with a notice
+    - /stop returns effect=cancel-run when a run is active and a no-op notice when idle
+    - /model with no argument prints the current model; with an id sets it (when idle)
+    - /model is rejected with a notice while a run is active
+    - /context prints the window and current token counts
+    - /cost prints the accumulated cost
+    - /approve toggles approveCommands and reflects the new state in the notice
+    - /test with no argument prints the command; with one sets it (when idle)
+    - /quit returns effect=quit
+    - a state-only command returns effect=none and pushes its lines to scrollback
