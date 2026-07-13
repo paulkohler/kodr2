@@ -453,6 +453,24 @@ describe('evaluateGoal', () => {
     assert.match(system, /VERDICT: NOT MET/);
     assert.match(system, /without opening a file/);
   });
+
+  it('does not crash under a run budget when no startedAt is supplied', async () => {
+    // With maxRunMs set, the tool loop's budget check reads startedAt.getTime();
+    // evaluateGoal must default startedAt so a caller can omit it (regression:
+    // a live --max-run-ms goal run threw "Cannot read properties of undefined").
+    const client = scriptedClient([finalTurn('VERDICT: MET')]);
+    const v = await evaluateGoal({
+      reporter: silentReporter,
+      client,
+      modelId: 'judge',
+      cwd: tmpDir,
+      goal: 'x is exported',
+      filesChanged: ['a.mjs'],
+      minToolCalls: 0,
+      maxRunMs: 60000,
+    });
+    assert.equal(v.met, true);
+  });
 });
 
 describe('summarizeGoalResult', () => {

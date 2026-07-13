@@ -160,7 +160,11 @@ export async function evaluateGoal(params) {
     cwd,
     goal,
     filesChanged = [],
-    startedAt,
+    // The judge's own budget clock starts when it does. Defaulted here so a
+    // caller can omit it: with maxRunMs set, the tool loop's budget check calls
+    // startedAt.getTime(), which throws on undefined (caught live with a
+    // --max-run-ms goal run; the unit tests ran with the budget disabled).
+    startedAt = new Date(),
     maxRunMs = 0,
     contextWindow = 0,
     heartbeatMs,
