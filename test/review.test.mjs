@@ -5,12 +5,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
+import { createNullReporter } from '../src/reporter.mjs';
 import {
   minReviewToolCalls,
   reviewDiffTimeoutMs,
   reviewMaxToolTurns,
   runReview,
 } from '../src/review.mjs';
+
+// runReview defaults to a terminal reporter (it streams review output even under
+// --quiet — see review.mjs). In a `node --test` child that stdout IS the test
+// runner's framed IPC channel, so letting the reporter write to it corrupts a
+// frame and crashes the runner with "Unable to deserialize cloned data"
+// intermittently. Silence it in every call below.
+const silentReporter = createNullReporter();
 
 let tmpDir;
 
@@ -74,6 +82,7 @@ describe('runReview', () => {
   it('returns skipped: true when filesChanged is empty, without calling the model', async () => {
     const client = scriptedClient([finalTurn('should not be called')]);
     const result = await runReview({
+      reporter: silentReporter,
       client,
       modelId: 'reviewer',
       cwd: tmpDir,
@@ -92,6 +101,7 @@ describe('runReview', () => {
     ]);
 
     const result = await runReview({
+      reporter: silentReporter,
       client,
       modelId: 'reviewer',
       cwd: tmpDir,
@@ -109,6 +119,7 @@ describe('runReview', () => {
     const client = scriptedClient([finalTurn('No findings.')]);
 
     await runReview({
+      reporter: silentReporter,
       client,
       modelId: 'reviewer',
       cwd: tmpDir,
@@ -137,6 +148,7 @@ describe('runReview', () => {
     ]);
 
     await runReview({
+      reporter: silentReporter,
       client,
       modelId: 'reviewer',
       cwd: tmpDir,
@@ -160,6 +172,7 @@ describe('runReview', () => {
     ]);
 
     const result = await runReview({
+      reporter: silentReporter,
       client,
       modelId: 'reviewer',
       cwd: tmpDir,
@@ -181,6 +194,7 @@ describe('runReview', () => {
     ]);
 
     const result = await runReview({
+      reporter: silentReporter,
       client,
       modelId: 'reviewer',
       cwd: tmpDir,
@@ -204,6 +218,7 @@ describe('runReview', () => {
     ]);
 
     const result = await runReview({
+      reporter: silentReporter,
       client,
       modelId: 'reviewer',
       cwd: tmpDir,
@@ -220,6 +235,7 @@ describe('runReview', () => {
     const client = scriptedClient([finalTurn('Zero-tool-call answer.')]);
 
     const result = await runReview({
+      reporter: silentReporter,
       client,
       modelId: 'reviewer',
       cwd: tmpDir,
@@ -241,6 +257,7 @@ describe('runReview', () => {
     ]);
 
     const result = await runReview({
+      reporter: silentReporter,
       client,
       modelId: 'reviewer',
       cwd: tmpDir,
@@ -270,6 +287,7 @@ describe('runReview', () => {
     ]);
 
     const result = await runReview({
+      reporter: silentReporter,
       client,
       modelId: 'reviewer',
       cwd: tmpDir,
@@ -293,6 +311,7 @@ describe('runReview', () => {
 
     const client = scriptedClient([finalTurn('No findings.')]);
     await runReview({
+      reporter: silentReporter,
       client,
       modelId: 'reviewer',
       cwd: tmpDir,
@@ -310,6 +329,7 @@ describe('runReview', () => {
     const client = scriptedClient([finalTurn('No findings.')]);
 
     const result = await runReview({
+      reporter: silentReporter,
       client,
       modelId: 'reviewer',
       cwd: tmpDir,
