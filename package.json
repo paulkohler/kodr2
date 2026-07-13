@@ -39,6 +39,7 @@
     "inspect-run": "node scripts/inspect-run.mjs",
     "install-local": "node bin/install-local.mjs",
     "check": "find bin src -name '*.mjs' -exec node --check {} +",
+    "check:specs": "node scripts/check-specs.mjs",
     "check:types": "tsc --noEmit -p jsconfig.json",
     "precheck:types": "node scripts/require-typescript.mjs",
     "check:biome": "node scripts/require-biome.mjs",
