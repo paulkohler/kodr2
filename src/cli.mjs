@@ -13,11 +13,21 @@ import {
   formatSimpleModelsList,
   formatStats,
 } from './format.mjs';
+import {
+  DEFAULT_MAX_ATTEMPTS,
+  evaluateGoal,
+  runGoal,
+  summarizeGoalResult,
+} from './goal.mjs';
 import { DEFAULT_HEARTBEAT_MS, resolveRunsDir, run } from './harness.mjs';
 import { DEFAULT_INCIDENT_HEARTBEAT_MS } from './incident.mjs';
 import { DEFAULT_MAX_RETRIES } from './model.mjs';
 import { createProvider, resolveProviderName } from './provider.mjs';
-import { createJsonReporter } from './reporter.mjs';
+import {
+  createJsonReporter,
+  createNullReporter,
+  createTerminalReporter,
+} from './reporter.mjs';
 import {
   DEFAULT_MIN_REVIEW_TOOL_CALLS,
   DEFAULT_REVIEW_MAX_TOOL_TURNS,
@@ -42,6 +52,7 @@ import { MAX_TOOL_TURNS } from './tool-loop.mjs';
  * @property {number} healTurns
  * @property {number} maxRunMs
  * @property {number} maxToolTurns
+ * @property {number} maxAttempts
  * @property {number} heartbeatMs
  * @property {number} incidentHeartbeatMs
  * @property {number} modelRetries
@@ -106,6 +117,11 @@ export async function main(argv) {
 
   if (args.command === 'replay') {
     await runReplay(args);
+    return;
+  }
+
+  if (args.command === 'goal') {
+    await runGoalCommand(args);
     return;
   }
 
@@ -495,6 +511,7 @@ export function parseArgs(argv) {
     healTurns: 3,
     maxRunMs: 0,
     maxToolTurns: MAX_TOOL_TURNS,
+    maxAttempts: DEFAULT_MAX_ATTEMPTS,
     heartbeatMs: DEFAULT_HEARTBEAT_MS,
     incidentHeartbeatMs: DEFAULT_INCIDENT_HEARTBEAT_MS,
     modelRetries: DEFAULT_MAX_RETRIES,
@@ -608,6 +625,11 @@ export function parseArgs(argv) {
     }
     if (arg === '--max-tool-turns' && argv[i + 1]) {
       args.maxToolTurns = parseInt(argv[++i], 10);
+      i++;
+      continue;
+    }
+    if (arg === '--max-attempts' && argv[i + 1]) {
+      args.maxAttempts = parseInt(argv[++i], 10);
       i++;
       continue;
     }
@@ -747,6 +769,10 @@ export function parseArgs(argv) {
     // `kodr replay <last|path>` — the ref lands in args.prompt via the
     // generic "second positional" capture above; replay reads it as a ref,
     // not a task prompt, and re-runs the referenced record's own prompt.
+  } else if (args.command === 'goal') {
+    // `kodr goal "<goal>"` — the goal text lands in args.prompt via the second
+    // positional; goal reads it as the success criterion the judge assesses,
+    // not a one-shot task prompt. Don't shorthand a bare `kodr goal` into a run.
   } else if (args.command === 'tui') {
     // `kodr tui ["prompt"]` — launch the interactive TUI; the prompt is
     // optional (typed into the input box otherwise), so don't shorthand a
@@ -775,6 +801,7 @@ Usage:
   kodr doctor                     Preflight checks: LM Studio, a loaded model, git, Node.js version
   kodr stats                      Aggregate rates (heal, retry, compaction, verify) across saved runs
   kodr replay <last|path>         Re-run a saved run's original prompt fresh, to check reproducibility
+  kodr goal "<goal>"              Iterate run() until a model judge says the goal is met (specs/goal.yaml)
   kodr acp                        Serve Kodr as an ACP agent over stdio for an editor (specs/acp.yaml)
 
 Options:
@@ -809,6 +836,8 @@ Options:
   --heal-turns <n>                Max repair turns (default: 3)
   --max-run-ms <n>                Stop between turns after this many ms (default: 0, disabled)
   --max-tool-turns <n>            Tool-turn ceiling per loop (default: 20)
+  --max-attempts <n>              For 'kodr goal': cap on build+judge iterations (default: 3,
+                                  or KODR_GOAL_MAX_ATTEMPTS)
   --heartbeat-ms <n>              Stop-hook "still running" notice interval (or KODR_HEARTBEAT_MS; default: 30000, 0 disables)
   --incident-heartbeat-ms <n>     On-disk heartbeat interval for detecting a run that
                                   never exited cleanly (or KODR_INCIDENT_HEARTBEAT_MS;
@@ -862,6 +891,7 @@ Examples:
   kodr "add error handling" --continue last
   kodr "/compact" --continue last
   kodr replay last                                    # rerun the last run's own prompt fresh
+  kodr goal "the /health route is documented and has a test" --test "node --test" --max-attempts 4
 `;
   process.stdout.write(`${help.trim()}\n`);
 }
@@ -988,6 +1018,162 @@ export async function runReplay(args) {
     if (!noFailEnabled(args)) {
       process.exitCode = 1;
     }
+  }
+}
+
+/**
+ * Process exit code for a goal loop: 0 iff the goal was met (unless --no-fail).
+ * @param {import('./goal.mjs').GoalResult} result
+ * @param {CliArgs} args
+ * @returns {number}
+ */
+export function goalExitCode(result, args) {
+  if (noFailEnabled(args)) {
+    return 0;
+  }
+  if (result.met) {
+    return 0;
+  }
+  return 1;
+}
+
+/**
+ * `kodr goal "<goal>"` — the evaluator loop (specs/goal.yaml). Iterate run()
+ * until a read-only model judge confirms the goal is met, or --max-attempts is
+ * hit. Each attempt is one full run() (build + test/heal); the judge decides
+ * whether to continue and its feedback is carried into the next attempt as a
+ * continuation. In P0 the judge runs on the same provider/model as the build.
+ * @param {CliArgs} args
+ */
+export async function runGoalCommand(args) {
+  const goal = args.prompt;
+  if (!goal) {
+    process.stderr.write(
+      'Usage: kodr goal "<goal>" [--test cmd] [--max-attempts n]\n',
+    );
+    process.exitCode = 1;
+    return;
+  }
+  if (!Number.isInteger(args.maxAttempts) || args.maxAttempts < 1) {
+    process.stderr.write('--max-attempts must be a positive integer.\n');
+    process.exitCode = 1;
+    return;
+  }
+  const providerName = resolveProviderName(args.provider);
+  if (!['lmstudio', 'openrouter', 'ollama'].includes(providerName)) {
+    process.stderr.write(
+      `Unknown provider "${providerName}" -- must be one of: lmstudio, openrouter, ollama.\n`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const cwd = resolve(args.cwd || '.');
+  const quiet = args.quiet || args.json;
+  const runOptions = {
+    cwd,
+    provider: args.provider,
+    baseUrl: args.baseUrl,
+    model: args.model,
+    reasoning: args.reasoning,
+    vision: visionEnabled(args),
+    noZdr: args.openrouterNoZdr,
+    allowDataCollection: args.openrouterAllowDataCollection,
+    providerOrder: args.openrouterProviderOnly,
+    testCommand: args.test,
+    maxHealTurns: args.healTurns,
+    maxRunMs: args.maxRunMs,
+    maxToolTurns: args.maxToolTurns,
+    heartbeatMs: args.heartbeatMs,
+    incidentHeartbeatMs: args.incidentHeartbeatMs,
+    maxRetries: args.modelRetries,
+    envPassthrough: args.env,
+    runsDir: args.runsDir,
+    noSave: args.noSave,
+    memory: args.memory,
+    memoryAutoApply: args.memoryAutoApply,
+    debug: args.debug,
+    quiet,
+  };
+  if (args.contextWindow !== null) {
+    runOptions.contextWindow = args.contextWindow;
+  }
+
+  // A dedicated read-only client for the judge; the build's own client lives
+  // inside run(). Same provider/model as the build in P0 -- cross-model judging
+  // is a future enhancement (specs/goal.yaml).
+  let client;
+  let judgeModelId;
+  try {
+    client = createProvider({
+      provider: args.provider,
+      baseUrl: args.baseUrl,
+      model: args.model,
+      timeout: args.maxRunMs || undefined,
+      maxRetries: args.modelRetries,
+      reasoning: args.reasoning,
+      noZdr: args.openrouterNoZdr,
+      allowDataCollection: args.openrouterAllowDataCollection,
+      providerOrder: args.openrouterProviderOnly,
+    });
+    judgeModelId = await client.resolveModel();
+  } catch (err) {
+    process.stderr.write(`Error: ${err.message}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const judgeReporter = quiet ? createNullReporter() : createTerminalReporter();
+  const loopReporter = quiet ? createNullReporter() : createTerminalReporter();
+
+  const controller = new AbortController();
+  runOptions.signal = controller.signal;
+  const onSigint = createSigintCanceller(controller);
+  process.on('SIGINT', onSigint);
+  try {
+    const goalResult = await runGoal({
+      goal,
+      maxAttempts: args.maxAttempts,
+      reporter: loopReporter,
+      runTask: (prompt, continuation) =>
+        run(prompt, {
+          ...runOptions,
+          priorMessages: continuation?.priorMessages,
+          priorFilesChanged: continuation?.priorFilesChanged,
+        }),
+      evaluate: (result) =>
+        evaluateGoal({
+          client,
+          modelId: judgeModelId,
+          cwd,
+          goal,
+          filesChanged: result.filesChanged || [],
+          maxRunMs: args.maxRunMs,
+          contextWindow: args.contextWindow ?? 0,
+          heartbeatMs: args.heartbeatMs,
+          envPassthrough: args.env,
+          reporter: judgeReporter,
+        }),
+    });
+    if (args.json) {
+      process.stdout.write(
+        `${JSON.stringify(summarizeGoalResult(goalResult))}\n`,
+      );
+    }
+    process.exitCode = goalExitCode(goalResult, args);
+  } catch (err) {
+    if (args.json) {
+      process.stdout.write(
+        `${JSON.stringify({ met: false, reason: 'error', error: err.message })}\n`,
+      );
+    } else {
+      process.stderr.write(`Error: ${err.message}\n`);
+    }
+    if (!noFailEnabled(args)) {
+      process.exitCode = 1;
+    }
+  } finally {
+    process.removeListener('SIGINT', onSigint);
   }
 }
 

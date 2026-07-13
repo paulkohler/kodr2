@@ -158,6 +158,20 @@ instruction), replay starts over with the _same original prompt_:
 $ kodr replay last
 ```
 
+`kodr goal "<goal>"` is the outer loop: it re-runs the task until a **read-only
+model judge** confirms your goal is met, or it hits `--max-attempts` (default 3).
+Where `--test` is a deterministic gate ("tests pass"), the judge handles a fuzzy
+goal a shell command can't express, and carries its feedback into the next
+attempt as a continuation. It stops early on a two-attempt no-change stall or a
+build error, and `--json` prints `{ met, reason, attempts, … }`. For a *backlog*
+of tasks rather than one goal, wrap `kodr` in a shell loop —
+[`examples/loop.sh`](examples/loop.sh). See [specs/goal.yaml](specs/goal.yaml)
+and the [usage guide](docs/usage.md).
+
+```
+$ kodr goal "the /health route is documented and has a test" --test "node --test"
+```
+
 `kodr acp` serves Kodr as an [Agent Client Protocol](https://agentclientprotocol.com)
 agent over stdio, so an ACP-speaking editor (e.g. Zed) can drive it against a
 local or hosted model, rendering the stream, tool calls, and command-approval

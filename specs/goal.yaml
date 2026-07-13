@@ -1,5 +1,5 @@
 name: goal
-status: proposed
+status: implemented
 description: >
   An evaluator loop: iterate run() until a model judge confirms a natural-language
   goal is met, or a cap (max attempts) is hit. `kodr goal "<goal>"`. This is the

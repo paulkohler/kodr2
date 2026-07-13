@@ -276,6 +276,35 @@ is deferred — see the spec.)
 
 ---
 
+## 12. Loop toward a goal — `kodr goal`
+
+A single `kodr run` is one shot. `kodr goal` is the *outer loop*: it re-runs the
+task until a model judge confirms your goal is met, or it hits an attempt cap.
+Where `--test` is a deterministic gate ("tests pass"), the judge handles a
+*fuzzy* goal a shell command can't express.
+
+```bash
+kodr goal "the /health route is documented in the README and has a test" \
+  --test "node --test" --max-attempts 4
+```
+
+Each attempt is a full `run()` (build + `--test`/heal). After it, a **read-only**
+judge inspects the workspace and ends with `VERDICT: MET` or `VERDICT: NOT MET`;
+when not met, its feedback is carried into the next attempt as a continuation.
+The judge can't edit anything, and a verdict reached without opening a file is
+treated as ungrounded and never stops the loop on its own — the same
+anti-hallucination guard the [review pass](../specs/review.yaml) uses. The loop
+also stops early if two attempts in a row change no files (`stalled`) or a build
+errors (`build-error`).
+
+`--json` prints a machine-readable summary (`{ met, reason, attempts, verdicts,
+usage, … }`); the process exits `0` only when the goal was met (unless
+`--no-fail`). For a *backlog* of tasks rather than one goal, wrap `kodr` in a
+shell loop — see [`examples/loop.sh`](../examples/loop.sh). Full contract:
+[`specs/goal.yaml`](../specs/goal.yaml).
+
+---
+
 ## Utility commands
 
 Beyond `run` and `tui`, Kodr ships a handful of read-mostly subcommands:
