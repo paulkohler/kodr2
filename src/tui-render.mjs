@@ -8,6 +8,8 @@
  * the scrollback region because the input line is always drawn last.
  */
 
+import { matchCommands } from './tui-commands.mjs';
+
 const RESET = '\x1b[0m';
 const DIM = '\x1b[2m';
 const BOLD = '\x1b[1m';
@@ -153,7 +155,7 @@ export function renderFrame(state, size, now = Date.now()) {
 
   lines[sepRow] = `${DIM}${'─'.repeat(cols)}${RESET}`;
   lines[inputRow] = truncateAnsi(inputLine(state), cols);
-  lines[hintRow] = truncateAnsi(hintLine(state), cols);
+  lines[hintRow] = truncateAnsi(hintLine(state, cols), cols);
 
   // A trailing RESET per row stops an unclosed color (e.g. a wrapped colored
   // line) from bleeding into the next row.
@@ -206,9 +208,47 @@ function inputLine(state) {
   return `${CYAN}›${RESET} ${before}${REVERSE}${at}${RESET}${after}`;
 }
 
-function hintLine(state) {
+function hintLine(state, cols) {
   if (state.approval) {
     return `${DIM}y: run · n: skip${RESET}`;
   }
-  return `${DIM}enter: send · ctrl-c: quit${RESET}`;
+  // After a first Ctrl-C, prompt for the confirming second press (see
+  // specs/tui.yaml) -- ahead of the autocomplete, so the warning is never
+  // hidden by a half-typed command.
+  if (state.quitPending) {
+    return `${YELLOW}press ctrl-c again to quit${RESET}`;
+  }
+  // While a slash command is being typed, the hint row turns into a live
+  // autocomplete: the primary command names still matching the prefix, narrowing
+  // as more is typed (see specs/tui-slash-commands.yaml). Falls back to the
+  // static hint once the input isn't a partial command (or matches nothing).
+  const matches = matchCommands(state.input);
+  if (matches.length > 0) {
+    return suggestionLine(matches, cols);
+  }
+  return `${DIM}enter: send · /help: commands · ctrl-c: quit${RESET}`;
+}
+
+// Join `/name` suggestions with the same ` · ` the static hint uses, fitting to
+// one row: if they don't all fit, show as many as do and cap with ` …`.
+function suggestionLine(names, cols) {
+  const sep = ' · ';
+  const pieces = names.map((name) => `/${name}`);
+  const full = pieces.join(sep);
+  if (full.length <= cols) {
+    return `${DIM}${full}${RESET}`;
+  }
+  const ellipsis = ' …';
+  const budget = cols - ellipsis.length;
+  const shown = [];
+  let width = 0;
+  for (const piece of pieces) {
+    const add = (shown.length === 0 ? 0 : sep.length) + piece.length;
+    if (width + add > budget) {
+      break;
+    }
+    shown.push(piece);
+    width += add;
+  }
+  return `${DIM}${shown.join(sep)}${ellipsis}${RESET}`;
 }

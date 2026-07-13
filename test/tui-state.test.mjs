@@ -17,7 +17,9 @@ import {
   noteOnce,
   pushLine,
   setApproval,
+  setInput,
   setPhase,
+  setQuitPending,
   setRunning,
   takeInput,
 } from '../src/tui-state.mjs';
@@ -144,6 +146,26 @@ describe('tui-state', () => {
     assert.deepEqual(state.approval, { command: 'rm -rf build' });
     clearApproval(state);
     assert.equal(state.approval, null);
+  });
+
+  it('setInput replaces the buffer and moves the cursor to the end', () => {
+    const state = createTuiState();
+    for (const ch of 'ab') {
+      insertChar(state, ch);
+    }
+    moveCursor(state, -2);
+    setInput(state, '/compact ');
+    assert.equal(state.input, '/compact ');
+    assert.equal(state.cursor, '/compact '.length);
+  });
+
+  it('setQuitPending arms and disarms the quit confirmation', () => {
+    const state = createTuiState();
+    assert.equal(state.quitPending, false);
+    setQuitPending(state, true);
+    assert.equal(state.quitPending, true);
+    setQuitPending(state, false);
+    assert.equal(state.quitPending, false);
   });
 
   it('noteOnce reports a note as new the first time and seen thereafter', () => {

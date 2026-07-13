@@ -51,7 +51,8 @@ constraints:
     redraws.
   - Input is handled in raw keypress mode (readline.emitKeypressEvents), not
     readline line-mode. The TUI owns the input buffer and cursor: printable
-    insert, backspace, left/right/home/end, and Enter to submit.
+    insert, backspace, left/right/home/end, Enter to submit, and Tab to complete
+    a partially-typed slash command (see specs/tui-slash-commands.yaml).
   - Streamed assistant text is buffered and flushed into scrollback ahead of
     the next discrete event (tool call/result, notice, verification, heal,
     summary, phase), so text emitted before a tool call is ordered above it.
@@ -72,7 +73,16 @@ constraints:
     call executes, run() calls the injected confirm(call); the TUI switches the
     input line to an approval prompt and the next y/n keypress resolves it.
     A denied command returns an error result to the model instead of running.
-  - Ctrl-C tears the session down cleanly (restores the terminal) and exits.
+  - Ctrl-C requires a confirming second press to quit, as insurance against an
+    accidental exit. A first press does not quit: while a run is active it
+    interrupts it (like /stop -- settling any pending command approval as denied
+    and aborting via the cancel path, specs/cancel.yaml), and either way it arms
+    a quit confirmation shown in the hint row ("press ctrl-c again to quit"). A
+    second Ctrl-C within a short window (quitConfirmMs, default 3000ms,
+    overridable) quits; any other key, or the window elapsing, stands the quit
+    down. This double-taps to quit even mid-run, so it stays an escape hatch,
+    while a stray single press never drops the session. Teardown is unchanged:
+    the terminal is restored on quit, SIGTERM, and uncaught errors.
 
 tests:
   unit:
@@ -92,6 +102,10 @@ tests:
     - renderFrame draws header, scrollback tail, input line, and hint within the given rows/cols
     - renderFrame shows the reverse-video caret at the input cursor position
     - renderFrame shows the approval prompt when approval mode is active
+    - setInput replaces the buffer and moves the cursor to the end
+    - setQuitPending arms and disarms the quit confirmation
+    - renderFrame shows the quit confirmation in the hint row when armed
+    - the quit confirmation outranks the command autocomplete in the hint row
     - the tui reporter routes tool calls, notices, and phase changes into the state
     - the tui reporter flushes buffered streamed text before a discrete event line
     - noteOnce reports a note as new the first time and seen thereafter

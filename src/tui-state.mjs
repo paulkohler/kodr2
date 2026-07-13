@@ -24,6 +24,7 @@
  * @property {number} tokensOut
  * @property {number} cost
  * @property {Set<string>} noticeSeen
+ * @property {boolean} quitPending
  */
 
 /**
@@ -52,6 +53,8 @@ export function createTuiState(init = {}) {
     // Notice texts already shown this session, so a note repeated on a later
     // turn (e.g. the context-window notice) isn't reprinted.
     noticeSeen: new Set(),
+    // True after a first Ctrl-C, while awaiting a confirming second press.
+    quitPending: false,
   };
 }
 
@@ -190,6 +193,17 @@ export function cursorEnd(state) {
 }
 
 /**
+ * Replace the whole input buffer, moving the cursor to the end. Used by Tab
+ * completion, which rewrites the input to the completed command.
+ * @param {TuiState} state
+ * @param {string} value
+ */
+export function setInput(state, value) {
+  state.input = value;
+  state.cursor = value.length;
+}
+
+/**
  * Return the current input and clear the buffer.
  * @param {TuiState} state
  * @returns {string}
@@ -254,6 +268,17 @@ export function setApproval(state, command) {
  */
 export function clearApproval(state) {
   state.approval = null;
+}
+
+/**
+ * Arm or disarm the quit confirmation. Set after a first Ctrl-C so the hint row
+ * prompts for a confirming second press (see specs/tui.yaml); cleared on the
+ * confirming press, on any other key, or when the window elapses.
+ * @param {TuiState} state
+ * @param {boolean} pending
+ */
+export function setQuitPending(state, pending) {
+  state.quitPending = pending;
 }
 
 function clamp(value, min, max) {

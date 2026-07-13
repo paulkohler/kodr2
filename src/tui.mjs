@@ -4,14 +4,23 @@
  *
  * Responsibilities: enter/leave the alternate screen, read raw keypresses,
  * drive one harness run() per turn (queuing follow-ups, never running two at
- * once), surface command-approval prompts, and always restore the terminal --
- * including before incident.mjs's crash-stack write, so a trace isn't lost
- * into the alt buffer.
+ * once), dispatch slash commands (src/tui-commands.mjs), surface
+ * command-approval prompts, and always restore the terminal -- including
+ * before incident.mjs's crash-stack write, so a trace isn't lost into the alt
+ * buffer.
  */
 
 import { emitKeypressEvents } from 'node:readline';
-import { formatNotice } from './format.mjs';
+import { formatDoctorReport, formatNotice } from './format.mjs';
+import { runDoctorChecks } from './doctor.mjs';
 import { run } from './harness.mjs';
+import { resolveProviderName } from './provider.mjs';
+import { runShell } from './shell.mjs';
+import {
+  PROMPT_ECHO,
+  completeCommand,
+  dispatchCommand,
+} from './tui-commands.mjs';
 import { renderFrame } from './tui-render.mjs';
 import { createTuiReporter } from './tui-reporter.mjs';
 import {
@@ -26,16 +35,30 @@ import {
   moveCursor,
   pushLine,
   setApproval,
+  setInput,
+  setQuitPending,
   setRunning,
   takeInput,
 } from './tui-state.mjs';
 
-const CARET = '\x1b[36m›\x1b[0m';
+const CARET = PROMPT_ECHO;
+
+// How long a first Ctrl-C waits for a confirming second press before standing
+// down. Overridable per session via options.quitConfirmMs.
+const QUIT_CONFIRM_MS = 3000;
+
+/**
+ * TUI options: everything run() takes, plus TUI-only settings consumed here and
+ * never forwarded to run().
+ * @typedef {import('./harness.mjs').RunOptions & {
+ *   quitConfirmMs?: number,
+ * }} TuiOptions
+ */
 
 /**
  * Run the interactive TUI. Resolves when the user quits.
  * @param {string} firstPrompt - Initial prompt (may be empty)
- * @param {import('./harness.mjs').RunOptions} options - The same options run() takes, plus approveCommands
+ * @param {TuiOptions} options - The same options run() takes, plus approveCommands and quitConfirmMs
  * @returns {Promise<void>}
  */
 export function runTui(firstPrompt, options) {
@@ -50,6 +73,24 @@ export function runTui(firstPrompt, options) {
   let approvalResolve = null;
   let cleaned = false;
   let resolveSession;
+  let currentAbort = null;
+  let quitTimer = null;
+  const quitConfirmMs = options.quitConfirmMs || QUIT_CONFIRM_MS;
+
+  // Live per-session config the slash commands read and mutate (see
+  // specs/tui-slash-commands.yaml). buildRunOptions() reads the mutable fields
+  // so /model, /test, /approve, and /reasoning take effect on the next turn.
+  const session = {
+    provider: resolveProviderName(options.provider),
+    model: options.model || state.model,
+    testCommand: options.testCommand,
+    approveCommands: Boolean(options.approveCommands),
+    reasoning: Boolean(options.reasoning),
+    reasoningSupported: resolveProviderName(options.provider) === 'openrouter',
+    contextWindow: options.contextWindow,
+    messages: options.priorMessages || [],
+    lastPrompt: null,
+  };
 
   function draw() {
     const rows = stdout.rows || 24;
@@ -81,25 +122,37 @@ export function runTui(firstPrompt, options) {
   function buildRunOptions() {
     return {
       ...options,
+      model: session.model,
+      testCommand: session.testCommand,
+      reasoning: session.reasoning,
       reporter,
       confirm,
-      approveCommands: options.approveCommands,
+      approveCommands: session.approveCommands,
       priorMessages: lastMessages,
       quiet: false,
+      signal: currentAbort.signal,
     };
   }
 
   async function startRun(prompt) {
     busy = true;
+    currentAbort = new AbortController();
     setRunning(state, true);
     pushLine(state, `${CARET} ${prompt}`);
+    // Remember the task prompt for /retry (but not the /compact meta-command,
+    // which isn't a task to re-run).
+    if (prompt !== '/compact') {
+      session.lastPrompt = prompt;
+    }
     requestRender();
     ticker = setInterval(requestRender, 1000);
     try {
       const result = await run(prompt, buildRunOptions());
       lastMessages = result.messages;
+      session.messages = result.messages || [];
       if (result.metadata?.model) {
         state.model = result.metadata.model;
+        session.model = result.metadata.model;
       }
     } catch (err) {
       pushLine(state, formatNotice(`run failed: ${err.message}`));
@@ -107,6 +160,7 @@ export function runTui(firstPrompt, options) {
       clearInterval(ticker);
       ticker = null;
       busy = false;
+      currentAbort = null;
       setRunning(state, false);
       requestRender();
       const queued = dequeue(state);
@@ -136,24 +190,144 @@ export function runTui(firstPrompt, options) {
     resolve({ approved });
   }
 
-  function onKey(str, key = {}) {
-    if (key.ctrl && key.name === 'c') {
+  // Ctrl-C no longer quits on the first press. A first press interrupts an
+  // active run (like /stop, settling any pending approval) and arms a quit
+  // confirmation; a second press within the window quits -- the escape hatch
+  // even mid-run. So a stray Ctrl-C never drops you out of the session.
+  function onCtrlC() {
+    if (state.quitPending) {
       quit();
       return;
+    }
+    if (busy) {
+      if (approvalResolve) {
+        resolveApproval(false);
+      }
+      if (currentAbort) {
+        currentAbort.abort();
+      }
+    }
+    armQuit();
+  }
+
+  function armQuit() {
+    setQuitPending(state, true);
+    requestRender();
+    if (quitTimer) {
+      clearTimeout(quitTimer);
+    }
+    quitTimer = setTimeout(standDownQuit, quitConfirmMs);
+  }
+
+  function standDownQuit() {
+    if (quitTimer) {
+      clearTimeout(quitTimer);
+      quitTimer = null;
+    }
+    setQuitPending(state, false);
+    requestRender();
+  }
+
+  function onKey(str, key = {}) {
+    if (key.ctrl && key.name === 'c') {
+      onCtrlC();
+      return;
+    }
+    // Any other key stands down a pending quit -- you changed your mind.
+    if (state.quitPending) {
+      standDownQuit();
     }
     if (state.approval) {
       handleApprovalKey(str, key);
       return;
     }
     if (key.name === 'return' || key.name === 'enter') {
-      const prompt = takeInput(state).trim();
+      const text = takeInput(state).trim();
       requestRender();
-      if (prompt) {
-        submit(prompt);
+      if (text) {
+        submitLine(text);
       }
       return;
     }
     handleEditKey(str, key);
+  }
+
+  // A slash command is dispatched locally (immediately, even mid-run, since it
+  // acts on the session, not the model); anything else is a prompt for the
+  // model -- including an unknown /word, which is never swallowed.
+  function submitLine(text) {
+    const outcome = dispatchCommand(text, state, session);
+    if (!outcome.handled) {
+      submit(text);
+      return;
+    }
+    applyEffect(outcome);
+    requestRender();
+  }
+
+  function applyEffect(outcome) {
+    if (outcome.effect === 'quit') {
+      quit();
+    } else if (outcome.effect === 'clear') {
+      lastMessages = null;
+    } else if (outcome.effect === 'cancel-run') {
+      if (currentAbort) {
+        currentAbort.abort();
+      }
+    } else if (outcome.effect === 'compact') {
+      startRun('/compact');
+    } else if (outcome.effect === 'start-run') {
+      // /retry re-runs the prompt fresh (no continuation), like `kodr replay`.
+      lastMessages = null;
+      startRun(outcome.prompt);
+    } else if (outcome.effect === 'diff') {
+      showDiff();
+    } else if (outcome.effect === 'doctor') {
+      showDoctor();
+    }
+  }
+
+  // Fire-and-forget from applyEffect, so both guard against a thrown error --
+  // an unhandled rejection while idle would trip onFatal and tear the session
+  // down. A failure just prints a notice instead.
+  async function showDiff() {
+    try {
+      const result = await runShell('git diff', options.cwd || '.', {
+        timeout: 10000,
+      });
+      const output = result.stdout.trim();
+      if (result.exitCode !== 0 && !output) {
+        pushLine(
+          state,
+          formatNotice(`git diff failed: ${result.stderr.trim()}`),
+        );
+      } else if (!output) {
+        pushLine(state, formatNotice('no changes'));
+      } else {
+        for (const line of output.split('\n')) {
+          pushLine(state, line);
+        }
+      }
+    } catch (err) {
+      pushLine(state, formatNotice(`git diff failed: ${err.message}`));
+    }
+    requestRender();
+  }
+
+  async function showDoctor() {
+    try {
+      const report = await runDoctorChecks({
+        provider: options.provider,
+        baseUrl: options.baseUrl,
+        model: session.model,
+      });
+      for (const line of formatDoctorReport(report).split('\n')) {
+        pushLine(state, line);
+      }
+    } catch (err) {
+      pushLine(state, formatNotice(`doctor failed: ${err.message}`));
+    }
+    requestRender();
   }
 
   function handleApprovalKey(str, key) {
@@ -172,7 +346,9 @@ export function runTui(firstPrompt, options) {
   }
 
   function handleEditKey(str, key) {
-    if (key.name === 'backspace') {
+    if (key.name === 'tab') {
+      completeInput();
+    } else if (key.name === 'backspace') {
       backspace(state);
     } else if (key.name === 'left') {
       moveCursor(state, -1);
@@ -190,6 +366,15 @@ export function runTui(firstPrompt, options) {
     requestRender();
   }
 
+  // Tab completes a partially-typed slash command in place (see
+  // src/tui-commands.mjs completeCommand); a no-op for anything else.
+  function completeInput() {
+    const completed = completeCommand(state.input);
+    if (completed !== state.input) {
+      setInput(state, completed);
+    }
+  }
+
   function cleanup() {
     if (cleaned) {
       return;
@@ -197,6 +382,9 @@ export function runTui(firstPrompt, options) {
     cleaned = true;
     if (ticker) {
       clearInterval(ticker);
+    }
+    if (quitTimer) {
+      clearTimeout(quitTimer);
     }
     // Settle a pending command approval as denied, so an in-flight run()'s
     // confirm() promise resolves instead of hanging when we tear down (e.g.
@@ -261,7 +449,7 @@ export function runTui(firstPrompt, options) {
   draw();
 
   if (firstPrompt?.trim()) {
-    submit(firstPrompt.trim());
+    submitLine(firstPrompt.trim());
   }
 
   return new Promise((resolve) => {

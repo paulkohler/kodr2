@@ -125,6 +125,50 @@ describe('renderFrame', () => {
     assert.ok(frame.includes('y: run'));
   });
 
+  it('turns the hint row into command suggestions while typing a slash', () => {
+    const state = createTuiState();
+    state.input = '/c';
+    state.cursor = 2;
+    const frame = renderFrame(state, size, 0);
+    assert.ok(frame.includes('/compact'), 'suggests /compact');
+    assert.ok(frame.includes('/clear'), 'suggests /clear');
+    assert.ok(!frame.includes('enter: send'), 'replaces the static hint');
+  });
+
+  it('caps overflowing suggestions with an ellipsis on one row', () => {
+    const state = createTuiState();
+    state.input = '/';
+    state.cursor = 1;
+    const frame = renderFrame(state, { rows: 10, cols: 24 }, 0);
+    assert.ok(frame.includes('…'), 'overflow is elided');
+  });
+
+  it('restores the static hint once the command word is settled', () => {
+    const state = createTuiState();
+    state.input = '/model gpt';
+    state.cursor = state.input.length;
+    const frame = renderFrame(state, size, 0);
+    assert.ok(frame.includes('enter: send'), 'argument typed -> static hint');
+  });
+
+  it('shows the quit confirmation in the hint row when armed', () => {
+    const state = createTuiState();
+    state.quitPending = true;
+    const frame = renderFrame(state, size, 0);
+    assert.ok(frame.includes('ctrl-c again'), 'prompts for a second ctrl-c');
+    assert.ok(!frame.includes('enter: send'), 'replaces the static hint');
+  });
+
+  it('the quit confirmation outranks the command autocomplete', () => {
+    const state = createTuiState();
+    state.input = '/c';
+    state.cursor = 2;
+    state.quitPending = true;
+    const frame = renderFrame(state, size, 0);
+    assert.ok(frame.includes('ctrl-c again'), 'warning wins over suggestions');
+    assert.ok(!frame.includes('/compact'), 'suggestions are suppressed');
+  });
+
   it('shows the current phase in the header while running', () => {
     const state = createTuiState();
     setRunning(state, true, 0);

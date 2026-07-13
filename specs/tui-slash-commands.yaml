@@ -1,0 +1,184 @@
+name: tui-slash-commands
+status: implemented
+description: >
+  Slash commands for the interactive TUI (specs/tui.yaml): meta-commands that
+  act on the session -- the conversation, the per-session config, the view --
+  rather than being sent to the model as a prompt. Before this, the TUI had
+  exactly one, `/compact`, and only because each TUI turn is a full run() and
+  the harness intercepts a `/compact` prompt before starting a task
+  (src/compact.mjs isCompactCommand). That was an accident of the run()
+  intercept, not a TUI feature.
+
+  This is a first-class slash-command layer owned by the TUI input loop
+  (src/tui-commands.mjs, pure; wired into src/tui.mjs). When the trimmed input
+  begins with `/` and its first word matches a known command, the TUI
+  dispatches it locally instead of calling submit(); an unknown `/word` is NOT
+  swallowed -- it is sent to the model as an ordinary prompt. dispatchCommand
+  is a pure function of (input, state, session): it echoes the command line,
+  mutates the render state (scrollback) and a small `session` config bag, and
+  returns an { handled, effect, prompt } outcome. The imperative shell performs
+  the effect (quit / clear / start-run / cancel-run / compact / diff / doctor);
+  the async ones (diff, doctor) shell out there, keeping the dispatcher free of
+  I/O so the whole set unit-tests without a terminal, mirroring the
+  tui-state / tui-render split.
+
+  A companion pure helper, matchCommands(input), powers a live autocomplete:
+  while the input is a partial `/word` with no argument yet, the TUI hint row
+  (src/tui-render.mjs) lists the primary command names still matching the
+  prefix, narrowing keystroke by keystroke and reverting to the static hint
+  once the word is settled (a space is typed) or nothing matches. It is purely
+  derived from the input -- no new state, no keypress handling -- so it is just
+  a render-time read.
+
+  Tab completion builds on the same matcher: completeCommand(input) rewrites a
+  partially-typed command in place. A unique match completes to the full command
+  with a trailing space (ready for an argument); several matches complete to the
+  longest prefix they share (which may leave the input unchanged, with the hint
+  row still listing the candidates); non-command input is untouched. The shell
+  (src/tui.mjs) binds Tab to it via setInput.
+
+inputs:
+  input:
+    type: string
+    description: >
+      The raw input-box contents at submit time. Treated as a slash command
+      only when trim() starts with `/` and the first whitespace-delimited word
+      is a known command name (case-insensitive). Everything after the command
+      word is the argument string.
+  state:
+    type: object
+    description: The TUI render state (see specs/tui.yaml); mutated in place.
+  session:
+    type: object
+    description: >
+      A live per-session config bag the shell owns and buildRunOptions() reads:
+      provider, model, testCommand, approveCommands, reasoning,
+      reasoningSupported, contextWindow, messages (for /history), and lastPrompt
+      (for /retry). Config commands mutate it so the change lands on the next
+      run.
+
+outputs:
+  handled:
+    type: boolean
+    description: >
+      True when the input was a recognized slash command and was dispatched
+      locally (so the TUI must not also submit() it as a prompt). False for a
+      non-command or an unknown `/word`.
+  effect:
+    type: string
+    description: >
+      What the dispatch asks the shell to do: none (state-only, just redraw),
+      quit, clear (drop the continuation), start-run (re-run a prompt), cancel-run
+      (abort the in-flight run), compact, diff, or doctor.
+  prompt:
+    type: string
+    description: For effect start-run, the prompt to (re-)run. Absent otherwise.
+
+constraints:
+  # Recognition and dispatch
+  - A slash command is recognized only when the trimmed input starts with `/`
+    and its first word is a known command; matching is case-insensitive. A bare
+    `/` is not a command.
+  - An unknown `/word` is NOT swallowed -- dispatchCommand returns handled=false
+    and the shell submits it to the model as a normal prompt. `/help` lists what
+    is actually recognized.
+  - Dispatch is a pure function of (input, state, session) returning
+    { handled, effect, prompt } -- no terminal or async I/O -- so it unit-tests
+    without a terminal.
+  - A recognized command is dispatched immediately, even while a run is active
+    (it is a session command, not a queued follow-up). Config commands that
+    would corrupt an in-flight run (/compact, /clear, /retry, /model, /test) are
+    rejected with a notice while busy; view/inspection and /stop work mid-run.
+  - A dispatched command echoes its own `>`-prefixed line into scrollback, like
+    a submitted prompt, so the transcript shows what was run.
+
+  # The command set (names, aliases, behavior)
+  - "/help (/?): list the recognized commands and one-line descriptions. Effect none."
+  - "/compact: compress the conversation into a summary and continue. Effect
+    compact -- the shell runs a /compact turn (the harness intercept). Rejected
+    while busy."
+  - "/clear (/new): drop the continuation so the next prompt starts a fresh
+    conversation (session.messages cleared, shell drops priorMessages). Effect
+    clear. Rejected while busy."
+  - "/retry: re-run the last task prompt fresh, with no continuation -- the
+    TUI-local equivalent of `kodr replay`. Effect start-run with the prompt. A
+    no-op notice when there is no prior prompt; rejected while busy."
+  - "/stop (/cancel): abort the in-flight run via the AbortSignal path
+    (specs/cancel.yaml) without leaving the TUI. Effect cancel-run while
+    running; a no-op notice when idle."
+  - "/model [id]: with no argument, print the current model; with an id, set the
+    model (session + header) for subsequent turns. Rejected while busy."
+  - "/provider: print the resolved provider. Print-only (switching provider
+    mid-session is out of scope)."
+  - "/context (/tokens): print the context window and the session's token
+    counts. Effect none."
+  - "/cost: print accumulated cost (real on OpenRouter; $0 on local). Effect none."
+  - "/diff: run `git diff` in the workspace and page the result into scrollback.
+    Effect diff (the shell runs git). Read-only."
+  - "/history (/messages): print a compact view of the conversation so far
+    (role and truncated content), omitting the system message. Effect none."
+  - "/test [command]: with no argument, print the current verify command; with
+    one, set it for subsequent turns. Rejected while busy."
+  - "/approve: toggle per-command approval (session.approveCommands). Effect none."
+  - "/reasoning: toggle reasoning tokens; a no-op with a notice when the
+    provider doesn't support it. Effect none."
+  - "/doctor: run the preflight checks (specs/doctor.yaml) and print the report
+    inline. Effect doctor (the shell runs the checks). Read-only."
+  - "/quit (/exit): leave the TUI cleanly -- the same teardown as Ctrl-C. Effect quit."
+
+  # Autocomplete hint
+  - matchCommands(input) returns the primary command names whose name begins
+    with the typed prefix, but only while the input is a bare-or-partial `/word`
+    with no argument (a space settles the word, so it returns nothing then).
+    Pure -- derived from the input alone, no state.
+  - Only primary names are suggested; aliases still dispatch when submitted but
+    are not advertised, keeping the one-row hint short.
+  - The suggestion list replaces the static hint row and fits one line: when the
+    matches overflow the width, as many as fit are shown, capped with a trailing
+    ` …`. When nothing matches, the static `enter: send · …` hint is shown.
+  - Tab completes the partial command: completeCommand(input) returns the sole
+    match plus a trailing space when exactly one matches, else the longest shared
+    prefix (possibly unchanged), else the input untouched for non-command text.
+    Pure, like matchCommands; the shell applies it to the input on the Tab key.
+
+  # Deferred
+  - "/memory (proposed in the first sketch) is deferred: applying proposed
+    memory notes reuses run-time context and the human-decision path
+    (specs/memory.yaml) that a between-turns command doesn't have cleanly today.
+    Revisit once memory review is factored out of the run loop."
+
+tests:
+  unit:
+    - parseCommand recognizes a known leading-slash word and splits off its argument
+    - parseCommand is case-insensitive on the command name
+    - parseCommand returns a non-command shape for non-slash input and a bare slash
+    - parseCommand leaves an empty argument when none is given
+    - dispatchCommand does not handle a non-command (falls through to a prompt submit)
+    - dispatchCommand does not handle an unknown /word
+    - a handled command echoes its own line into scrollback
+    - /help lists every recognized command
+    - /clear returns effect=clear when idle and is rejected while a run is active
+    - /retry with a prior prompt returns effect=start-run and the prompt to re-run
+    - /retry with no prior prompt is a no-op with a notice
+    - /stop returns effect=cancel-run when running and a no-op notice when idle
+    - /model with no argument prints the current model; with an id sets it (when idle)
+    - /model is rejected with a notice while a run is active
+    - /context prints the window and current token counts
+    - /cost prints the accumulated cost
+    - /approve toggles approveCommands and reflects the new state in the notice
+    - /reasoning toggles when supported and notes when the provider does not support it
+    - /test with no argument prints the command; with one sets it (when idle)
+    - /history prints a compact conversation view (omitting system) or notes when empty
+    - /diff and /doctor defer to the shell via their effect
+    - /compact returns effect=compact when idle
+    - /quit returns effect=quit
+    - matchCommands returns every primary name for a bare slash
+    - matchCommands narrows to the primary names sharing the typed prefix, case-insensitively
+    - matchCommands returns nothing once a space begins the argument, for non-command input, or an unmatched prefix
+    - matchCommands advertises only primary names, not aliases
+    - the hint row renders matching command names while a slash command is being typed
+    - an overflowing suggestion list is capped with an ellipsis on one row
+    - the static hint returns once the command word is settled
+    - completeCommand completes a unique match to the full command with a trailing space
+    - completeCommand completes to the longest prefix several matches share
+    - completeCommand leaves non-command or unmatched input unchanged
