@@ -1,0 +1,164 @@
+name: goal
+status: proposed
+description: >
+  An evaluator loop: iterate run() until a model judge confirms a natural-language
+  goal is met, or a cap (max attempts) is hit. `kodr goal "<goal>"`. This is the
+  outer loop the harness otherwise leaves to a shell script (see examples/loop.sh),
+  but with a *fuzzy* stop condition a shell test command can't express — "the docs
+  read clearly", "the option is documented and tested" — judged by a model instead
+  of an exit code.
+
+  It is distinct from the two checks Kodr already has, and composes both. verify
+  (specs/verification.yaml) is a deterministic per-run test gate; review
+  (specs/review.yaml) is a one-shot post-build critique. Neither *drives
+  iteration*. goal wraps run() so the test command stays the hard gate inside each
+  build (with its own heal loop), the judge is the soft goal gate between builds,
+  and continuation (specs/continuation.yaml) carries progress from one attempt to
+  the next by replaying the prior transcript plus the judge's feedback.
+
+  The judge borrows the review pass's hard-won anti-hallucination stance: it is
+  read-only (it can never touch the workspace) and grounded (a verdict reached
+  without inspecting any files is not trusted). Here the stakes are higher than in
+  review — a fabricated "met" would end the loop early — so an ungrounded "met"
+  never stops the loop on its own.
+
+inputs:
+  goal:
+    type: string
+    required: true
+    description: The success criterion in natural language (the CLI's goal text)
+  options:
+    type: object
+    required: true
+    description: >
+      The same options run() takes (cwd, provider, model, testCommand,
+      maxToolTurns, maxRunMs, memory, etc.). Each attempt is one run() with these.
+  maxAttempts:
+    type: number
+    required: false
+    description: >
+      Cap on build+judge iterations (default 3 — KODR_GOAL_MAX_ATTEMPTS, CLI
+      --max-attempts). The loop's coarse budget; each run() still honors its own
+      maxRunMs.
+  judgeMinToolCalls:
+    type: number
+    required: false
+    description: >
+      Tool-call floor before a judge verdict is trusted as grounded (default 1 —
+      KODR_GOAL_JUDGE_MIN_TOOL_CALLS; 0 disables the floor). Mirrors the review
+      pass's minToolCalls.
+  judgeMaxToolTurns:
+    type: number
+    required: false
+    description: >
+      Tool-turn ceiling per judge assessment (default 12 —
+      KODR_GOAL_JUDGE_MAX_TOOL_TURNS)
+
+outputs:
+  met:
+    type: boolean
+    description: Whether the goal was confirmed met by a grounded judge verdict
+  reason:
+    type: string
+    description: >
+      Why the loop stopped: "met", "exhausted" (hit maxAttempts unmet), "stalled"
+      (two consecutive attempts changed no files), or "build-error" (a build
+      attempt ended in stoppedReason "error")
+  attempts:
+    type: number
+    description: Number of build+judge iterations actually run
+  verdicts:
+    type: array
+    description: One per attempt — { met, grounded, feedback, toolTurns, usage, retries }
+  lastResult:
+    type: object
+    description: The final attempt's RunResult (its stoppedReason, verification, filesChanged, response)
+  usage:
+    type: object
+    description: "{ prompt, completion, cost } summed across every build and judge call"
+  retries:
+    type: number
+    description: Retried model requests summed across every build and judge call
+
+constraints:
+  - Each attempt is one full run() (build + test/heal), then one judge assessment.
+    The loop stops as soon as a judge verdict is both met and grounded.
+  - The judge is read-only — its tool registry is restricted to read_file,
+    list_files, and search (never write_file, edit_file, or run_command), exactly
+    like the review pass. A verdict can only decide whether the loop continues,
+    never change the code.
+  - The judge is grounded — a verdict reached in fewer than judgeMinToolCalls tool
+    calls is treated as not-yet-trusted and never stops the loop on its own. On a
+    non-final attempt the loop continues; on the final attempt an ungrounded "met"
+    is preserved in the verdict but the overall result is met:false, never silently
+    upgraded. This is the review spec's grounding guard applied to a stop decision,
+    where a fabricated "met" is costlier because it would end the loop early.
+  - Verdict parsing is defensive — the judge must end with an explicit
+    `VERDICT: MET` or `VERDICT: NOT MET` line; a missing, garbled, or truncated
+    verdict parses as not met, so a broken reply is never read as success. The
+    feedback is the judge's reply text with the verdict line removed.
+  - Retry continuation — attempt k>1 runs run() with priorMessages and
+    priorFilesChanged from attempt k-1's result and a prompt that frames the prior
+    judge's feedback ("the goal is not yet met … continue"). The same continuation
+    the CLI's --continue uses.
+  - Convergence guard — two consecutive attempts that change no files stop the loop
+    with reason "stalled" instead of spending the remaining attempts thrashing. The
+    cross-run sibling of noOpCompletion; logged via a notice, never silent.
+  - A build attempt whose stoppedReason is "error" stops the loop with reason
+    "build-error" — a crashing backend is not fixed by another attempt. A
+    tool-limit or budget-exceeded build is still judged, since it may hold partial
+    progress worth assessing.
+  - In P0 the judge runs on the same model as the build (a dedicated read-only
+    client on the same provider/model). Cross-model judging — a stronger judge than
+    the builder, loaded/verified via lms.mjs like reviewModel — is a future
+    enhancement, deferred to avoid thrashing LM Studio's model load on every
+    attempt.
+  - Orchestration (runGoal) is pure and injectable — the per-attempt build (a
+    runTask callback) and the judge (an evaluate callback) are injected
+    collaborators, so the loop control (attempt capping, stall detection, verdict
+    routing, ungrounded handling) is unit-tested without a model. The model-backed
+    judge (evaluateGoal) is a scripted-client unit test plus an eval.
+  - CLI — `kodr goal "<goal>" [--test cmd] [--max-attempts n]` and the shared
+    provider/model/budget flags. --json prints the goal-result summary; the process
+    exits 0 iff the goal was met, unless --no-fail is set. Reuses run()'s option
+    surface.
+  - Zero runtime dependencies. No ternaries in branch logic; errors at module
+    boundaries are returned values.
+
+tests:
+  unit:
+    - parseVerdict reads "VERDICT: MET" as met
+    - parseVerdict reads "VERDICT: NOT MET" as not met
+    - parseVerdict treats a missing or garbled verdict as not met, never a false success
+    - parseVerdict returns the reply text with the verdict line stripped as feedback
+    - goalMaxAttempts resolves option, then KODR_GOAL_MAX_ATTEMPTS, then the default
+    - judgeMinToolCalls resolves option, then KODR_GOAL_JUDGE_MIN_TOOL_CALLS, then the default
+    - judgeMaxToolTurns resolves option, then KODR_GOAL_JUDGE_MAX_TOOL_TURNS, then the default
+    - runGoal stops on the first met-and-grounded verdict and reports reason "met"
+    - runGoal retries with continuation carrying the prior judge's feedback when not met
+    - runGoal caps at maxAttempts and reports reason "exhausted"
+    - runGoal does not stop on an ungrounded "met" verdict, it keeps iterating
+    - runGoal preserves an ungrounded final verdict but reports the overall result met:false
+    - runGoal stops with reason "stalled" after two consecutive no-file-change attempts
+    - runGoal stops with reason "build-error" without judging when a build attempt errors
+    - runGoal sums build and judge usage and retries
+    - evaluateGoal runs a read-only tool loop and parses the verdict from the final turn
+    - evaluateGoal marks a zero-tool-call verdict ungrounded
+    - evaluateGoal restricts the tool registry so write_file/edit_file/run_command are unavailable
+    - the judge system prompt states the read-only tool set, the verdict format, and grounding
+    - summarizeGoalResult produces a compact machine-readable summary
+    - parseArgs parses the goal subcommand, the goal text, and --max-attempts
+  eval:
+    - a goal that needs two attempts converges — the second build acts on the judge's
+      feedback and the judge then reports MET
+
+future:
+  - Cross-model judging — a stronger judge model than the builder, loaded and
+    verified via lms.mjs (specs/lms.yaml) like reviewModel, with the load amortized
+    across attempts rather than swapped every iteration.
+  - Feed a parked goal's final judge feedback into MEMORY.md as a durable lesson
+    (specs/memory.yaml), so the next session starts knowing why it stalled.
+  - A `kodr loop` driver that runs `kodr goal` per task over an arena-style task
+    queue (the { name, prompt, verify } schema in specs/harness-arena.yaml).
+  - An aggregate wall-clock / token budget across the whole loop, beyond the
+    attempt cap and each run()'s own maxRunMs.
