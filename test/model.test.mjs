@@ -547,6 +547,17 @@ describe('model HTTP client', () => {
     );
   });
 
+  it('caps a per-call timeoutMs to the client ceiling — a larger value cannot exceed it', async () => {
+    // The client timeout is a hard per-request ceiling: a per-call timeoutMs can
+    // only shorten it, so 5000ms against a 20ms ceiling still fires at 20ms.
+    const baseUrl = await startServer(() => {});
+    const client = createClient({ baseUrl, model: 'test', timeout: 20 });
+    await assert.rejects(
+      client.chat({ messages: [], timeoutMs: 5000 }),
+      /timed out after 20ms/i,
+    );
+  });
+
   it('calls onHeartbeat on an interval while a chat request is in flight', async () => {
     const baseUrl = await startServer((_req, res) => {
       setTimeout(() => {

@@ -167,6 +167,15 @@ describe('parseArgs', () => {
     assert.equal(args.maxToolTurns, 20);
   });
 
+  it('parses --request-timeout-ms, defaulting to null so the env var still applies', () => {
+    assert.equal(
+      parseArgs(['run', 'hi', '--request-timeout-ms', '180000'])
+        .requestTimeoutMs,
+      180000,
+    );
+    assert.equal(parseArgs(['run', 'hi']).requestTimeoutMs, null);
+  });
+
   it('parses --heartbeat-ms flag', () => {
     const args = parseArgs(['run', 'hi', '--heartbeat-ms', '5000']);
     assert.equal(args.heartbeatMs, 5000);

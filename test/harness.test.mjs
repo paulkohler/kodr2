@@ -9,11 +9,13 @@ import {
   createRunRecord,
   DEFAULT_HEAL_RESERVE,
   DEFAULT_HEARTBEAT_MS,
+  DEFAULT_REQUEST_TIMEOUT_MS,
   healReserveFraction,
   heartbeatIntervalMs,
   isRunBudgetExceeded,
   modelMaxRetries,
   remainingRunBudgetMs,
+  resolveRequestTimeoutMs,
   reviewSkippedForIncompleteBuild,
   run,
   runReviewPass,
@@ -130,6 +132,48 @@ describe('toLocalIso', () => {
       /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2}$/,
     );
     assert.equal(new Date(local).getTime(), new Date(utc).getTime());
+  });
+});
+
+describe('resolveRequestTimeoutMs', () => {
+  const envKey = 'KODR_REQUEST_TIMEOUT_MS';
+  let original;
+  afterEach(() => {
+    if (original === undefined) {
+      delete process.env[envKey];
+    } else {
+      process.env[envKey] = original;
+    }
+  });
+  const stashAndSet = (value) => {
+    original = process.env[envKey];
+    if (value === undefined) {
+      delete process.env[envKey];
+    } else {
+      process.env[envKey] = value;
+    }
+  };
+
+  it('prefers an explicit option', () => {
+    stashAndSet('120000');
+    assert.equal(resolveRequestTimeoutMs(300000), 300000);
+  });
+  it('falls back to KODR_REQUEST_TIMEOUT_MS', () => {
+    stashAndSet('120000');
+    assert.equal(resolveRequestTimeoutMs(undefined), 120000);
+  });
+  it('falls back to the default (10 minutes) when neither is set', () => {
+    stashAndSet(undefined);
+    assert.equal(
+      resolveRequestTimeoutMs(undefined),
+      DEFAULT_REQUEST_TIMEOUT_MS,
+    );
+    assert.equal(DEFAULT_REQUEST_TIMEOUT_MS, 600_000);
+  });
+  it('ignores a non-positive option (no "disable"; a request must have a timeout)', () => {
+    stashAndSet(undefined);
+    assert.equal(resolveRequestTimeoutMs(0), DEFAULT_REQUEST_TIMEOUT_MS);
+    assert.equal(resolveRequestTimeoutMs(-5), DEFAULT_REQUEST_TIMEOUT_MS);
   });
 });
 

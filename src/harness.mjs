@@ -126,6 +126,9 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  * @param {string} [options.testCommand] - Verification command
  * @param {number} [options.maxHealTurns] - Max heal turns (default 3)
  * @param {number} [options.maxRunMs] - Stop between turns after this many ms (0 disables)
+ * @param {number} [options.requestTimeoutMs] - Hard per-request timeout ceiling,
+ *   independent of maxRunMs, so a stalled backend fails one request instead of
+ *   hanging (default 10 minutes; positive only, also KODR_REQUEST_TIMEOUT_MS)
  * @param {boolean} [options.quiet] - Suppress terminal output
  * @param {import('./reporter.mjs').Reporter} [options.reporter] - Output channel
  *   (see specs/reporter.yaml). Defaults to a terminal reporter, or a null
@@ -246,7 +249,9 @@ export async function run(prompt, options) {
       provider: options.provider,
       baseUrl: options.baseUrl,
       model: options.model,
-      timeout: maxRunMs || undefined,
+      // A hard per-request ceiling; the run budget (maxRunMs) still shortens a
+      // near-deadline request via the per-call timeoutMs the loop passes.
+      timeout: resolveRequestTimeoutMs(options.requestTimeoutMs),
       maxRetries: modelMaxRetries(options.maxRetries),
       reasoning: options.reasoning,
       noZdr: options.noZdr,
@@ -853,6 +858,30 @@ export function modelMaxRetries(option) {
     return fromEnv;
   }
   return DEFAULT_MAX_RETRIES;
+}
+
+export const DEFAULT_REQUEST_TIMEOUT_MS = 600_000; // 10 minutes
+
+/**
+ * Per-request timeout ceiling, independent of the whole-run budget (maxRunMs):
+ * bounds any single model request so a stalled local backend fails that request
+ * instead of hanging for the full default. The run budget can only make a given
+ * request's timeout shorter, never longer. Resolved from an explicit option,
+ * then KODR_REQUEST_TIMEOUT_MS, then the default (10 minutes). Must be positive
+ * -- there is no "disable" (a request with no timeout could hang forever); set
+ * a large value to effectively lift the cap.
+ * @param {number} [option]
+ * @returns {number}
+ */
+export function resolveRequestTimeoutMs(option) {
+  if (Number.isInteger(option) && option > 0) {
+    return option;
+  }
+  const fromEnv = Number.parseInt(process.env.KODR_REQUEST_TIMEOUT_MS, 10);
+  if (Number.isInteger(fromEnv) && fromEnv > 0) {
+    return fromEnv;
+  }
+  return DEFAULT_REQUEST_TIMEOUT_MS;
 }
 
 export const DEFAULT_HEAL_RESERVE = 0.25;

@@ -105,6 +105,17 @@ constraints:
   - The main run and the heal pass share one tool loop, limited to maxToolTurns (default 20, --max-tool-turns) to prevent runaway
   - Optional maxRunMs stops between turns, caps tool and verification command timeouts, before healing, and during healing when the budget is exceeded
   - Each model request is capped to the run's *remaining* budget (not a fresh maxRunMs-length timeout every turn), so a request started near the deadline cannot itself outlive it
+  - >
+    A hard per-request timeout ceiling (requestTimeoutMs, default 600,000ms =
+    10 minutes, --request-timeout-ms / KODR_REQUEST_TIMEOUT_MS, positive only)
+    bounds *any single* model request, independent of maxRunMs. It is the
+    client's configured timeout; the per-call remaining-budget timeout can only
+    make a given request shorter, never longer, so with no run budget
+    (maxRunMs 0) a stalled local backend fails that one request at the ceiling
+    instead of hanging for the whole default -- and even under a large run
+    budget no single request exceeds the ceiling. A ceiling timeout is a
+    genuine error (the request stalled), distinct from cleanly running out of
+    run budget (budget-exceeded).
   - When such a near-deadline request times out *because* it was capped to the last of the run budget (the budget is exceeded by the time it throws), the tool loop reports stoppedReason "budget-exceeded" rather than a hard "error" -- the run merely ran out of wall-clock. A timeout with no run budget (or budget still remaining) is still a genuine error
   - Retries used by every model request in the run (main loop, compaction, heal, review, memory) are summed into a single retries count on the result, the --json summary, and the saved run record
   - When maxRunMs is set, the initial verification is capped to hold back a heal reserve (KODR_HEAL_RESERVE / healReserve option, default 0.25) so a hanging Stop hook cannot starve the heal pass
@@ -183,6 +194,8 @@ tests:
     - remaining run budget can be used as a command timeout
     - each model request is capped to the remaining run budget, not a fresh full-length timeout
     - model client honors a per-call timeoutMs override, falling back to its configured default
+    - the client timeout is a hard ceiling: a per-call timeoutMs larger than it cannot exceed it
+    - resolveRequestTimeoutMs resolves option, then KODR_REQUEST_TIMEOUT_MS, then the 10-minute default, ignoring non-positive values
     - a custom maxToolTurns overrides the default tool-turn ceiling
     - CLI --max-tool-turns is parsed and validated as a positive integer
     - CLI --heartbeat-ms is parsed and defaults to 30,000

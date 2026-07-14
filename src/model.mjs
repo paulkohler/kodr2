@@ -60,10 +60,12 @@ export function createClient(options = {}) {
    * @param {Array} [params.tools] - Tool definitions
    * @param {function} [params.onToken] - Called with each text token
    * @param {function} [params.onToolCall] - Called when a tool call starts
-   * @param {number} [params.timeoutMs] - Per-call timeout override (e.g. the
-   *   run's remaining budget), so a request started near the run deadline
-   *   doesn't get a fresh full-length timeout. Falls back to the client's
-   *   configured timeout when omitted.
+   * @param {number} [params.timeoutMs] - Per-call timeout (e.g. the run's
+   *   remaining budget), so a request started near the run deadline doesn't get
+   *   a fresh full-length timeout. It can only make the request's timeout
+   *   SHORTER than the client's configured ceiling, never longer -- so a
+   *   configured request-timeout cap bounds every request even under a large run
+   *   budget. Falls back to the client's configured timeout when omitted.
    * @param {number} [params.heartbeatMs] - Interval for onHeartbeat "still
    *   waiting" notices while a request is in flight (0 or omitted disables).
    *   A large prompt can spend minutes in prefill before the first token
@@ -97,7 +99,13 @@ export function createClient(options = {}) {
       }));
     }
 
-    const callTimeout = params.timeoutMs ?? timeout;
+    // The client's `timeout` is a hard per-request ceiling; a per-call
+    // timeoutMs (the run's remaining budget) can only shorten it, never exceed
+    // it, so a stalled request can't outlive the configured request-timeout cap.
+    let callTimeout = timeout;
+    if (params.timeoutMs != null) {
+      callTimeout = Math.min(params.timeoutMs, timeout);
+    }
     return streamRequestWithRetry(
       `${baseUrl}/chat/completions`,
       body,

@@ -19,7 +19,12 @@ import {
   runGoal,
   summarizeGoalResult,
 } from './goal.mjs';
-import { DEFAULT_HEARTBEAT_MS, resolveRunsDir, run } from './harness.mjs';
+import {
+  DEFAULT_HEARTBEAT_MS,
+  resolveRequestTimeoutMs,
+  resolveRunsDir,
+  run,
+} from './harness.mjs';
 import { DEFAULT_INCIDENT_HEARTBEAT_MS } from './incident.mjs';
 import { DEFAULT_MAX_RETRIES } from './model.mjs';
 import { createProvider, resolveProviderName } from './provider.mjs';
@@ -53,6 +58,7 @@ import { MAX_TOOL_TURNS } from './tool-loop.mjs';
  * @property {number} maxRunMs
  * @property {number} maxToolTurns
  * @property {number|null} maxRepeatToolErrors
+ * @property {number|null} requestTimeoutMs
  * @property {number} maxAttempts
  * @property {number} heartbeatMs
  * @property {number} incidentHeartbeatMs
@@ -171,6 +177,14 @@ export async function main(argv) {
     process.exitCode = 1;
     return;
   }
+  if (
+    args.requestTimeoutMs !== null &&
+    (!Number.isInteger(args.requestTimeoutMs) || args.requestTimeoutMs < 1)
+  ) {
+    process.stderr.write('--request-timeout-ms must be a positive integer.\n');
+    process.exitCode = 1;
+    return;
+  }
   if (!Number.isInteger(args.heartbeatMs) || args.heartbeatMs < 0) {
     process.stderr.write('--heartbeat-ms must be a non-negative integer.\n');
     process.exitCode = 1;
@@ -262,6 +276,7 @@ export async function main(argv) {
     maxRunMs: args.maxRunMs,
     maxToolTurns: args.maxToolTurns,
     maxRepeatToolErrors: args.maxRepeatToolErrors,
+    requestTimeoutMs: args.requestTimeoutMs,
     heartbeatMs: args.heartbeatMs,
     incidentHeartbeatMs: args.incidentHeartbeatMs,
     maxRetries: args.modelRetries,
@@ -528,6 +543,9 @@ export function parseArgs(argv) {
     // reaches the resolver when the flag isn't passed -- a numeric default here
     // would always win over it (see maxRepeatToolErrors in tool-loop.mjs).
     maxRepeatToolErrors: null,
+    // null so KODR_REQUEST_TIMEOUT_MS still reaches the resolver when the flag
+    // isn't passed (same reasoning as maxRepeatToolErrors above).
+    requestTimeoutMs: null,
     maxAttempts: DEFAULT_MAX_ATTEMPTS,
     heartbeatMs: DEFAULT_HEARTBEAT_MS,
     incidentHeartbeatMs: DEFAULT_INCIDENT_HEARTBEAT_MS,
@@ -652,6 +670,11 @@ export function parseArgs(argv) {
     }
     if (arg === '--max-repeat-tool-errors' && argv[i + 1]) {
       args.maxRepeatToolErrors = parseInt(argv[++i], 10);
+      i++;
+      continue;
+    }
+    if (arg === '--request-timeout-ms' && argv[i + 1]) {
+      args.requestTimeoutMs = parseInt(argv[++i], 10);
       i++;
       continue;
     }
@@ -860,6 +883,9 @@ Options:
   --max-tool-turns <n>            Tool-turn ceiling per loop (default: 20)
   --max-repeat-tool-errors <n>    Stop after the same tool call fails this many times in a
                                   row (default: 3, or KODR_MAX_REPEAT_TOOL_ERRORS; 0 disables)
+  --request-timeout-ms <n>        Hard per-request timeout ceiling, independent of --max-run-ms,
+                                  so a stalled backend fails one request instead of hanging
+                                  (default: 600000 = 10 min, or KODR_REQUEST_TIMEOUT_MS)
   --max-attempts <n>              For 'kodr goal': cap on build+judge iterations (default: 3,
                                   or KODR_GOAL_MAX_ATTEMPTS)
   --heartbeat-ms <n>              Stop-hook "still running" notice interval (or KODR_HEARTBEAT_MS; default: 30000, 0 disables)
@@ -1109,6 +1135,7 @@ export async function runGoalCommand(args) {
     maxRunMs: args.maxRunMs,
     maxToolTurns: args.maxToolTurns,
     maxRepeatToolErrors: args.maxRepeatToolErrors,
+    requestTimeoutMs: args.requestTimeoutMs,
     heartbeatMs: args.heartbeatMs,
     incidentHeartbeatMs: args.incidentHeartbeatMs,
     maxRetries: args.modelRetries,
@@ -1134,7 +1161,7 @@ export async function runGoalCommand(args) {
       provider: args.provider,
       baseUrl: args.baseUrl,
       model: args.model,
-      timeout: args.maxRunMs || undefined,
+      timeout: resolveRequestTimeoutMs(args.requestTimeoutMs),
       maxRetries: args.modelRetries,
       reasoning: args.reasoning,
       noZdr: args.openrouterNoZdr,
@@ -1243,6 +1270,7 @@ export async function runAcpCommand(args) {
     maxRunMs: args.maxRunMs,
     maxToolTurns: args.maxToolTurns,
     maxRepeatToolErrors: args.maxRepeatToolErrors,
+    requestTimeoutMs: args.requestTimeoutMs,
     heartbeatMs: args.heartbeatMs,
     incidentHeartbeatMs: args.incidentHeartbeatMs,
     maxRetries: args.modelRetries,

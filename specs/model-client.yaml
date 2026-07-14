@@ -82,7 +82,7 @@ constraints:
     even one that only sends `[DONE]`) is unaffected
   - Timeout applies to the full request lifecycle, even when streaming chunks keep arriving
   - A request timeout is thrown as an Error tagged with code 'ETIMEDOUT' (recognized by isTimeoutError), so a caller can distinguish a timeout from any other failure without matching on the message text -- e.g. to treat a timeout caused by the run's own remaining-budget cap as a clean budget-exceeded stop rather than a hard error
-  - chat() accepts a per-call timeoutMs that overrides the client's configured default timeout, so a caller tracking a wall-clock budget (e.g. the harness's maxRunMs) can cap each request to the time actually remaining
+  - chat() treats the client's configured timeout as a hard per-request ceiling: a per-call timeoutMs can only shorten a request below it, never lengthen it. So a caller tracking a wall-clock budget (e.g. the harness's maxRunMs) caps each request to the time actually remaining, while the client timeout still bounds any single request regardless of the budget
   - chat() retries a 5xx response, or an ECONNRESET/EPIPE connection error, up to maxRetries times (default 1) before surfacing the error; a 4xx, ECONNREFUSED, or a timeout is never retried
   - Each retry reuses the same request body and timeout; a run's remaining budget is not recomputed per attempt, so callers with a tight maxRunMs and a high maxRetries could in the worst case spend roughly (maxRetries + 1) x timeout on one chat() call -- the default of 1 keeps that bounded to 2x
   - chat() accepts optional heartbeatMs/onHeartbeat: while a request is in flight, onHeartbeat(elapsedMs) fires on that interval until the request settles (0 or omitted disables it). A large prompt can spend minutes in prefill before the first streamed token, which is otherwise indistinguishable from a hung request to anything watching for output; each retry attempt restarts its own heartbeat timer from zero
@@ -115,8 +115,9 @@ tests:
     - HTTP errors from model listing and chat are surfaced
     - stalled requests time out
     - long streaming requests time out even when chunks arrive
-    - a per-call timeoutMs overrides the client default
+    - a per-call timeoutMs tighter than the client default is honored
     - omitting timeoutMs falls back to the client default
+    - the client timeout is a hard ceiling: a per-call timeoutMs larger than it cannot exceed it
     - isRetryableServerError is true for a 5xx error
     - isRetryableServerError is false for a 4xx error
     - isRetryableServerError is false for a non-HTTP error (e.g. a timeout)
