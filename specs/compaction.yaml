@@ -88,6 +88,13 @@ constraints:
     so no assistant tool_call is left without its matching tool result
   - Auto-compaction is checked between tool turns, after the turn's results
     are appended, using the most recent request's prompt-token count
+  - Auto-compaction is also checked once before the loop's first request,
+    against a chars/token estimate of the seeded conversation -- a
+    continuation or a goal-loop retry (see specs/goal.yaml) carries the
+    entire prior transcript forward as priorMessages with no trimming in
+    between, so it can already be oversized before this loop ever sends its
+    own first request. Waiting for a turn to complete to check would mean
+    that first (possibly oversized) request already went out uncompacted
   - When the provider does not report prompt-token usage (e.g. Ollama's /v1
     endpoint reports none), the turn falls back to a chars/token estimate of
     the message history (estimateTokens, ratio overridable) so compaction can
@@ -108,6 +115,13 @@ constraints:
     reports no loaded context length
   - The resolved context window is recorded in run metadata and the number of
     compactions in the run record
+  - renderTranscript collapses an assistant turn (its tool calls plus the tool
+    results answering them) to one rendered instance plus a repeat count when
+    it is byte-identical to the immediately preceding turn -- e.g. the same
+    failing call retried unchanged. Errors are not dropped outright: the one
+    instance kept still shows what was tried and how it failed, which is the
+    signal a summary needs to warn against repeating; only the redundant
+    repeats of that same text are elided
 
 tests:
   unit:
@@ -134,6 +148,9 @@ tests:
     - tool loop adds the compaction summary call's retries to the run total
     - tool loop forwards heartbeatMs and onHeartbeat to the compaction summary call
     - tool loop does not compact when below the threshold
+    - tool loop compacts a conversation seeded already over threshold, before the first turn
+    - renderTranscript collapses a repeated identical failing call to one instance plus a count
+    - renderTranscript does not collapse two different tool calls or results
     - isCompactCommand recognizes "/compact"
     - configuredContextWindow reads an explicit value and the env var, else null
     - pickLoadedContextLength selects the model's loaded length, else null

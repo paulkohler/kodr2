@@ -149,6 +149,15 @@ export function isCompactCommand(prompt) {
  * a pathologically large task prompt can't alone push the summarize request
  * back over the window. Every other message -- later user turns, assistant
  * text, tool call arguments, and tool results -- is truncated to `maxChars`.
+ *
+ * An assistant turn (its tool calls plus the tool results that answer them) is
+ * collapsed to a single instance plus a repeat count when it renders
+ * byte-identical to the immediately preceding turn -- e.g. the same failing
+ * call retried unchanged, or the same read repeated to recheck state. This
+ * keeps the "this was tried and failed" signal (unlike dropping errors
+ * outright, which would erase the one thing a summary needs to warn against
+ * repeating) while not burning summarize-request budget re-rendering the same
+ * text over and over.
  * @param {Array} messages
  * @param {number} [maxChars] - Per-message cap for non-task content
  * @param {number} [taskMaxChars] - Cap for the first user (task) message
@@ -161,16 +170,40 @@ export function renderTranscript(
 ) {
   const lines = [];
   let taskSeen = false;
-  for (const message of messages) {
+  let lastTurnText = null;
+  let identicalRepeats = 0;
+
+  function flushRepeats() {
+    if (identicalRepeats > 0) {
+      let suffix = 's';
+      if (identicalRepeats === 1) {
+        suffix = '';
+      }
+      lines.push(
+        `(same tool call and result repeated identically ${identicalRepeats} more time${suffix})`,
+      );
+      identicalRepeats = 0;
+    }
+  }
+
+  let i = 0;
+  while (i < messages.length) {
+    const message = messages[i];
+
     if (message.role === 'system') {
+      i++;
       continue;
     }
+
     if (message.role === 'user') {
+      flushRepeats();
+      lastTurnText = null;
       // An image user message (from view_image) has array content, not a
       // string -- render a compact placeholder instead of truncating it.
       if (Array.isArray(message.content)) {
         lines.push(`User:\n${imagePlaceholder(message.content)}`);
         taskSeen = true;
+        i++;
         continue;
       }
       const content = message.content || '';
@@ -182,18 +215,53 @@ export function renderTranscript(
       }
       lines.push(`User:\n${rendered}`);
       taskSeen = true;
-    } else if (message.role === 'assistant') {
+      i++;
+      continue;
+    }
+
+    if (message.role === 'assistant') {
+      const turnLines = [];
       if (message.content) {
-        lines.push(`Assistant:\n${truncate(message.content, maxChars)}`);
+        turnLines.push(`Assistant:\n${truncate(message.content, maxChars)}`);
       }
       for (const call of message.tool_calls || []) {
         const args = truncate(call.function.arguments || '', maxChars);
-        lines.push(`Assistant called ${call.function.name}(${args})`);
+        turnLines.push(`Assistant called ${call.function.name}(${args})`);
       }
-    } else if (message.role === 'tool') {
-      lines.push(`Tool result:\n${truncate(message.content || '', maxChars)}`);
+      i++;
+      // The tool results answering this turn's calls immediately follow it --
+      // fold them into the same turn so a retried call and its (also
+      // repeated) result collapse together, not as two independent lines.
+      while (i < messages.length && messages[i].role === 'tool') {
+        turnLines.push(
+          `Tool result:\n${truncate(messages[i].content || '', maxChars)}`,
+        );
+        i++;
+      }
+      if (turnLines.length === 0) {
+        continue;
+      }
+      const turnText = turnLines.join('\n\n');
+      if (turnText === lastTurnText) {
+        identicalRepeats++;
+        continue;
+      }
+      flushRepeats();
+      lines.push(turnText);
+      lastTurnText = turnText;
+      continue;
     }
+
+    // A lone tool message with no preceding assistant call in this slice
+    // (not expected in a well-formed conversation, but rendered rather than
+    // silently dropped).
+    flushRepeats();
+    lastTurnText = null;
+    lines.push(`Tool result:\n${truncate(message.content || '', maxChars)}`);
+    i++;
   }
+  flushRepeats();
+
   return lines.join('\n\n');
 }
 

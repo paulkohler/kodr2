@@ -273,6 +273,58 @@ describe('renderTranscript', () => {
     assert.doesNotMatch(text, /x{5000}/);
     assert.match(text, /Assistant called write_file\(/);
   });
+
+  it('collapses a repeated identical failing call to one instance plus a count', () => {
+    const failingCall = {
+      role: 'assistant',
+      content: '',
+      tool_calls: [
+        { function: { name: 'write_file', arguments: '{"content":"x"}' } },
+      ],
+    };
+    const failingResult = {
+      role: 'tool',
+      content: '{"error":"path is required"}',
+    };
+    const text = renderTranscript([
+      { role: 'user', content: 'task' },
+      failingCall,
+      failingResult,
+      failingCall,
+      failingResult,
+      failingCall,
+      failingResult,
+    ]);
+
+    // One rendered instance of the call/result, not three.
+    assert.equal(text.match(/Assistant called write_file/g)?.length, 1);
+    assert.match(text, /repeated identically 2 more times/);
+  });
+
+  it('does not collapse two different tool calls or results', () => {
+    const text = renderTranscript([
+      { role: 'user', content: 'task' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          { function: { name: 'read_file', arguments: '{"path":"a.mjs"}' } },
+        ],
+      },
+      { role: 'tool', content: 'file a contents' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          { function: { name: 'read_file', arguments: '{"path":"b.mjs"}' } },
+        ],
+      },
+      { role: 'tool', content: 'file b contents' },
+    ]);
+
+    assert.equal(text.match(/Assistant called read_file/g)?.length, 2);
+    assert.doesNotMatch(text, /repeated identically/);
+  });
 });
 
 describe('compactMessageChars', () => {
@@ -541,12 +593,42 @@ describe('runToolLoop compaction', () => {
   it('compacts using an estimate when the provider reports no prompt usage', async () => {
     // A provider like Ollama reports prompt: 0. Without an estimate fallback,
     // needsCompaction(0, ...) is always false and the session never compacts.
-    // Turn 1 is a tool call with zero usage but a large conversation, so the
-    // estimated size crosses the threshold and compaction fires.
+    // The seed is small (so the pre-loop check below doesn't fire yet). Turn
+    // 1's large tool call is appended to the conversation but, since the
+    // check runs on the pre-turn snapshot, only turn 2's post-turn estimate
+    // reflects it and crosses the threshold.
     const client = scriptedClient([
+      toolCallTurn('list_files', { blob: 'x'.repeat(2000) }, 0),
       toolCallTurn('list_files', {}, 0),
       finalTurn('COMPACTED SUMMARY', 0),
       finalTurn('all done', 0),
+    ]);
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'task' },
+    ];
+
+    const loop = await runToolLoop({
+      client,
+      modelId: 'm',
+      messages,
+      tools: stubTools,
+      contextWindow: 500,
+    });
+
+    assert.equal(loop.completed, true);
+    assert.equal(loop.compactions, 1);
+    assert.match(messages[1].content, /COMPACTED SUMMARY/);
+  });
+
+  it('compacts a conversation seeded already over threshold, before the first turn', async () => {
+    // priorMessages carried into a continuation or a goal-loop retry (see
+    // specs/goal.yaml) can already be oversized before this loop ever sends
+    // its own first request -- compaction must not wait for a turn to
+    // complete to notice.
+    const client = scriptedClient([
+      finalTurn('COMPACTED SUMMARY', 5),
+      finalTurn('all done', 5),
     ]);
     const messages = [
       { role: 'system', content: 'system prompt' },
@@ -564,6 +646,7 @@ describe('runToolLoop compaction', () => {
 
     assert.equal(loop.completed, true);
     assert.equal(loop.compactions, 1);
+    assert.equal(client.calls.length, 2);
     assert.match(messages[1].content, /COMPACTED SUMMARY/);
   });
 

@@ -173,7 +173,36 @@ export async function runToolLoop(params) {
     retries,
   };
 
+  async function compactIfNeeded(lastPromptTokens) {
+    const compacted = await maybeCompact({
+      client,
+      modelId,
+      messages,
+      lastPromptTokens,
+      contextWindow,
+      compactThreshold,
+      reporter,
+      usage,
+      timeoutMs: remainingRunBudgetMs(startedAt, maxRunMs),
+      heartbeatMs,
+      onHeartbeat,
+      onDebug,
+    });
+    if (compacted.compacted) {
+      compactions++;
+    }
+    retries += compacted.retries || 0;
+  }
+
   async function runLoopBody() {
+    // Seeded messages (a continuation, or priorMessages carried forward
+    // across goal-loop attempts, see specs/goal.yaml) can already be over
+    // threshold before this loop ever sends its own first request -- check
+    // against an estimate up front rather than waiting for a turn's real
+    // usage, which would mean the first (possibly oversized) request has
+    // already gone out uncompacted.
+    await compactIfNeeded(estimateTokens(messages));
+
     while (toolTurns < maxToolTurns) {
       // Cancelled before starting a new turn: stop cleanly rather than begin
       // another (paid) model request. An abort mid-request is caught by the
@@ -256,24 +285,7 @@ export async function runToolLoop(params) {
         break;
       }
 
-      const compacted = await maybeCompact({
-        client,
-        modelId,
-        messages,
-        lastPromptTokens,
-        contextWindow,
-        compactThreshold,
-        reporter,
-        usage,
-        timeoutMs: remainingRunBudgetMs(startedAt, maxRunMs),
-        heartbeatMs,
-        onHeartbeat,
-        onDebug,
-      });
-      if (compacted.compacted) {
-        compactions++;
-      }
-      retries += compacted.retries || 0;
+      await compactIfNeeded(lastPromptTokens);
     }
   }
 }
