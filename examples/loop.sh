@@ -73,13 +73,21 @@ while task="$(next_task)"; [ -n "$task" ]; do
   done
 
   if [ "$green" = "true" ]; then
-    git add -A && git commit -q -m "kodr: $task"
+    # Mark first, commit second — the checklist tick rides in the same commit
+    # as the code, so it survives any later task's `git reset --hard`. (A
+    # commit-then-mark order leaves the tick uncommitted, and a later park's
+    # reset silently reverts this task back to unchecked — it gets redone.)
     mark_first x
+    git add -A && git commit -q -m "kodr: $task"
     echo "  committed."
   else
     echo "  PARKED after $MAX_ATTEMPTS attempts" | tee -a loop.log
     git reset --hard -q      # discard the failed attempt; keep the tree green
     mark_first '!'
+    # Commit the park mark on its own — same reason as above, but the mark
+    # has to happen after the reset here, so it needs its own tiny commit
+    # instead of riding along with one that already happened.
+    git add "$TASKS_FILE" && git commit -q -m "kodr: park $task"
   fi
 done
 
