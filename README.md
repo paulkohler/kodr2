@@ -54,6 +54,11 @@ For a worked multi-turn example — scaffolding an Express TODO API and
 extending it across several `--continue` turns — see
 [examples/todo-express.md](examples/todo-express.md).
 
+To run Kodr **isolated** while testing locally — your local checkout in a
+container, your repo mounted as the only writable path, egress restricted to
+your model server — use `scripts/kodr-box.sh`; see
+[docs/docker-isolation.md](docs/docker-isolation.md).
+
 ## Requirements
 
 - Node.js 22+

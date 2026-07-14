@@ -1,0 +1,97 @@
+name: docker isolation wrapper
+status: implemented
+description: >
+  A Dockerfile and scripts/kodr-box.sh wrapper that run a local Kodr checkout
+  inside a container for filesystem isolation. Kodr's run_command tool runs
+  arbitrary /bin/sh -c commands with only cd targets jailed (see
+  tool-run-command spec), so when testing locally a bad model turn can touch
+  anything on disk. This wrapper confines that blast radius to a single
+  mounted directory: the user's current working directory is mounted rw at
+  /workspace (the only writable host path), the local Kodr checkout is mounted
+  ro at /opt/kodr so source edits take effect with no image rebuild, egress is
+  restricted to the host LLM by default, and local providers' base URL is
+  auto-injected so the container reaches a host-run LM Studio or Ollama. It is
+  a local testing aid, not an image published to a registry.
+
+inputs:
+  args:
+    type: string[]
+    description: >
+      Everything after the wrapper's own --box-* flags is forwarded verbatim
+      to kodr (e.g. run "prompt" --model m). Empty args start Kodr's TUI.
+  KODR_BOX_IMAGE:
+    type: string
+    description: Image tag to build/run (default kodr-box)
+  KODR_BOX_NETWORK:
+    type: string
+    description: >
+      locked (default) restricts egress to the host LLM port(s); open allows
+      full outbound (required for openrouter or tasks that need the internet)
+  KODR_BOX_HOST:
+    type: string
+    description: Host alias the container uses to reach the LLM (default host.docker.internal)
+  KODR_BOX_LMSTUDIO_PORT:
+    type: string
+    description: Host LM Studio port for base-url injection (default 1234)
+  KODR_BOX_OLLAMA_PORT:
+    type: string
+    description: Host Ollama port for base-url injection (default 11434)
+  KODR_BOX_HOME:
+    type: string
+    description: Writable HOME inside the container for the dropped UID (default /tmp)
+  KODR_BOX_WORKSPACE:
+    type: string
+    description: Mount point for the user's CWD (default /workspace)
+  KODR_BOX_ENV_PASS:
+    type: string
+    description: >
+      Comma-separated host env var names forwarded into the container
+      (default OPENROUTER_API_KEY,OLLAMA_API_KEY,KODR_PROVIDER,KODR_MODEL,
+      KODR_REASONING,KODR_NO_SAVE)
+  KODR_BOX_DRYRUN:
+    type: string
+    description: When 1, print the assembled docker command and run nothing
+
+constraints:
+  - Image is a batteries-included runtime (node:22-slim + git + python3 + build
+    tools + jq + ripgrep + curl + iptables); Kodr source is mounted live at
+    /opt/kodr:ro, never baked, so local edits need no rebuild
+  - $PWD mounted rw at /workspace is the only writable host path (the boundary)
+  - Container starts as root, programs an iptables egress allowlist in locked
+    mode, then drops to the host UID:GID via setpriv; files written to
+    /workspace are owned by the host user, not root
+  - Egress restricted to the host LLM port(s) by default
+    (KODR_BOX_NETWORK=locked); KODR_BOX_NETWORK=open allows full outbound
+  - HOME set to a writable dir (default /tmp) so tooling works under an
+    arbitrary UID with no /etc/passwd entry
+  - --base-url auto-injected only for lmstudio (1234) and ollama (11434),
+    never for openrouter, and never overriding an explicit --base-url
+  - --cwd auto-injected as the workspace mount unless the user passes --cwd
+  - Host LLM reached via host.docker.internal with --add-host host-gateway
+    (works on Linux and Docker Desktop)
+  - Image name, host, ports, network, HOME, and env-passthrough are all
+    overridable via KODR_BOX_* env vars
+  - Container removed after each run (--rm); interactive TTY (-it) only when
+    both stdin and stdout are terminals
+  - Dry-run prints the docker invocation and runs nothing; forwarded secret
+    env vars are referenced by name, so their values are not echoed
+  - The wrapper builds the image on first use (or --box-build) and is
+    otherwise a thin, deterministic argv assembler
+
+tests:
+  unit:
+    - dry-run injects lmstudio base-url at host.docker.internal:1234 by default
+    - dry-run injects ollama base-url at :11434 when --provider ollama
+    - dry-run does not inject --base-url when the user passes one
+    - dry-run does not inject --base-url for --provider openrouter
+    - dry-run mounts $PWD at /workspace rw and the checkout at /opt/kodr ro
+    - dry-run passes host UID/GID and HOME to the container
+    - locked mode adds --cap-add NET_ADMIN and KODR_BOX_LOCK=1; open mode does not
+    - dry-run forwards OPENROUTER_API_KEY only when set in the host env
+    - dry-run injects --cwd for the workspace unless the user passes --cwd
+    - dry-run forwards the prompt and passthrough args unchanged
+    - dry-run prints the command and does not invoke docker
+  eval:
+    - image builds and kodr --version runs inside the box (Docker; local only)
+    - locked run reaches host LM Studio but cannot reach the public internet
+    - a run writes host-owned files into the mounted /workspace

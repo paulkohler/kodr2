@@ -1,0 +1,5 @@
+# The image bakes in only the entrypoint; Kodr source is mounted live at
+# runtime (see Dockerfile). Keep the build context to just what COPY needs.
+*
+!Dockerfile
+!docker/kodr-box-entry.sh
