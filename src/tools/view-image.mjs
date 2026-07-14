@@ -57,7 +57,9 @@ export default {
 
   async execute({ path }, context) {
     if (!path) {
-      return { error: 'path is required' };
+      return {
+        error: 'path is required — view_image needs { "path": "<image>" }',
+      };
     }
     const mediaType = MEDIA_TYPES[extname(path).toLowerCase()];
     if (!mediaType) {

@@ -33,13 +33,22 @@ export default {
 
   async execute({ path, old_string, new_string }, context) {
     if (!path) {
-      return { error: 'path is required' };
+      return {
+        error:
+          'path is required — edit_file needs { "path": "<file>", "old_string": "...", "new_string": "..." }',
+      };
     }
     if (!old_string) {
-      return { error: 'old_string is required' };
+      return {
+        error:
+          'old_string is required — edit_file needs { "path", "old_string", "new_string" }',
+      };
     }
     if (new_string === undefined || new_string === null) {
-      return { error: 'new_string is required' };
+      return {
+        error:
+          'new_string is required — edit_file needs { "path", "old_string", "new_string" }',
+      };
     }
 
     let resolved;

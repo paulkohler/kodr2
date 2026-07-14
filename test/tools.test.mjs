@@ -125,9 +125,10 @@ describe('read_file', () => {
     assert.match(result.error, /not a file/i);
   });
 
-  it('requires path parameter', async () => {
+  it('requires path parameter, naming the tool and its shape', async () => {
     const result = await readFileTool.execute({ path: undefined }, context);
-    assert.ok(result.error);
+    assert.match(result.error, /path is required/);
+    assert.match(result.error, /read_file needs/);
   });
 });
 
@@ -198,12 +199,23 @@ describe('write_file', () => {
     assert.ok(context._writes.includes('tracked.txt'));
   });
 
-  it('requires content parameter', async () => {
+  it('requires content parameter, naming the tool and its shape', async () => {
     const result = await writeFileTool.execute(
       { path: 'f.txt', content: undefined },
       context,
     );
-    assert.ok(result.error);
+    assert.match(result.error, /content is required/);
+    assert.match(result.error, /write_file needs/);
+  });
+
+  it('requires path parameter, naming the tool and its shape', async () => {
+    // The failure mode a real run hit: content supplied, path omitted, the
+    // same malformed call repeated. The error must tell the model the shape.
+    const result = await writeFileTool.execute({ content: 'data' }, context);
+    assert.match(result.error, /path is required/);
+    assert.match(result.error, /write_file needs/);
+    assert.match(result.error, /"path"/);
+    assert.match(result.error, /"content"/);
   });
 });
 
@@ -212,6 +224,19 @@ describe('write_file', () => {
 describe('edit_file', () => {
   beforeEach(setup);
   afterEach(teardown);
+
+  it('required-argument errors name the tool and its shape', async () => {
+    const noPath = await editFileTool.execute({}, context);
+    assert.match(noPath.error, /path is required/);
+    assert.match(noPath.error, /edit_file needs/);
+    const noOld = await editFileTool.execute({ path: 'a.mjs' }, context);
+    assert.match(noOld.error, /old_string is required/);
+    const noNew = await editFileTool.execute(
+      { path: 'a.mjs', old_string: 'x' },
+      context,
+    );
+    assert.match(noNew.error, /new_string is required/);
+  });
 
   it('edits a file with unique match', async () => {
     await writeFile(join(tmpDir, 'code.mjs'), 'const x = 1;\nconst y = 2;\n');

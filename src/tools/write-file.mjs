@@ -29,10 +29,16 @@ export default {
 
   async execute({ path, content }, context) {
     if (!path) {
-      return { error: 'path is required' };
+      return {
+        error:
+          'path is required — write_file needs { "path": "<file>", "content": "..." }',
+      };
     }
     if (content === undefined || content === null) {
-      return { error: 'content is required' };
+      return {
+        error:
+          'content is required — write_file needs { "path": "<file>", "content": "..." }',
+      };
     }
 
     let resolved;

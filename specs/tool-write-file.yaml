@@ -32,6 +32,12 @@ constraints:
   - Parent directories created with mkdir -p semantics
   - Written paths are tracked for the run summary
   - Content must be provided (even empty string is valid)
+  - >
+    Required-argument errors name the tool and its expected shape (e.g.
+    "path is required -- write_file needs { path, content }") rather than a
+    bare assertion. A small model that omits an argument -- and then repeats
+    the same malformed call -- gets a corrective it can act on. A live run
+    hit exactly this: content supplied, path omitted, the call repeated.
 
 tests:
   unit:
@@ -39,7 +45,8 @@ tests:
     - creates parent directories
     - rejects paths that escape workspace root
     - tracks written files in context
-    - requires content parameter
+    - requires content parameter, naming the tool and its shape
+    - requires path parameter, naming the tool and its shape
     - rejects symlinked parent directories escaping workspace
   eval:
     - model creates a file that persists on disk

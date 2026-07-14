@@ -58,6 +58,9 @@ constraints:
   - Zero runtime dependencies; base64 via Buffer, no image libraries.
   - Off by default; enabling it adds exactly one tool and no other behavior.
   - Model output is untrusted: the path is validated and jailed before any read.
+  - A missing-path error names the tool and its shape ("path is required --
+    view_image needs { path }") rather than a bare assertion, like the other
+    file tools.
 
 tests:
   unit:

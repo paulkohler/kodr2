@@ -28,7 +28,9 @@ export default {
 
   async execute({ path }, context) {
     if (!path) {
-      return { error: 'path is required' };
+      return {
+        error: 'path is required — read_file needs { "path": "<file>" }',
+      };
     }
 
     let resolved;

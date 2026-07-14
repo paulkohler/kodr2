@@ -26,6 +26,8 @@ constraints:
   - Files over 1MB return an error
   - Symlinks resolved before jail check
   - Directories return "not a file" error
+  - Required-argument errors name the tool and its expected shape (e.g.
+    "path is required -- read_file needs { path }") rather than a bare assertion
 
 tests:
   unit:
@@ -36,5 +38,6 @@ tests:
     - rejects files over 1MB
     - returns error for missing files
     - rejects directories
+    - requires path parameter, naming the tool and its shape
   eval:
     - model asked to read a specific file gets correct contents

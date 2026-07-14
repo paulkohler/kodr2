@@ -37,10 +37,14 @@ constraints:
   - Path must resolve within workspace root
   - Symlinks are resolved before jail check
   - Tracks edited files in run summary
+  - Required-argument errors (path, old_string, new_string) name the tool and
+    its expected shape (e.g. "path is required -- edit_file needs { path,
+    old_string, new_string }") rather than a bare assertion
 
 tests:
   unit:
     - edits a file with unique match
+    - required-argument errors name the tool and its shape
     - rejects when old_string appears multiple times
     - rejects when old_string not found
     - rejects paths escaping workspace
