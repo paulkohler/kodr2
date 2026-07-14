@@ -62,8 +62,14 @@ outputs:
     type: string
     description: >
       Why the loop stopped: "met", "exhausted" (hit maxAttempts unmet), "stalled"
-      (two consecutive attempts changed no files), or "build-error" (a build
-      attempt ended in stoppedReason "error")
+      (two consecutive attempts changed no files), "build-error" (a build attempt
+      ended in stoppedReason "error"), or "judge-error" (the judge assessment
+      itself threw, e.g. a backend crash mid-request)
+  judgeError:
+    type: object
+    description: >
+      Present only when reason is "judge-error": { message, name?, stack? } from
+      the thrown error, mirroring RunResult's own error shape
   attempts:
     type: number
     description: Number of build+judge iterations actually run
@@ -108,11 +114,23 @@ constraints:
     "build-error" — a crashing backend is not fixed by another attempt. A
     tool-limit or budget-exceeded build is still judged, since it may hold partial
     progress worth assessing.
+  - A judge assessment that throws (evaluateGoal calls runToolLoop directly, not
+    through run(), so it has none of run()'s own error-to-return-value handling)
+    stops the loop with reason "judge-error" rather than propagating out of
+    runGoal — the attempt's build result (lastResult) is preserved rather than
+    discarded just because the judge failed afterward. The thrown error is
+    attached in full as judgeError; the reporter notice is capped to a short
+    prefix, since the error can carry a raw backend response body (e.g. an HTML
+    500 page) as its message
   - In P0 the judge runs on the same model as the build (a dedicated read-only
-    client on the same provider/model). Cross-model judging — a stronger judge than
-    the builder, loaded/verified via lms.mjs like reviewModel — is a future
-    enhancement, deferred to avoid thrashing LM Studio's model load on every
-    attempt.
+    client on the same provider/model). Its context window is resolved the same
+    way run() resolves the build's — an explicit option, then a probe of the
+    model's loaded context length, then the default — rather than defaulting to
+    disabled, so the judge's own (read-only, but potentially large) conversation
+    is protected by compaction (specs/compaction.yaml) too. Cross-model judging —
+    a stronger judge than the builder, loaded/verified via lms.mjs like
+    reviewModel — is a future enhancement, deferred to avoid thrashing LM
+    Studio's model load on every attempt.
   - Orchestration (runGoal) is pure and injectable — the per-attempt build (a
     runTask callback) and the judge (an evaluate callback) are injected
     collaborators, so the loop control (attempt capping, stall detection, verdict
@@ -141,6 +159,8 @@ tests:
     - runGoal preserves an ungrounded final verdict but reports the overall result met:false
     - runGoal stops with reason "stalled" after two consecutive no-file-change attempts
     - runGoal stops with reason "build-error" without judging when a build attempt errors
+    - runGoal stops with reason "judge-error" and preserves the build when the judge throws
+    - runGoal truncates a long judge error message in the reporter notice but keeps it in full on the result
     - runGoal sums build and judge usage and retries
     - evaluateGoal runs a read-only tool loop and parses the verdict from the final turn
     - evaluateGoal marks a zero-tool-call verdict ungrounded

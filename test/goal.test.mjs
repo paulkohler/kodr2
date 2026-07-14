@@ -178,6 +178,48 @@ describe('runGoal', () => {
     assert.equal(judged, 0);
   });
 
+  it('stops with reason "judge-error" and preserves the build when the judge throws', async () => {
+    const notices = [];
+    const reporter = { ...silentReporter, notice: (msg) => notices.push(msg) };
+    const result = await runGoal({
+      goal: 'g',
+      maxAttempts: 3,
+      reporter,
+      runTask: async () => fakeResult(),
+      evaluate: async () => {
+        throw new Error('HTTP 500: <html>...boom...</html>');
+      },
+    });
+    assert.equal(result.met, false);
+    assert.equal(result.reason, 'judge-error');
+    assert.equal(result.attempts, 1);
+    // The build's own successful result is not discarded by the judge failure.
+    assert.equal(result.lastResult.stoppedReason, 'complete');
+    assert.equal(
+      result.judgeError.message,
+      'HTTP 500: <html>...boom...</html>',
+    );
+    assert.match(notices.at(-1), /judge error/);
+  });
+
+  it('truncates a long judge error message in the reporter notice but keeps it in full on the result', async () => {
+    const notices = [];
+    const reporter = { ...silentReporter, notice: (msg) => notices.push(msg) };
+    const longMessage = `HTTP 500: ${'x'.repeat(2000)}`;
+    const result = await runGoal({
+      goal: 'g',
+      maxAttempts: 1,
+      reporter,
+      runTask: async () => fakeResult(),
+      evaluate: async () => {
+        throw new Error(longMessage);
+      },
+    });
+    assert.ok(notices.at(-1).length < longMessage.length);
+    assert.match(notices.at(-1), /truncated/);
+    assert.equal(result.judgeError.message, longMessage);
+  });
+
   it('sums build and judge usage and retries', async () => {
     const verdicts = [
       verdict({

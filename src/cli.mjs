@@ -21,6 +21,7 @@ import {
 } from './goal.mjs';
 import {
   DEFAULT_HEARTBEAT_MS,
+  resolveContextWindow,
   resolveRequestTimeoutMs,
   resolveRunsDir,
   run,
@@ -1156,6 +1157,7 @@ export async function runGoalCommand(args) {
   // is a future enhancement (specs/goal.yaml).
   let client;
   let judgeModelId;
+  let judgeContextWindow;
   try {
     client = createProvider({
       provider: args.provider,
@@ -1169,6 +1171,17 @@ export async function runGoalCommand(args) {
       providerOrder: args.openrouterProviderOnly,
     });
     judgeModelId = await client.resolveModel();
+    // The judge is a read-only tool loop over the same model as the build
+    // (see above) -- give it the same auto-probed context window the build
+    // gets in run(), rather than defaulting to 0 (compaction disabled)
+    // whenever --context-window isn't set explicitly. A silent reporter here:
+    // the build's own run() call already prints the "context window ..."
+    // notice for the same model moments later.
+    judgeContextWindow = await resolveContextWindow({
+      option: args.contextWindow,
+      client,
+      modelId: judgeModelId,
+    });
   } catch (err) {
     process.stderr.write(`Error: ${err.message}\n`);
     process.exitCode = 1;
@@ -1201,7 +1214,7 @@ export async function runGoalCommand(args) {
           goal,
           filesChanged: result.filesChanged || [],
           maxRunMs: args.maxRunMs,
-          contextWindow: args.contextWindow ?? 0,
+          contextWindow: judgeContextWindow,
           heartbeatMs: args.heartbeatMs,
           envPassthrough: args.env,
           reporter: judgeReporter,

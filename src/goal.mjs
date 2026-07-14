@@ -237,12 +237,13 @@ function addUsage(total, usage) {
 /**
  * @typedef {object} GoalResult
  * @property {boolean} met
- * @property {string} reason - "met" | "exhausted" | "stalled" | "build-error"
+ * @property {string} reason - "met" | "exhausted" | "stalled" | "build-error" | "judge-error"
  * @property {number} attempts
  * @property {Verdict[]} verdicts
  * @property {import('./harness.mjs').RunResult|null} lastResult
  * @property {{ prompt: number, completion: number, cost: number }} usage
  * @property {number} retries
+ * @property {{ message: string, name?: string, stack?: string }} [judgeError]
  */
 
 /**
@@ -250,7 +251,16 @@ function addUsage(total, usage) {
  * runTask(prompt, continuation) builds one attempt and returns its RunResult;
  * evaluate(result, attempt) judges it and returns a Verdict. The loop stops on
  * the first met-and-grounded verdict, the attempt cap, a two-attempt no-change
- * stall, or a build error.
+ * stall, a build error, or a judge error.
+ *
+ * A build error already comes back as a returned value (RunResult's
+ * stoppedReason: 'error') rather than a throw -- runTask goes through
+ * harness.mjs's run(), which converts a thrown tool-loop error into that
+ * shape. evaluate() has no such wrapper (evaluateGoal calls runToolLoop
+ * directly), so a judge-side failure -- the same kind of thing run() already
+ * guards against, e.g. a backend crashing mid-request -- is caught here
+ * instead. Without this, that failure would propagate out of runGoal
+ * entirely and discard a build that had just succeeded.
  * @param {object} params
  * @param {string} params.goal
  * @param {(prompt: string, continuation: ({ priorMessages: Array, priorFilesChanged: string[] }|null)) => Promise<import('./harness.mjs').RunResult>} params.runTask
@@ -297,7 +307,22 @@ export async function runGoal(params) {
       );
     }
 
-    const verdict = await evaluate(result, attempt);
+    let verdict;
+    try {
+      verdict = await evaluate(result, attempt);
+    } catch (err) {
+      reporter.notice(`goal stopped: judge error (${truncate(err.message)})`);
+      return finish(
+        false,
+        'judge-error',
+        attempt,
+        verdicts,
+        lastResult,
+        usage,
+        retries,
+        { message: err.message, name: err.name, stack: err.stack },
+      );
+    }
     verdicts.push(verdict);
     addUsage(usage, verdict.usage);
     retries += verdict.retries || 0;
@@ -348,8 +373,46 @@ export async function runGoal(params) {
   );
 }
 
-function finish(met, reason, attempts, verdicts, lastResult, usage, retries) {
-  return { met, reason, attempts, verdicts, lastResult, usage, retries };
+function finish(
+  met,
+  reason,
+  attempts,
+  verdicts,
+  lastResult,
+  usage,
+  retries,
+  judgeError,
+) {
+  const result = {
+    met,
+    reason,
+    attempts,
+    verdicts,
+    lastResult,
+    usage,
+    retries,
+  };
+  if (judgeError) {
+    result.judgeError = judgeError;
+  }
+  return result;
+}
+
+/**
+ * Cap an error message for a one-line reporter notice -- a judge failure can
+ * carry a raw backend error body (e.g. an HTML 500 page, see
+ * specs/model-client.yaml) as its message, and that has no place filling the
+ * terminal. The full message is still preserved on the returned judgeError.
+ * @param {string} text
+ * @param {number} [maxChars]
+ * @returns {string}
+ */
+function truncate(text, maxChars = 200) {
+  const source = typeof text === 'string' ? text : '';
+  if (source.length <= maxChars) {
+    return source;
+  }
+  return `${source.slice(0, maxChars)}… [truncated]`;
 }
 
 /**
