@@ -133,6 +133,12 @@ constraints:
   - Run transcript saved even when model requests fail after run metadata is available
   - A model request that fails mid-loop preserves the usage, tool turns, compactions, and retries accumulated in earlier turns on the saved record (they are carried on the thrown error), rather than being booked as toolTurns 0 / cost 0 -- so a run that did real paid work before failing reports it accurately
   - Run transcript includes model, prompt, cwd, baseUrl, test command, env passthrough, start time, finish time, and duration
+  - >
+    The record's top-level `timestamp` is UTC ISO-8601 (…Z); a parallel
+    `timestampLocal` carries the same instant in the machine's local time zone
+    as ISO-8601 with the UTC offset (e.g. 2026-07-14T04:20:31.547+02:00), so a
+    saved log reads at a glance without UTC-to-local math. The two parse back to
+    the same instant.
   - Run transcript records the tool schemas offered to the model (the record's
     `tools` field), so a saved run is self-describing -- reading it back to
     explain a call that failed on its arguments should not require re-deriving
@@ -185,6 +191,8 @@ tests:
     - compaction forwards heartbeatMs and onHeartbeat to the summary chat call
     - run records include metadata and duration
     - run records include the tool schemas offered to the model, null when none were offered
+    - run records include a local-time-zone timestamp alongside the UTC one, the same instant
+    - toLocalIso formats a date in the local zone with a UTC offset, parsing back to the same instant
     - run records include package-manager commands and error metadata
     - failed model requests still save a run record
     - a mid-loop failure preserves the usage and tool turns done before it

@@ -1239,8 +1239,12 @@ async function saveRun(runsDir, result, startedAt) {
 }
 
 export function createRunRecord(result, finish = {}) {
+  const timestamp = finish.finishedAt || new Date().toISOString();
   return {
-    timestamp: finish.finishedAt || new Date().toISOString(),
+    timestamp,
+    // The same instant in the machine's local time zone, so a saved run reads
+    // at a glance without doing UTC-to-local math in your head.
+    timestampLocal: toLocalIso(new Date(timestamp)),
     metadata: result.metadata || {},
     durationMs: finish.durationMs ?? null,
     filesChanged: result.filesChanged,
@@ -1260,4 +1264,28 @@ export function createRunRecord(result, finish = {}) {
     tools: result.toolDefinitions ?? null,
     messages: result.messages,
   };
+}
+
+/**
+ * Format a Date as an ISO-8601 string in the machine's local time zone, with
+ * its UTC offset -- e.g. "2026-07-14T04:20:31.547+02:00". The same instant as
+ * the record's UTC `timestamp`, just in the operator's own zone. Parses back to
+ * the same instant via new Date(), so the two stay a matched pair.
+ * @param {Date} date
+ * @returns {string}
+ */
+export function toLocalIso(date) {
+  const pad = (value, width = 2) => String(value).padStart(width, '0');
+  // getTimezoneOffset is minutes behind UTC (positive west), so negate it to
+  // get the conventional "minutes east of UTC" the ISO offset expresses.
+  const offsetMinutes = -date.getTimezoneOffset();
+  let sign = '+';
+  if (offsetMinutes < 0) {
+    sign = '-';
+  }
+  const abs = Math.abs(offsetMinutes);
+  const offset = `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+  const ymd = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  const hms = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`;
+  return `${ymd}T${hms}${offset}`;
 }

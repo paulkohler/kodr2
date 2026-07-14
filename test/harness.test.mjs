@@ -18,6 +18,7 @@ import {
   run,
   runReviewPass,
   stopVerifyBudgetMs,
+  toLocalIso,
 } from '../src/harness.mjs';
 import { DEFAULT_MAX_RETRIES } from '../src/model.mjs';
 
@@ -99,6 +100,36 @@ describe('createRunRecord', () => {
       {},
     );
     assert.equal(record.tools, null);
+  });
+
+  it('records a local-time-zone timestamp alongside the UTC one, same instant', () => {
+    const record = createRunRecord(
+      { metadata: {}, filesChanged: [], toolTurns: 0, usage: {}, messages: [] },
+      { finishedAt: '2026-07-14T02:20:31.547Z' },
+    );
+    assert.equal(record.timestamp, '2026-07-14T02:20:31.547Z');
+    // TZ-independent (holds in CI/UTC too): the local string parses back to the
+    // exact same instant as the UTC timestamp.
+    assert.equal(
+      new Date(record.timestampLocal).getTime(),
+      new Date(record.timestamp).getTime(),
+    );
+    assert.match(
+      record.timestampLocal,
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2}$/,
+    );
+  });
+});
+
+describe('toLocalIso', () => {
+  it('formats the same instant as UTC, in ISO-8601 with a local offset', () => {
+    const utc = '2026-07-14T02:20:31.547Z';
+    const local = toLocalIso(new Date(utc));
+    assert.match(
+      local,
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2}$/,
+    );
+    assert.equal(new Date(local).getTime(), new Date(utc).getTime());
   });
 });
 
