@@ -51,7 +51,7 @@ outputs:
     description: Number of tool-call round trips
   stoppedReason:
     type: string
-    description: '"complete" when the model produced a final response, "tool-limit" when it hit the turn ceiling, "budget-exceeded" when maxRunMs elapsed'
+    description: '"complete" when the model produced a final response, "tool-limit" when it hit the turn ceiling, "budget-exceeded" when maxRunMs elapsed, "stuck" when the same tool call failed identically maxRepeatToolErrors times in a row, "cancelled" on abort'
   verification:
     type: object
     description: "{ passed, command, output, exitCode }"
@@ -116,6 +116,19 @@ constraints:
     fenced blocks); see the tool-recovery spec. Every recovered call in a
     message is executed.
   - Hitting the tool-turn ceiling sets stoppedReason "tool-limit" and emits a notice
+  - >
+    The system prompt tells the model "never repeat a failing call unchanged",
+    but a small model can ignore it and burn the whole budget re-sending an
+    identical broken call (a real dogfood run repeated a write_file with no
+    path six times over nine minutes before it was killed by hand). The tool
+    loop enforces the contract: it tracks consecutive identical (tool, error)
+    failures -- a success or a different error resets the streak -- escalates
+    the error the model sees as the count rises, and at the ceiling
+    (maxRepeatToolErrors, default 3, 0 disables, --max-repeat-tool-errors /
+    KODR_MAX_REPEAT_TOOL_ERRORS) stops the loop with stoppedReason "stuck"
+    rather than spending the rest of the budget. The ceiling is configurable,
+    per the operational-limits rule. Denied calls (approval/PreToolUse) are the
+    operator's choice, not a malformed model call, so they are excluded.
   - Run transcript saved to .kodr/runs/ after every run; the location is overridable (--runs-dir / KODR_RUNS_DIR) and saving can be disabled (--no-save / KODR_NO_SAVE) so a benchmark/container run keeps the task workspace clean
   - Run transcript saved even when model requests fail after run metadata is available
   - A model request that fails mid-loop preserves the usage, tool turns, compactions, and retries accumulated in earlier turns on the saved record (they are carried on the thrown error), rather than being booked as toolTurns 0 / cost 0 -- so a run that did real paid work before failing reports it accurately
@@ -190,6 +203,11 @@ tests:
     - write_file accepts an absolute path inside the workspace root
     - recovers text-form tool calls (all framings) through the tool registry
     - shared tool loop completes, exhausts turns, and stops on budget
+    - the tool loop stops with stoppedReason "stuck" after the same tool call fails maxRepeatToolErrors times in a row
+    - the repeated-failing-call breaker escalates the error the model sees before it gives up
+    - a successful call resets the repeat streak so a later failure starts fresh
+    - maxRepeatToolErrors of 0 disables the breaker
+    - maxRepeatToolErrors resolves option, then KODR_MAX_REPEAT_TOOL_ERRORS, then the default
     - a timeout at the run deadline is reported as budget-exceeded, not an error
     - a timeout with no run budget is still surfaced as an error
     - dispatches multi-call and repeated native tool calls, one result each

@@ -11,6 +11,7 @@ import {
   executeNativeToolCalls,
   executeRecoveredTextToolCall,
   MAX_TOOL_TURNS,
+  maxRepeatToolErrors,
   recoverTextToolCall,
   runToolLoop,
 } from '../src/tool-loop.mjs';
@@ -819,5 +820,109 @@ describe('tool hooks in dispatch', () => {
     const result = JSON.parse(messages[0].content);
     assert.equal(result.ok, true);
     assert.match(result.hookFeedback, /PostToolUse hook "lint" failed/);
+  });
+});
+
+describe('maxRepeatToolErrors', () => {
+  const envKey = 'KODR_MAX_REPEAT_TOOL_ERRORS';
+  let original;
+  beforeEach(() => {
+    original = process.env[envKey];
+  });
+  afterEach(() => {
+    if (original === undefined) {
+      delete process.env[envKey];
+    } else {
+      process.env[envKey] = original;
+    }
+  });
+
+  it('prefers an explicit option', () => {
+    process.env[envKey] = '9';
+    assert.equal(maxRepeatToolErrors(5), 5);
+  });
+  it('falls back to KODR_MAX_REPEAT_TOOL_ERRORS', () => {
+    process.env[envKey] = '9';
+    assert.equal(maxRepeatToolErrors(undefined), 9);
+  });
+  it('falls back to the default when neither is set', () => {
+    delete process.env[envKey];
+    assert.equal(maxRepeatToolErrors(undefined), 3);
+  });
+  it('treats 0 as an explicit disable', () => {
+    delete process.env[envKey];
+    assert.equal(maxRepeatToolErrors(0), 0);
+  });
+});
+
+describe('repeated-failing-call breaker', () => {
+  // A registry whose every dispatch fails the same way -- the shape a small
+  // model gets stuck on (e.g. write_file with no path). No fs needed.
+  const alwaysErrors = /** @type {any} */ ({
+    definitions: () => [],
+    dispatch: async () => ({ error: 'path is required' }),
+  });
+
+  it('stops with stoppedReason "stuck" after the same tool fails maxRepeatToolErrors times', async () => {
+    const client = scriptedClient([toolCallTurn('write_file', {})]); // repeats forever
+    const messages = [{ role: 'user', content: 'go' }];
+    const loop = await runToolLoop({
+      client,
+      modelId: 'm',
+      messages,
+      tools: alwaysErrors,
+      maxRepeatToolErrors: 3,
+    });
+    assert.equal(loop.stoppedReason, 'stuck');
+    assert.equal(loop.completed, false);
+    assert.equal(loop.toolTurns, 3);
+    // The model was warned before the loop gave up: the second failure escalates
+    // and the third announces the stop, both visible in the fed-back results.
+    const toolMsgs = messages.filter((m) => m.role === 'tool');
+    assert.match(toolMsgs[1].content, /Do not repeat the call unchanged/);
+    assert.match(toolMsgs[2].content, /Stopping/);
+  });
+
+  it('does not break when maxRepeatToolErrors is 0 (disabled)', async () => {
+    const client = scriptedClient([toolCallTurn('write_file', {})]);
+    const messages = [{ role: 'user', content: 'go' }];
+    const loop = await runToolLoop({
+      client,
+      modelId: 'm',
+      messages,
+      tools: alwaysErrors,
+      maxRepeatToolErrors: 0,
+      maxToolTurns: 2,
+    });
+    assert.equal(loop.stoppedReason, 'tool-limit');
+    assert.equal(loop.toolTurns, 2);
+  });
+
+  it('a successful call resets the streak so a later failure starts fresh', async () => {
+    const tools = /** @type {any} */ ({
+      definitions: () => [],
+      dispatch: async (name) => {
+        if (name === 'ok_tool') {
+          return { ok: true };
+        }
+        return { error: 'path is required' };
+      },
+    });
+    // fail, success (resets), then fail forever: stuck lands at turn 5, not 4.
+    const client = scriptedClient([
+      toolCallTurn('write_file', {}),
+      toolCallTurn('ok_tool', {}),
+      toolCallTurn('write_file', {}),
+    ]);
+    const messages = [{ role: 'user', content: 'go' }];
+    const loop = await runToolLoop({
+      client,
+      modelId: 'm',
+      messages,
+      tools,
+      maxRepeatToolErrors: 3,
+    });
+    assert.equal(loop.stoppedReason, 'stuck');
+    assert.equal(loop.toolTurns, 5);
   });
 });

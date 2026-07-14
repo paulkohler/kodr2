@@ -114,6 +114,9 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  *   supports this -- errors otherwise (see specs/provider.yaml)
  * @param {boolean} [options.vision] - Offer the view_image tool (see specs/vision.yaml)
  * @param {number} [options.maxToolTurns] - Tool-turn ceiling per loop (default MAX_TOOL_TURNS)
+ * @param {number} [options.maxRepeatToolErrors] - Consecutive identical (tool, error)
+ *   failures before the loop gives up with stoppedReason "stuck" (default 3; 0
+ *   disables, also KODR_MAX_REPEAT_TOOL_ERRORS)
  * @param {boolean} [options.noZdr] - Disable OpenRouter Zero Data Retention routing
  *   (on by default with the openrouter provider)
  * @param {boolean} [options.allowDataCollection] - Allow OpenRouter providers that
@@ -414,6 +417,7 @@ export async function run(prompt, options) {
       startedAt,
       maxRunMs,
       maxToolTurns,
+      maxRepeatToolErrors: options.maxRepeatToolErrors,
       contextWindow,
       toolHooks: toolHookSets,
       cwd,
@@ -545,6 +549,7 @@ export async function run(prompt, options) {
           startedAt,
           maxRunMs,
           maxToolTurns,
+          maxRepeatToolErrors: options.maxRepeatToolErrors,
           contextWindow,
           toolHooks: toolHookSets,
           cwd,
@@ -1148,6 +1153,9 @@ function formatStopReason(stoppedReason, maxToolTurns) {
   }
   if (stoppedReason === 'budget-exceeded') {
     return 'stopped after run budget';
+  }
+  if (stoppedReason === 'stuck') {
+    return 'stopped: the same tool call failed repeatedly';
   }
   return `stopped after ${maxToolTurns} tool turns`;
 }

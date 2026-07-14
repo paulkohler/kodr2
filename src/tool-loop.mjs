@@ -27,6 +27,30 @@ import {
 
 export const MAX_TOOL_TURNS = 20;
 
+// How many times the same (tool, error) may repeat in a row before the loop
+// gives up. The system prompt tells the model "never repeat a failing call
+// unchanged", but a small model can ignore it and burn the whole budget
+// re-sending an identical broken call (a real run repeated a write_file with
+// no path six times over nine minutes). This enforces the contract.
+export const DEFAULT_MAX_REPEAT_TOOL_ERRORS = 3;
+
+/**
+ * Consecutive-identical-failure ceiling. Resolved from an explicit option, then
+ * KODR_MAX_REPEAT_TOOL_ERRORS, then the default; 0 disables the breaker.
+ * @param {number} [option]
+ * @returns {number}
+ */
+export function maxRepeatToolErrors(option) {
+  if (Number.isInteger(option) && option >= 0) {
+    return option;
+  }
+  const fromEnv = Number.parseInt(process.env.KODR_MAX_REPEAT_TOOL_ERRORS, 10);
+  if (Number.isInteger(fromEnv) && fromEnv >= 0) {
+    return fromEnv;
+  }
+  return DEFAULT_MAX_REPEAT_TOOL_ERRORS;
+}
+
 /**
  * A chat message, as sent to/received from the model. `tool_calls` is
  * present on an assistant message that invoked tools; `content` carries
@@ -51,6 +75,10 @@ export const MAX_TOOL_TURNS = 20;
  * @param {Date} [params.startedAt] - Run start, for the budget check
  * @param {number} [params.maxRunMs] - Stop between turns after this many ms (0 disables)
  * @param {number} [params.maxToolTurns] - Tool-turn ceiling (default MAX_TOOL_TURNS)
+ * @param {number} [params.maxRepeatToolErrors] - Consecutive identical (tool,
+ *   error) failures before the loop gives up with stoppedReason "stuck"
+ *   (default DEFAULT_MAX_REPEAT_TOOL_ERRORS; 0 disables, also
+ *   KODR_MAX_REPEAT_TOOL_ERRORS)
  * @param {number} [params.contextWindow] - Max context window in tokens (0 disables compaction)
  * @param {number} [params.compactThreshold] - Fraction of the window that triggers compaction
  * @param {{ PreToolUse: Array, PostToolUse: Array }} [params.toolHooks] - Tool hooks
@@ -71,6 +99,8 @@ export const MAX_TOOL_TURNS = 20;
  *   Checked between turns and passed to each chat request: an abort mid-request
  *   destroys the socket and the loop stops with stoppedReason "cancelled".
  * @returns {Promise<{ finalText: string, completed: boolean, stoppedReason: string, toolTurns: number, compactions: number, usage: { prompt: number, completion: number, cost: number }, retries: number }>}
+ *   stoppedReason is "complete", "tool-limit", "budget-exceeded", "cancelled",
+ *   or "stuck" (the same tool call failed identically maxRepeatToolErrors times)
  */
 export async function runToolLoop(params) {
   const { client, modelId, messages, tools } = params;
@@ -79,6 +109,12 @@ export async function runToolLoop(params) {
   const { contextWindow = 0, compactThreshold = COMPACTION_THRESHOLD } = params;
   const { heartbeatMs = 0, onHeartbeat, onDebug, signal } = params;
   const hookCtx = buildHookCtx(params);
+  // Enforces "never repeat a failing call unchanged": tracks consecutive
+  // identical (tool, error) failures across turns, escalates the error the
+  // model sees, and flags the loop stuck at the ceiling.
+  const repeatTracker = createRepeatTracker(
+    maxRepeatToolErrors(params.maxRepeatToolErrors),
+  );
   // Approval gate: only active when both opted in and given a channel, so the
   // default (and every non-TUI run) executes commands exactly as before.
   const gate =
@@ -186,6 +222,7 @@ export async function runToolLoop(params) {
         reporter,
         hookCtx,
         gate,
+        repeatTracker,
       );
       if (nativeCalls === 0) {
         const recovered = await executeRecoveredTextToolCall(
@@ -195,6 +232,7 @@ export async function runToolLoop(params) {
           reporter,
           hookCtx,
           gate,
+          repeatTracker,
         );
         if (!recovered) {
           finalText = message.content || '';
@@ -206,6 +244,13 @@ export async function runToolLoop(params) {
       }
 
       toolTurns++;
+      // The model kept re-sending a call that fails the same way. It was warned
+      // (the error escalated as the count rose); stop rather than burn the rest
+      // of the budget on an identical broken call.
+      if (repeatTracker.stuck) {
+        stoppedReason = 'stuck';
+        break;
+      }
       if (isRunBudgetExceeded(startedAt, maxRunMs)) {
         stoppedReason = 'budget-exceeded';
         break;
@@ -337,6 +382,7 @@ export async function executeNativeToolCalls(
   reporter,
   hookCtx,
   gate,
+  repeatTracker,
 ) {
   if (!message.tool_calls || message.tool_calls.length === 0) {
     return 0;
@@ -350,6 +396,7 @@ export async function executeNativeToolCalls(
       reporter,
       hookCtx,
       gate,
+      repeatTracker,
     );
     appendToolResult(messages, tc.id, result);
     executed++;
@@ -409,7 +456,14 @@ function appendToolResult(messages, toolCallId, result) {
  * @param {object} [gate]
  * @returns {Promise<object>} The tool result (or a repair error)
  */
-async function executeOneNativeCall(tc, tools, reporter, hookCtx, gate) {
+async function executeOneNativeCall(
+  tc,
+  tools,
+  reporter,
+  hookCtx,
+  gate,
+  repeatTracker,
+) {
   if (isUnparseableArgs(tc.function.arguments)) {
     tc.function.arguments = '{}';
     reporter.notice(
@@ -423,7 +477,14 @@ async function executeOneNativeCall(tc, tools, reporter, hookCtx, gate) {
 
   const name = recoverToolName(tc.function.name);
   const args = parseToolArguments(tc.function.arguments);
-  return dispatchTool({ name, args }, tools, reporter, hookCtx, gate);
+  return dispatchTool(
+    { name, args },
+    tools,
+    reporter,
+    hookCtx,
+    gate,
+    repeatTracker,
+  );
 }
 
 /**
@@ -445,6 +506,7 @@ export async function executeRecoveredTextToolCall(
   reporter,
   hookCtx,
   gate,
+  repeatTracker,
 ) {
   if (message.tool_calls && message.tool_calls.length > 0) {
     return false;
@@ -455,7 +517,14 @@ export async function executeRecoveredTextToolCall(
   }
 
   for (const call of calls) {
-    const result = await dispatchTool(call, tools, reporter, hookCtx, gate);
+    const result = await dispatchTool(
+      call,
+      tools,
+      reporter,
+      hookCtx,
+      gate,
+      repeatTracker,
+    );
     messages.push({
       role: 'user',
       content: `Recovered text-form tool call ${call.name}. Result:\n${JSON.stringify(result)}`,
@@ -478,7 +547,14 @@ function parseToolArguments(value) {
   }
 }
 
-async function dispatchTool(call, tools, reporter, hookCtx, gate) {
+async function dispatchTool(
+  call,
+  tools,
+  reporter,
+  hookCtx,
+  gate,
+  repeatTracker,
+) {
   reporter.toolCall({ name: call.name, args: call.args });
 
   const unapproved = await denyByApproval(call, gate);
@@ -494,11 +570,82 @@ async function dispatchTool(call, tools, reporter, hookCtx, gate) {
   }
 
   const result = await tools.dispatch(call.name, call.args);
-  const finalResult = await applyPostToolHooks(call, result, hookCtx);
+  const withHooks = await applyPostToolHooks(call, result, hookCtx);
+  // Enforce the no-repeat contract on the actual tool result (denials above
+  // are the operator's choice, not the model's malformed call, so they're
+  // excluded): escalate the error and, at the ceiling, flag the loop stuck.
+  const finalResult = trackRepeat(call.name, withHooks, repeatTracker);
 
   reporter.toolResult({ name: call.name, result: finalResult });
 
   return finalResult;
+}
+
+/**
+ * State for the repeated-failing-call breaker: the last (tool, error) key seen,
+ * how many times in a row, and whether the loop should give up.
+ * @param {number} limit - Consecutive-repeat ceiling (0 disables the breaker)
+ */
+function createRepeatTracker(limit) {
+  return { limit, key: null, count: 0, stuck: false };
+}
+
+function resultErrorText(result) {
+  if (
+    result &&
+    typeof result === 'object' &&
+    typeof result.error === 'string'
+  ) {
+    return result.error;
+  }
+  return null;
+}
+
+/**
+ * Track consecutive identical (tool, error) failures. A success or a different
+ * error resets the streak. As the count rises the error the model sees is
+ * escalated with an explicit "stop repeating" note; at the ceiling the tracker
+ * is flagged stuck so the loop can stop. Returns the (possibly augmented) result.
+ * @param {string} name - Tool name
+ * @param {object} result - Tool result (after post-tool hooks)
+ * @param {{ limit: number, key: string|null, count: number, stuck: boolean }} [tracker]
+ * @returns {object}
+ */
+function trackRepeat(name, result, tracker) {
+  if (!tracker?.limit) {
+    return result;
+  }
+  const error = resultErrorText(result);
+  if (!error) {
+    tracker.key = null;
+    tracker.count = 0;
+    return result;
+  }
+  const key = `${name} ${error}`;
+  if (key === tracker.key) {
+    tracker.count += 1;
+  } else {
+    tracker.key = key;
+    tracker.count = 1;
+  }
+  if (tracker.count >= tracker.limit) {
+    tracker.stuck = true;
+    return withGuidance(
+      result,
+      `This is call #${tracker.count} to ${name} returning the same error. Stopping — do not keep repeating the same failing call.`,
+    );
+  }
+  if (tracker.count >= 2) {
+    return withGuidance(
+      result,
+      `You have now called ${name} ${tracker.count} times and it failed the same way each time. Do not repeat the call unchanged — change the arguments, or use a different tool.`,
+    );
+  }
+  return result;
+}
+
+function withGuidance(result, guidance) {
+  return { ...result, error: `${result.error}\n\n${guidance}` };
 }
 
 /**

@@ -52,6 +52,7 @@ import { MAX_TOOL_TURNS } from './tool-loop.mjs';
  * @property {number} healTurns
  * @property {number} maxRunMs
  * @property {number} maxToolTurns
+ * @property {number|null} maxRepeatToolErrors
  * @property {number} maxAttempts
  * @property {number} heartbeatMs
  * @property {number} incidentHeartbeatMs
@@ -159,6 +160,17 @@ export async function main(argv) {
     process.exitCode = 1;
     return;
   }
+  if (
+    args.maxRepeatToolErrors !== null &&
+    (!Number.isInteger(args.maxRepeatToolErrors) ||
+      args.maxRepeatToolErrors < 0)
+  ) {
+    process.stderr.write(
+      '--max-repeat-tool-errors must be a non-negative integer.\n',
+    );
+    process.exitCode = 1;
+    return;
+  }
   if (!Number.isInteger(args.heartbeatMs) || args.heartbeatMs < 0) {
     process.stderr.write('--heartbeat-ms must be a non-negative integer.\n');
     process.exitCode = 1;
@@ -249,6 +261,7 @@ export async function main(argv) {
     maxHealTurns: args.healTurns,
     maxRunMs: args.maxRunMs,
     maxToolTurns: args.maxToolTurns,
+    maxRepeatToolErrors: args.maxRepeatToolErrors,
     heartbeatMs: args.heartbeatMs,
     incidentHeartbeatMs: args.incidentHeartbeatMs,
     maxRetries: args.modelRetries,
@@ -511,6 +524,10 @@ export function parseArgs(argv) {
     healTurns: 3,
     maxRunMs: 0,
     maxToolTurns: MAX_TOOL_TURNS,
+    // null (not a number) so the KODR_MAX_REPEAT_TOOL_ERRORS env var still
+    // reaches the resolver when the flag isn't passed -- a numeric default here
+    // would always win over it (see maxRepeatToolErrors in tool-loop.mjs).
+    maxRepeatToolErrors: null,
     maxAttempts: DEFAULT_MAX_ATTEMPTS,
     heartbeatMs: DEFAULT_HEARTBEAT_MS,
     incidentHeartbeatMs: DEFAULT_INCIDENT_HEARTBEAT_MS,
@@ -630,6 +647,11 @@ export function parseArgs(argv) {
     }
     if (arg === '--max-attempts' && argv[i + 1]) {
       args.maxAttempts = parseInt(argv[++i], 10);
+      i++;
+      continue;
+    }
+    if (arg === '--max-repeat-tool-errors' && argv[i + 1]) {
+      args.maxRepeatToolErrors = parseInt(argv[++i], 10);
       i++;
       continue;
     }
@@ -836,6 +858,8 @@ Options:
   --heal-turns <n>                Max repair turns (default: 3)
   --max-run-ms <n>                Stop between turns after this many ms (default: 0, disabled)
   --max-tool-turns <n>            Tool-turn ceiling per loop (default: 20)
+  --max-repeat-tool-errors <n>    Stop after the same tool call fails this many times in a
+                                  row (default: 3, or KODR_MAX_REPEAT_TOOL_ERRORS; 0 disables)
   --max-attempts <n>              For 'kodr goal': cap on build+judge iterations (default: 3,
                                   or KODR_GOAL_MAX_ATTEMPTS)
   --heartbeat-ms <n>              Stop-hook "still running" notice interval (or KODR_HEARTBEAT_MS; default: 30000, 0 disables)
@@ -1084,6 +1108,7 @@ export async function runGoalCommand(args) {
     maxHealTurns: args.healTurns,
     maxRunMs: args.maxRunMs,
     maxToolTurns: args.maxToolTurns,
+    maxRepeatToolErrors: args.maxRepeatToolErrors,
     heartbeatMs: args.heartbeatMs,
     incidentHeartbeatMs: args.incidentHeartbeatMs,
     maxRetries: args.modelRetries,
@@ -1217,6 +1242,7 @@ export async function runAcpCommand(args) {
     maxHealTurns: args.healTurns,
     maxRunMs: args.maxRunMs,
     maxToolTurns: args.maxToolTurns,
+    maxRepeatToolErrors: args.maxRepeatToolErrors,
     heartbeatMs: args.heartbeatMs,
     incidentHeartbeatMs: args.incidentHeartbeatMs,
     maxRetries: args.modelRetries,
