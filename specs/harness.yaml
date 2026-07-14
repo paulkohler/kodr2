@@ -120,6 +120,11 @@ constraints:
   - Run transcript saved even when model requests fail after run metadata is available
   - A model request that fails mid-loop preserves the usage, tool turns, compactions, and retries accumulated in earlier turns on the saved record (they are carried on the thrown error), rather than being booked as toolTurns 0 / cost 0 -- so a run that did real paid work before failing reports it accurately
   - Run transcript includes model, prompt, cwd, baseUrl, test command, env passthrough, start time, finish time, and duration
+  - Run transcript records the tool schemas offered to the model (the record's
+    `tools` field), so a saved run is self-describing -- reading it back to
+    explain a call that failed on its arguments should not require re-deriving
+    what tools were offered, or turning on --debug. Null on paths that offer no
+    tools (the "/compact" management run)
   - Run transcript records package-manager commands without blocking them
   - System prompt assembled fresh each run from workspace state
   - System prompt discloses the workspace root's absolute path and states that tool paths are relative to it, and that an absolute path inside the root is also accepted -- otherwise a model told only "paths are relative to the workspace root" cannot map a task's absolute path (e.g. write to /app/out.txt when the root is /app) and may strip just the leading slash to "app/out.txt", nesting a level too deep. The path jail resolves an absolute path within the (canonical) root to the same location as its relative form
@@ -166,6 +171,7 @@ tests:
     - heal forwards heartbeatMs and onHeartbeat to the model client's chat call
     - compaction forwards heartbeatMs and onHeartbeat to the summary chat call
     - run records include metadata and duration
+    - run records include the tool schemas offered to the model, null when none were offered
     - run records include package-manager commands and error metadata
     - failed model requests still save a run record
     - a mid-loop failure preserves the usage and tool turns done before it

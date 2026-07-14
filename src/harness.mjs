@@ -92,6 +92,7 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  * @property {number} [compactions]
  * @property {number} [retries]
  * @property {Array} [messages]
+ * @property {Array} [toolDefinitions]
  * @property {{ raw?: object, fix?: object }} [commits]
  * @property {boolean} [noOpCompletion]
  * @property {{ passed: boolean }} [verification]
@@ -445,6 +446,11 @@ export async function run(prompt, options) {
       usage: totalUsage,
       compactions,
       retries: totalRetries,
+      // The tool schemas the model actually saw this run, so the saved
+      // transcript is self-describing: reading a run back shouldn't require
+      // re-deriving what tools were offered (or turning on --debug) to explain
+      // a call that failed on its arguments.
+      toolDefinitions: tools.definitions(),
       messages,
     };
 
@@ -798,6 +804,7 @@ function createErrorResult(params) {
     usage: err.usage ?? { prompt: 0, completion: 0, cost: 0 },
     compactions: err.compactions ?? 0,
     retries: err.retries ?? 0,
+    toolDefinitions: tools.definitions(),
     messages,
   };
 }
@@ -1240,6 +1247,9 @@ export function createRunRecord(result, finish = {}) {
     noOpCompletion: result.noOpCompletion ?? false,
     healed: result.healed ?? null,
     healTurns: result.healTurns ?? null,
+    // The tool schemas offered to the model, so the log is self-describing
+    // (null on paths that offer no tools, e.g. the "/compact" management run).
+    tools: result.toolDefinitions ?? null,
     messages: result.messages,
   };
 }

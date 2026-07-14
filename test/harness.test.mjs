@@ -73,6 +73,33 @@ describe('createRunRecord', () => {
     );
     assert.equal(record.retries, 0);
   });
+
+  it('records the tool schemas offered to the model, so the log is self-describing', () => {
+    const toolDefinitions = [
+      { name: 'write_file', description: 'write', parameters: {} },
+      { name: 'read_file', description: 'read', parameters: {} },
+    ];
+    const record = createRunRecord(
+      {
+        metadata: {},
+        filesChanged: [],
+        toolTurns: 0,
+        usage: {},
+        toolDefinitions,
+        messages: [],
+      },
+      {},
+    );
+    assert.deepEqual(record.tools, toolDefinitions);
+  });
+
+  it('leaves tools null when none were offered (e.g. a /compact run)', () => {
+    const record = createRunRecord(
+      { metadata: {}, filesChanged: [], toolTurns: 0, usage: {}, messages: [] },
+      {},
+    );
+    assert.equal(record.tools, null);
+  });
 });
 
 describe('isRunBudgetExceeded', () => {
