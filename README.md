@@ -278,6 +278,7 @@ routing docs](https://openrouter.ai/docs/features/provider-routing).
 --model-retries <n>     Retries for a 5xx chat response, e.g. a local backend crash (or KODR_MODEL_RETRIES; default: 1, 0 disables)
 --context-window <n>    Max context tokens; compact at 80% (auto-detected where the provider supports it; 0 disables)
 --env <a,b,c>           Extra env vars to expose to commands (CSV of names)
+--plugin <name>         Enable an output-sink plugin (repeatable, e.g. --plugin telegram)
 --continue <last|path>  Continue from a prior run
 --quiet, -q             Suppress streaming output
 ```
@@ -309,6 +310,42 @@ kodr "run the integration suite" --test "npm run test:int" --env API_BASE_URL,CI
 
 Only the named variables that exist in your environment are forwarded; the
 values are never shown to the model.
+
+## Plugins
+
+Plugins are output sinks that observe a run. They ride the same one-way
+[reporter channel](specs/reporter.yaml) the terminal output uses, so a plugin
+sees each turn, tool call, and the final summary as they happen. Unlike tools
+and skills (which the model invokes) and hooks (user shell commands that feed
+back to the model), a plugin is a pure observer: the model never sees it and it
+writes nothing back into the conversation.
+
+Plugins are in-tree and off by default. Enable one with `--plugin <name>`
+(repeatable) or by adding a `.kodr/plugins.json` file to your workspace:
+
+```json
+{ "plugins": { "telegram": {} } }
+```
+
+When a plugin is active, the run's reporter is fanned out to it alongside the
+terminal, and a plugin that fails is isolated — it never breaks the run.
+
+### Telegram
+
+The `telegram` plugin mirrors each turn to a Telegram channel. Credentials come
+from the environment, never config or the repo:
+
+```bash
+export KODR_TELEGRAM_TOKEN="<bot token from @BotFather>"
+export KODR_TELEGRAM_CHAT_ID="<target chat or channel id>"
+kodr "list the files" --plugin telegram
+```
+
+This mirrors the model's turns, tool calls, and a final summary to an external
+service — enable it deliberately. Messages are sent as plain text (so model
+output is never rendered as markup) and truncated to Telegram's 4096-character
+limit. If the credentials are missing, the plugin is disabled with a notice and
+the run proceeds normally.
 
 ## Workspace instructions
 
@@ -375,6 +412,10 @@ src/
   acp-reporter.mjs     ACP reporter: run events -> session/update
   acp-backend.mjs      ACP fs/terminal delegation to the client
   format.mjs           Terminal output formatting
+  reporter.mjs         One-way output channel (terminal/json/null/fan-out)
+  plugins/
+    index.mjs          Plugin host (activation + reporter fan-out)
+    telegram.mjs       Telegram channel mirror
   tools/
     index.mjs          Tool registry
     backend.mjs        Local fs/exec backend behind the file/command tools

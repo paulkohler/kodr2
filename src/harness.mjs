@@ -15,7 +15,12 @@ import { buildSystemPrompt } from './context.mjs';
 import { createDebugLogger, debugLogEnabled } from './debug-log.mjs';
 import { buildEnv } from './env.mjs';
 import { heal } from './heal.mjs';
-import { createNullReporter, createTerminalReporter } from './reporter.mjs';
+import { activateReporterPlugins } from './plugins/index.mjs';
+import {
+  createFanOutReporter,
+  createNullReporter,
+  createTerminalReporter,
+} from './reporter.mjs';
 import {
   loadHooks,
   runSessionHooks,
@@ -140,6 +145,7 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  *   attempt touched but never got to commit, not just files this specific
  *   session's own tool calls touch.
  * @param {string[]} [options.envPassthrough] - Extra env var names for commands
+ * @param {string[]} [options.plugins] - Output-sink plugin names to enable (see specs/plugins.yaml)
  * @param {number} [options.contextWindow] - Max context window in tokens (0 disables compaction)
  * @param {number} [options.healReserve] - Fraction of the run budget held back for heal (0..0.9; default KODR_HEAL_RESERVE or 0.25)
  * @param {number} [options.heartbeatMs] - Interval for Stop-hook "still running" notices (0 disables; default KODR_HEARTBEAT_MS or 30000)
@@ -207,6 +213,7 @@ export async function run(prompt, options) {
     priorMessages,
     priorFilesChanged = [],
     envPassthrough = [],
+    plugins = [],
   } = options;
   const runsDir = resolveRunsDir(cwd, options.runsDir);
   const rawThenFixCommits = rawThenFixCommitsEnabled(options.rawThenFixCommits);
@@ -215,9 +222,19 @@ export async function run(prompt, options) {
   // here at the harness boundary and threaded down; quiet just selects the
   // silent reporter. The CLI may inject its own (e.g. the --events JSON
   // reporter) via options.reporter.
-  const reporter =
+  let reporter =
     options.reporter ??
     (quiet ? createNullReporter() : createTerminalReporter());
+
+  // Output-sink plugins (specs/plugins.yaml) ride the same reporter channel:
+  // when any activate, fan the run's reporter out to them alongside the base.
+  const pluginReporters = await activateReporterPlugins(cwd, {
+    enabled: plugins,
+    notice: (text) => reporter.notice(text),
+  });
+  if (pluginReporters.length > 0) {
+    reporter = createFanOutReporter([reporter, ...pluginReporters]);
+  }
 
   // A previous run's leftover heartbeat is the only evidence of a true
   // SIGKILL or host crash, since nothing runs in-process at the moment

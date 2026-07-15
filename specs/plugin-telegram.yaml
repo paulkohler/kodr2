@@ -1,0 +1,60 @@
+name: plugin-telegram
+status: accepted
+description: >
+  A plugin that mirrors a run's turns to a Telegram channel. It is an output
+  sink on the reporter channel (specs/plugins.yaml, specs/reporter.yaml): its
+  setup() returns a Reporter that accumulates streamed token deltas and posts
+  one plain-text message per turn (turnEnd), a line per tool call (toolCall),
+  and a compact run summary (summary). Credentials come from the environment,
+  never config or the repo. Egress is opt-in: the plugin is only active when
+  explicitly enabled. Sends are serialized so channel messages preserve run
+  order. The plugin is an observer — it posts copies and returns nothing into
+  the conversation.
+
+inputs:
+  KODR_TELEGRAM_TOKEN:
+    type: string
+    required: true
+    description: Telegram bot token, read from the environment
+  KODR_TELEGRAM_CHAT_ID:
+    type: string
+    required: true
+    description: Target chat/channel id, read from the environment
+  config.transport:
+    type: function
+    required: false
+    description: >
+      Injectable async sender (text) => void for tests. Defaults to a
+      fetch-based sender that POSTs to the Telegram Bot API sendMessage.
+
+outputs:
+  error:
+    type: string
+    description: Set when required env vars are missing, disabling the plugin
+
+constraints:
+  - Token and chat id are read from the environment, never from config or the repo
+  - setup returns { error } when either env var is missing, disabling the plugin
+  - setup otherwise returns a total Reporter built on createNullReporter
+  - The default transport uses built-in fetch — no runtime dependency
+  - Messages are sent as plain text with no parse_mode, so model output cannot be rendered as markup
+  - A message longer than 4096 characters (Telegram's limit) is truncated with an ellipsis marker
+  - Streamed token deltas accumulate and flush as one message per turn on turnEnd
+  - A turn whose accumulated text is empty (tool-only turn) sends nothing
+  - toolCall sends the tool name and a short argument summary
+  - summary sends a compact run summary (files, verify, tokens)
+  - Sends are serialized through a single tail promise so messages arrive in order
+  - A failed send is swallowed and never crashes the run
+
+tests:
+  unit:
+    - setup returns an error when KODR_TELEGRAM_TOKEN is missing
+    - setup returns an error when KODR_TELEGRAM_CHAT_ID is missing
+    - turnEnd flushes accumulated token text as one message
+    - a tool-only turn (empty text) sends nothing on turnEnd
+    - toolCall sends the tool name and argument summary
+    - summary sends a compact run summary
+    - truncate caps a message at 4096 characters with an ellipsis
+    - sends go through the injected transport with the expected text
+    - messages are delivered in order through the tail promise
+    - a transport rejection is swallowed and does not throw

@@ -1,0 +1,69 @@
+name: plugins
+status: accepted
+description: >
+  A host-driven extension point, distinct from tools, skills, and hooks. Tools
+  and skills are model-invoked and feed results back into the conversation;
+  hooks are user shell commands that gate or feed back to the model. Plugins are
+  observers: output sinks that ride the reporter channel (specs/reporter.yaml).
+  A plugin's setup() returns a Reporter, and the harness fans the run's reporter
+  out to it (createFanOutReporter), so a plugin sees the same token/turnEnd/
+  toolCall/toolResult/summary stream the terminal reporter does. A plugin never
+  writes back into the message array and the model never sees it. Plugins are
+  in-tree (registered in src/plugins/index.mjs), not dynamically loaded, and are
+  activated by configuration — off by default.
+
+inputs:
+  cwd:
+    type: string
+    required: true
+    description: Absolute path to workspace root
+  config:
+    type: object
+    required: false
+    description: >
+      Activation config, shape { plugins: { <name>: <pluginConfig> } }. Loaded
+      from .kodr/plugins.json or supplied directly.
+  enabled:
+    type: array
+    required: false
+    description: Plugin names force-enabled via the CLI (--plugin <name>)
+  env:
+    type: object
+    required: false
+    description: Environment for plugin setup (defaults to process.env)
+
+outputs:
+  reporters:
+    type: array
+    description: >
+      One Reporter per activated plugin, for the harness to fan out to.
+  error:
+    type: string
+    description: >
+      A plugin's setup may return { error } to disable itself; the host reports
+      it as a notice and skips the plugin.
+
+constraints:
+  - A plugin is a plain object { name, setup } (no dynamic loading)
+  - setup(config, ctx) returns a Reporter, or { error } to disable the plugin with a notice
+  - The returned Reporter is total (every REPORTER_METHODS name is a function), built on createNullReporter
+  - Plugins are output sinks only — a Reporter observes, it never mutates the conversation
+  - Only plugins named in config.plugins or in the force-enabled list are activated
+  - A workspace with no plugin config and no force-enable activates no plugins
+  - createFanOutReporter forwards every reporter method to each child in order
+  - A child reporter that throws is isolated so it breaks neither another sink nor the run
+  - The .kodr/plugins.json path is path-jailed within the workspace root
+  - A missing or malformed .kodr/plugins.json activates no plugins and never throws
+  - Credentials and secrets come from the environment, never from config or the repo
+
+tests:
+  unit:
+    - createFanOutReporter forwards each method to every child in order
+    - createFanOutReporter isolates a throwing child so other children still run
+    - activateReporterPlugins returns a sink reporter for a configured plugin
+    - activateReporterPlugins force-enables a plugin by name
+    - activateReporterPlugins returns nothing when no plugin is configured or enabled
+    - a plugin whose setup returns an error is skipped and its message noticed
+    - loadConfig reads activation config from .kodr/plugins.json
+    - loadConfig returns null when no config file exists
+    - loadConfig returns null for malformed JSON

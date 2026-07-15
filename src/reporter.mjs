@@ -99,6 +99,31 @@ export function createNullReporter() {
 }
 
 /**
+ * A reporter that forwards every call to each of several child reporters, so a
+ * run can drive more than one sink at once (e.g. the terminal plus a plugin
+ * that mirrors the run elsewhere). Total like every reporter, and each forward
+ * is isolated: a child that throws is caught so one sink cannot break another
+ * or the run. Children are called in the given order.
+ * @param {Reporter[]} reporters
+ * @returns {Reporter}
+ */
+export function createFanOutReporter(reporters) {
+  const fan = /** @type {Reporter} */ ({});
+  for (const name of REPORTER_METHODS) {
+    fan[name] = (payload) => {
+      for (const reporter of reporters) {
+        try {
+          reporter[name](payload);
+        } catch {
+          // A sink's failure must never break another sink or the run.
+        }
+      }
+    };
+  }
+  return fan;
+}
+
+/**
  * The terminal reporter — reproduces the harness's historical output exactly:
  * streamed model text to stdout, all other chrome to stderr, each chrome line
  * the matching format.mjs string plus a trailing newline. `phase` and

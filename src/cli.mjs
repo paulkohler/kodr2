@@ -71,6 +71,7 @@ import { MAX_TOOL_TURNS } from './tool-loop.mjs';
  * @property {number} reviewMaxToolTurns
  * @property {boolean} quiet
  * @property {string[]} env
+ * @property {string[]} plugins
  * @property {string|null} continue
  * @property {string|null} runsDir
  * @property {boolean} noSave
@@ -289,6 +290,7 @@ export async function main(argv) {
     // undefined otherwise so the harness picks the terminal/null reporter.
     reporter: args.events ? createJsonReporter() : undefined,
     envPassthrough: args.env,
+    plugins: args.plugins,
     runsDir: args.runsDir,
     noSave: args.noSave,
     rawThenFixCommits: args.rawThenFixCommits,
@@ -558,6 +560,7 @@ export function parseArgs(argv) {
     reviewMaxToolTurns: DEFAULT_REVIEW_MAX_TOOL_TURNS,
     quiet: false,
     env: [],
+    plugins: [],
     continue: null,
     runsDir: null,
     noSave: false,
@@ -721,6 +724,14 @@ export function parseArgs(argv) {
     }
     if (arg === '--env' && argv[i + 1]) {
       args.env = parseEnvNames(argv[++i]);
+      i++;
+      continue;
+    }
+    if (arg === '--plugin' && argv[i + 1]) {
+      const name = argv[++i].trim();
+      if (name && !args.plugins.includes(name)) {
+        args.plugins.push(name);
+      }
       i++;
       continue;
     }
@@ -905,6 +916,7 @@ Options:
                                   KODR_REVIEW_MIN_TOOL_CALLS; default: 2, 0 disables the floor)
   --review-max-tool-turns <n>     Tool-turn ceiling per review attempt (or KODR_REVIEW_MAX_TOOL_TURNS; default: 12)
   --env <a,b,c>                   Extra env vars to expose to commands (CSV of names)
+  --plugin <name>                 Enable an output-sink plugin (repeatable, e.g. --plugin telegram)
   --continue <last|path>          Continue from a prior run
   --runs-dir <path>               Where to write run transcripts (or KODR_RUNS_DIR)
   --no-save                       Don't write a run transcript (or KODR_NO_SAVE)

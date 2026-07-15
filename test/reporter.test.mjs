@@ -11,12 +11,16 @@ import {
   formatVerification,
 } from '../src/format.mjs';
 import {
+  createFanOutReporter,
   createJsonReporter,
   createNullReporter,
   createTerminalReporter,
   REPORTER_METHODS,
 } from '../src/reporter.mjs';
-import { createFakeStream } from './capture-reporter.mjs';
+import {
+  createCaptureReporter,
+  createFakeStream,
+} from './capture-reporter.mjs';
 
 describe('createNullReporter', () => {
   it('exposes every REPORTER_METHODS name as a no-op returning undefined', () => {
@@ -151,5 +155,40 @@ describe('createJsonReporter', () => {
       filesChanged: ['a.mjs'],
       usage: { prompt: 1, completion: 2, cost: 0 },
     });
+  });
+});
+
+describe('createFanOutReporter', () => {
+  it('forwards each method to every child in order', () => {
+    const a = createCaptureReporter();
+    const b = createCaptureReporter();
+    const fan = createFanOutReporter([a.reporter, b.reporter]);
+
+    for (const name of REPORTER_METHODS) {
+      assert.equal(typeof fan[name], 'function', name);
+    }
+
+    fan.toolCall({ name: 'read_file', args: { path: 'a.mjs' } });
+    fan.summary(/** @type {any} */ ({ stoppedReason: 'complete' }));
+
+    const shape = (capture) => capture.events.map((e) => e.type);
+    assert.deepEqual(shape(a), ['toolCall', 'summary']);
+    assert.deepEqual(shape(b), ['toolCall', 'summary']);
+    assert.deepEqual(a.events[0].payload, {
+      name: 'read_file',
+      args: { path: 'a.mjs' },
+    });
+  });
+
+  it('isolates a throwing child so other children still run', () => {
+    const throwing = createNullReporter();
+    throwing.notice = () => {
+      throw new Error('sink boom');
+    };
+    const good = createCaptureReporter();
+    const fan = createFanOutReporter([throwing, good.reporter]);
+
+    assert.doesNotThrow(() => fan.notice('hello'));
+    assert.deepEqual(good.events, [{ type: 'notice', payload: 'hello' }]);
   });
 });
