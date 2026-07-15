@@ -314,9 +314,43 @@ That's the walking skeleton. Everything else (search, edit_file, run_command, ve
 
 - Not a chat interface. One prompt in, one result out (with tool calls in between).
 - Not a multi-model router. LM Studio, one model at a time.
-- Not a plugin platform. Tools are in the source tree, not dynamically loaded.
+- Not a general plugin platform. There are extension points (see "Extension model" below), but nothing is dynamically loaded — every extension lives in the source tree and is reviewed. We don't run arbitrary third-party plugin code.
 - Not an agent framework. No subagents, no orchestration, no delegation.
 - Not a product. It's a development tool for us, built in public.
+
+
+## Extension model (added since this proposal)
+
+The original proposal framed extensibility as "tools, in the source tree." As the
+tool grew, that expanded into four distinct extension points. They differ along two
+axes — *who triggers them* and *whether they feed back into the conversation* — and
+that difference is the whole point: reaching for the wrong one is a design smell.
+All four are in-tree and config-gated; none is dynamically loaded.
+
+| Extension | Triggered by | Feeds back to the model? | Config |
+|---|---|---|---|
+| **Tools** | the model | yes (tool result) | in-tree registry (`src/tools/index.mjs`) |
+| **Skills** | the model | yes (instructions injected) | `.kodr/skills/*/SKILL.md`, loaded via `load_skill` |
+| **Hooks** | the operator | yes, when blocking | `.kodr/hooks.json` |
+| **Plugins** | the harness | no (observers only) | `.kodr/plugins.json` / `--plugin` |
+
+- **Tools** and **skills** are model-invoked and feed results back into the
+  conversation — the model calls a tool, or loads a skill's instructions, mid-run.
+- **Hooks** (`specs/hooks.yaml`, implemented) are the deterministic,
+  operator-controlled counterpart to tool calls: user shell commands bound to
+  lifecycle events (`Stop`, `PreToolUse`, `PostToolUse`, `SessionStart`,
+  `SessionEnd`). A blocking hook's output feeds back through the heal loop.
+- **Plugins** (`specs/plugins.yaml`) are host-driven observers — output sinks that
+  ride the one-way reporter channel (`specs/reporter.yaml`). A plugin's `setup()`
+  returns a reporter and the harness fans the run's reporter out to it, so the
+  plugin sees each turn, tool call, and the final summary. The model never sees a
+  plugin and a plugin writes nothing back into the conversation. Plugins are off by
+  default and enabled per workspace/run. The first plugin is **Telegram**
+  (`specs/plugin-telegram.yaml`), which mirrors a run's turns to a Telegram channel
+  using built-in `fetch`, credentials from the environment only.
+
+The boundary from "What this is not" still holds: these are in-tree and reviewed.
+There is no dynamic loading of arbitrary third-party plugin code.
 
 
 ## Relationship to v1
