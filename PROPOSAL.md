@@ -349,6 +349,25 @@ All four are in-tree and config-gated; none is dynamically loaded.
   (`specs/plugin-telegram.yaml`), which mirrors a run's turns to a Telegram channel
   using built-in `fetch`, credentials from the environment only.
 
+### Plugins are not front-ends
+
+A plugin is not the same thing as a front-end (the terminal, the interactive TUI,
+`--events` JSON, or the ACP agent), even though both are reporters. The reporter
+(`specs/reporter.yaml`) is the shared one-way output seam; how a consumer uses it is
+what differs:
+
+- **Front-ends** *own the run*. Each is an entry point (`kodr`, `kodr --tui`,
+  `kodr acp`), constructs its own reporter and passes it as `options.reporter`, and
+  pairs it with *input* channels — command approval (`confirm`), cancellation
+  (`signal`), and, for ACP, a filesystem/exec `backend`. One front-end is *selected*
+  per run; they are mutually exclusive and bidirectional.
+- **Plugins** *ride along*. They are output-only observers that the harness *fans out*
+  to on top of whichever front-end is active. Many can run at once, and none has an
+  input channel — a plugin watches, it never drives.
+
+Rule of thumb: selected + bidirectional + one-at-a-time ⇒ front-end; fanned-out +
+output-only + additive ⇒ plugin. So the TUI and ACP are front-ends, not plugins.
+
 The boundary from "What this is not" still holds: these are in-tree and reviewed.
 There is no dynamic loading of arbitrary third-party plugin code.
 
