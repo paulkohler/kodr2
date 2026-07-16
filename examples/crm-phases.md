@@ -269,3 +269,10 @@ added. Same shape as phase 5, just bigger — same reason it's a GOAL: line.
 - This is a long run by design — fifteen phases, four of them a multi-attempt
   judged loop on top of a multi-turn build. Launch it detached
   (see phased-loop.sh's header) rather than in a foreground shell.
+- Set `RESET_PATHS=data` (phase 0 scaffolds storage under `data/`, gitignored).
+  A parked phase's `git reset --hard` only reverts tracked files — without
+  `RESET_PATHS`, a since-reverted attempt's schema/migration changes to the
+  live database persist forever, invisible in git, and can break every phase
+  after it. A live run of this exact plan hit that: three separate parked
+  phases left permanent schema drift in `data/crm.db` with zero trace in any
+  commit.
