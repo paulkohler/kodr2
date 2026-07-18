@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -6,11 +7,28 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { runShell } from '../src/shell.mjs';
 
+// A killed process can linger as an unreaped zombie when PID 1 is not a
+// reaping init (as in some containers). process.kill(pid, 0) still succeeds
+// for a zombie, but the process is dead -- so a 'Z' state counts as not alive.
+// A still-running process (kill mechanism failed) is state R/S, not Z, so the
+// timeout-kill assertions still catch a real regression.
 function isProcessAlive(pid) {
   try {
     process.kill(pid, 0);
-    return true;
   } catch {
+    return false;
+  }
+  return !isZombie(pid);
+}
+
+function isZombie(pid) {
+  try {
+    const stat = execFileSync('ps', ['-o', 'stat=', '-p', String(pid)])
+      .toString()
+      .trim();
+    return stat.startsWith('Z');
+  } catch {
+    // No such process (already reaped/gone): not alive, and not a zombie.
     return false;
   }
 }
