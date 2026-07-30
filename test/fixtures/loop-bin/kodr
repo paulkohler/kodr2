@@ -1,0 +1,86 @@
+#!/usr/bin/env node
+/**
+ * A scripted stand-in for the `kodr` CLI, for the loop-script tests.
+ *
+ * The unit under test is the bash orchestration in examples/loop.sh and
+ * examples/phased-loop.sh — the ratchet, the retry loop, the park path. `kodr`
+ * is that orchestration's injected collaborator, the same role runTask and
+ * evaluate play in runGoal's own unit tests. No model is faked here because no
+ * model is involved in the behaviour being asserted; see specs/loop-scripts.yaml.
+ *
+ * Driven by three env vars, all pointing outside the repo under test so this
+ * fixture's own state is never swept into a `git add -A`:
+ *   KODR_STUB_RESPONSES  JSON array, one entry consumed per run/goal invocation
+ *   KODR_STUB_STATE      counter file holding the next index
+ *   KODR_STUB_ARGV       JSONL log, one line of argv per invocation
+ *
+ * A response entry:
+ *   { "json": {...},                 printed to stdout (what --json emits)
+ *     "write": { "path": "text" },   files created first, so filesChanged is real
+ *     "remove": ["path"],            files deleted first
+ *     "exit": 0 }                    process exit code
+ */
+
+import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+
+const argv = process.argv.slice(2);
+const subcommand = argv[0];
+
+const argvLog = process.env.KODR_STUB_ARGV;
+if (argvLog) {
+  appendFileSync(argvLog, `${JSON.stringify(argv)}\n`);
+}
+
+// `kodr stats` is the end-of-backlog summary. It consumes no scripted response —
+// tests assert it ran, not what it said.
+if (subcommand === 'stats') {
+  process.stdout.write('stub stats\n');
+  process.exit(0);
+}
+
+const responsesPath = process.env.KODR_STUB_RESPONSES;
+const statePath = process.env.KODR_STUB_STATE;
+if (!responsesPath || !statePath) {
+  process.stderr.write('kodr stub: KODR_STUB_RESPONSES and KODR_STUB_STATE are required\n');
+  process.exit(97);
+}
+
+const responses = JSON.parse(readFileSync(responsesPath, 'utf8'));
+
+let index = 0;
+try {
+  index = Number.parseInt(readFileSync(statePath, 'utf8').trim(), 10);
+} catch {
+  index = 0;
+}
+if (Number.isNaN(index)) {
+  index = 0;
+}
+
+if (index >= responses.length) {
+  // Loudly, not by repeating the last response: a script that invoked kodr more
+  // times than the test scripted is a real finding, not something to paper over.
+  process.stderr.write(
+    `kodr stub: no scripted response for invocation ${index + 1} (${responses.length} scripted)\n`,
+  );
+  process.exit(97);
+}
+
+const response = responses[index];
+writeFileSync(statePath, String(index + 1));
+
+for (const [path, content] of Object.entries(response.write ?? {})) {
+  mkdirSync(dirname(join(process.cwd(), path)), { recursive: true });
+  writeFileSync(join(process.cwd(), path), content);
+}
+
+for (const path of response.remove ?? []) {
+  rmSync(join(process.cwd(), path), { force: true, recursive: true });
+}
+
+if (response.json) {
+  process.stdout.write(`${JSON.stringify(response.json)}\n`);
+}
+
+process.exit(response.exit ?? 0);

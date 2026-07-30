@@ -1,0 +1,18 @@
+#!/usr/bin/env node
+/**
+ * A recording stand-in for `sleep`, for the loop-script tests.
+ *
+ * RETRY_BACKOFF_S defaults to 5s and the backoff assertions need to prove *when*
+ * the backoff fires, not wait for it — a suite that really slept would take
+ * minutes and would tempt a later reader to delete the case. Appends its
+ * arguments to KODR_STUB_SLEEP (one line per call) and returns immediately.
+ */
+
+import { appendFileSync } from 'node:fs';
+
+const log = process.env.KODR_STUB_SLEEP;
+if (log) {
+  appendFileSync(log, `${process.argv.slice(2).join(' ')}\n`);
+}
+
+process.exit(0);

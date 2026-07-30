@@ -1,0 +1,181 @@
+name: loop-scripts
+status: implemented
+description: >
+  A contract and a unit-test harness for the two shipped driver scripts,
+  examples/loop.sh and examples/phased-loop.sh. They are the outer loop that
+  drives Kodr over a checklist unattended for hours — the ratchet (commit on
+  green, retry in place on red, revert-and-park on giving up) — and they are
+  currently the only part of this repo with neither a spec nor a test.
+
+  That gap is not theoretical. Commit 2adb55d fixed five bugs in these two
+  scripts, all found by hand during a 15-phase CRM dogfooding run
+  (examples/crm-phases.md) that took roughly five hours per pass. Their shape
+  is what matters here: four of the five failed *silently* — a run whose logs
+  froze after the first success while it was still healthy; five phases that
+  built correctly and were never committed because a `git add` advisory exit
+  code skipped the `&& git commit`; parked phases whose SQLite schema drift
+  leaked into every later phase with no trace in git history. One (bug 4) was a
+  regression introduced by the fix for bug 1 in the same session, caught only
+  by the next live run. Bug 5 was two more found on the very next relaunch, so
+  the discovery curve had not flattened when the session ended.
+
+  A silent failure in an unattended loop is the expensive class: the run looks
+  healthy, the operator is asleep, and the damage is only visible hours later.
+  These are exactly the failures a fast deterministic test catches for free,
+  and exactly the ones a live run catches only by luck and only after burning
+  an evening.
+
+  This spec proposes: (1) writing down what the scripts guarantee, so there is
+  a contract to test against, and (2) test/loop-scripts.test.mjs, which drives
+  both scripts end to end against a scripted `kodr` on PATH, with each of the
+  five live-found bugs as a named regression case.
+
+approach: >
+  The seam already exists. Both scripts resolve their collaborators off PATH
+  behind `command -v` guards (examples/phased-loop.sh:72-73) and take every
+  other input as an environment variable (MAX_ATTEMPTS, TEST_CMD, TASKS_FILE,
+  RETRY_BACKOFF_S, RESET_PATHS, ...). Prepending a fixture directory to PATH
+  therefore substitutes a scripted `kodr` with no change to the scripts
+  themselves, and the test asserts on real git state in a real temp repo.
+
+  This mirrors the precedent goal.yaml already sets for the in-process loop:
+  "Orchestration (runGoal) is pure and injectable — the per-attempt build and
+  the judge are injected collaborators, so the loop control is unit-tested
+  without a model." PATH is the shell's version of that injection, and the
+  loop control under test is the same kind: attempt capping, retry routing,
+  park handling, commit ordering.
+
+  Tests are fast (no model, no network, seconds not hours) and deterministic,
+  so they belong in test/ under `npm test` rather than eval/.
+
+scope:
+  in:
+    - examples/loop.sh and examples/phased-loop.sh — the ratchet, the retry
+      loop, the park path, checklist marking, commit ordering, RESET_PATHS.
+    - The scripts' consumption contract with `kodr --json` — which fields they
+      read and how they combine them into a green/not-green decision.
+  out:
+    - Kodr itself. `kodr run` and `kodr goal` have their own specs and tests;
+      this spec never asserts on model behaviour, only on what the shell does
+      with a given result.
+    - Whether these scripts should graduate from examples/ into a first-class
+      `kodr loop` command (goal.yaml's own future section proposes exactly
+      that). Testing them where they live is a prerequisite either way, and
+      does not prejudge it.
+
+constraints:
+  - >
+    The scripted `kodr` is a contract stub, not a model mock. AGENTS.md's rule
+    ("No model mocks. Tests either need the model (eval) or don't (unit)")
+    is about not faking model *output* to dodge an eval. Here the unit under
+    test is the bash orchestration, and `kodr` is its collaborator — the same
+    role runTask and evaluate play as injected callbacks in runGoal. No model
+    is faked because no model is involved in the behaviour being asserted.
+  - >
+    Stub drift is the real risk this introduces, and it gets an explicit guard.
+    The scripts consume a narrow set of `--json` fields — .completed,
+    .noOpCompletion, .verified, .stoppedReason, .filesChanged for `kodr run`;
+    .met, .filesChanged, .verified, .reason, .attempts for `kodr goal` — and a
+    stub is free to keep emitting a shape the real CLI has stopped producing.
+    One eval (eval/loop-contract.eval.mjs) runs the real binary once per
+    subcommand and asserts those fields still exist with the expected types.
+    The stub's scripted responses are generated from the same field list, so a
+    CLI shape change fails the eval rather than silently passing the units.
+  - >
+    The stub must produce real file changes, not just claim them. A "green"
+    response that writes nothing leaves `git add -A && git commit` with an
+    empty index, which fails for a reason unrelated to the behaviour under
+    test. Each scripted response therefore carries an optional set of files to
+    write before it returns, so filesChanged in the JSON and the actual working
+    tree agree.
+  - >
+    `sleep` is stubbed on the same PATH and records its arguments instead of
+    sleeping. RETRY_BACKOFF_S defaults to 5s and the backoff assertions need to
+    prove *when* it fires, not wait for it; a test suite that really slept
+    would take minutes and would tempt a future reader to delete the case.
+  - >
+    Each test runs in its own temp git repo with a local user.name/user.email
+    and a seeded TASKS.md, torn down after. No test touches the kodr2 repo
+    itself — several cases assert on `git reset --hard`, `git clean -fd` and
+    `rm -rf`, which must never be pointed at a real working tree.
+  - >
+    The scripts require bash >= 4.4 (an empty array expansion under `set -u` is
+    an unbound-variable error on macOS's preinstalled 3.2). Tests resolve bash
+    the same way the scripts' shebang does — `env bash` — and skip with an
+    explicit message rather than failing obscurely when it resolves to 3.x, so
+    a contributor on stock macOS sees why.
+  - Zero runtime dependencies; node:test and node:child_process only, per AGENTS.md.
+
+tests:
+  unit:
+    # --- the ratchet, both scripts ---
+    - a green task commits once, with the checklist tick inside the same commit as the code
+    - the checklist tick is committed before any later task can reset it (mark-then-commit order)
+    - a red task retries in place with --continue last, up to MAX_ATTEMPTS
+    - a task that never goes green parks - reset --hard, mark '!', and its own commit of TASKS_FILE
+    - an empty backlog exits cleanly and prints "backlog empty."
+    - green requires completed AND not noOpCompletion AND verified != false
+    - a no-op completion (completed true, filesChanged empty) is not green and does not commit
+    # --- phased-loop's GOAL: branch ---
+    - a "GOAL: " line routes to `kodr goal` with --max-attempts GOAL_MAX_ATTEMPTS, not `kodr run`
+    - a plain line routes to `kodr run` with --memory --memory-auto-apply
+    - a GOAL: item gets no outer retry loop - one kodr goal invocation, then green or park
+    - a GOAL: item's green requires met AND filesChanged non-empty AND verified != false
+    - the park note records the goal's attempts and reason
+    # --- regression: the five bugs from 2adb55d ---
+    - "bug 1: the script's own log file survives a later task's park (locally ignored, never reset)"
+    - "bug 2: an attempt ending stoppedReason error backs off RETRY_BACKOFF_S before the retry"
+    - "bug 2: no backoff before the final attempt's park - a park already happening is not delayed"
+    - "bug 3: RESET_PATHS wipes a gitignored path the parked attempt mutated"
+    - "bug 3: RESET_PATHS refuses '.', '..', '.git', an absolute path, and '..' traversal, and continues"
+    - "bug 3: an unquoted '*' in RESET_PATHS is not glob-expanded (set -f), so the tree survives"
+    - "bug 4: a green task still commits when the log file is ALSO in the project's tracked .gitignore"
+    - "bug 4: the script self-registers its log files in .git/info/exclude at startup"
+    - "bug 4: a failed commit after a green build stops the script non-zero instead of continuing"
+    - "bug 4: a failed park-mark commit stops the script non-zero"
+    - "bug 5: untracked debris from a failed attempt is removed on park (git clean -fd)"
+    - "bug 5: git clean does not touch a gitignored path - that is RESET_PATHS's job alone"
+    - "bug 5: a RESET_PATHS directory is recreated empty, not left missing"
+    # --- the drift guard's own guard ---
+    # jq collapses a missing field to a clean "false", so the scripts' own
+    # expressions cannot tell a renamed field from a genuinely red run. The
+    # field checks are what actually catch drift, so they are proven to bite
+    # here against deliberately drifted payloads - no model required.
+    - the contract check accepts what the scripts are handed today
+    - the contract check accepts a null verified (no test command configured)
+    - the contract check catches a renamed field the ratchet reads
+    - the contract check catches a retyped field
+    - the contract check catches filesChanged ceasing to be an array
+    - the contract check catches the park note losing reason or attempts
+    - the JS green decisions agree with the jq expressions the scripts run
+  eval:
+    - >
+      the real `kodr run --json` and `kodr goal --json` still emit every field the
+      scripts consume, with the expected types (the stub-drift guard), and the
+      scripts' own jq expressions agree with the same decision computed in JS
+
+deliverables:
+  - specs/loop-scripts.yaml (this file)
+  - test/loop-scripts.test.mjs
+  - test/loop-fixtures.mjs - temp-repo setup/teardown and the scripted-response
+    builder, a plain helper module like test/capture-reporter.mjs so
+    `node --test test/*.test.mjs` does not treat it as a test file
+  - test/fixtures/loop-bin/kodr - the scripted stub, reading its response
+    sequence and recording each invocation's argv
+  - test/fixtures/loop-bin/sleep - records its argument, returns immediately
+  - eval/loop-contract.eval.mjs - the stub-drift guard
+
+future:
+  - >
+    shellcheck over examples/*.sh in CI. It would not have caught any of the
+    five (all were semantic, not syntactic), so it is a rider rather than the
+    reason to do this work - but it is nearly free once the scripts are treated
+    as code under test rather than as documentation.
+  - >
+    Promote the ratchet into a first-class `kodr loop` driver over an
+    arena-style task queue, per goal.yaml's future section. These tests become
+    its acceptance criteria, and the bash scripts stay as the worked example.
+  - >
+    A slow, opt-in end-to-end case outside required CI - a 2-3 phase checklist
+    against a real model - to cover what the stub cannot: that a real
+    stoppedReason sequence still drives the ratchet the way the units assume.
