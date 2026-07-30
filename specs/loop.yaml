@@ -1,0 +1,315 @@
+name: loop
+status: proposed
+description: >
+  `kodr loop` — a first-class driver that ratchets a checklist into git, one
+  task at a time, unattended for hours. It is the ratchet examples/loop.sh and
+  examples/phased-loop.sh already implement (commit on green, retry in place on
+  red, revert-and-park on giving up), promoted out of bash into the harness
+  proper: `kodr run` per plain task, `kodr goal` per `GOAL: ` line, a git commit
+  as the unit of progress, and a checklist mark as the durable cursor.
+
+  The behaviour is not new and is not up for redesign here. specs/loop-scripts.yaml
+  already writes the ratchet down and pins it with 31 unit tests; this spec adopts
+  that contract wholesale and changes only what runs it. What is new is everything
+  bash structurally cannot reach — a loop-level run record, an aggregate budget
+  across the whole session, git failures as returned values, and the reporter
+  channel — plus portability off jq and bash >= 4.4.
+
+  The case for moving it is the failure data. Commit 2adb55d fixed five bugs in
+  those two scripts, all found by hand during a 15-phase CRM dogfooding run at
+  roughly five hours a pass. Four failed *silently*: a healthy run whose logs
+  froze after the first success, five phases that built correctly and were never
+  committed because a `git add` advisory exit code skipped the `&& git commit`,
+  parked phases whose SQLite schema drift leaked into every later phase with no
+  trace in git history. Silent failure in an unattended loop is the expensive
+  class — the run looks fine, the operator is asleep, and the damage surfaces
+  hours later. Every one of those four is a glance at a structured record that
+  the shell version has no way to write.
+
+approach: >
+  runLoop is pure orchestration over injected collaborators, exactly the pattern
+  goal.yaml already specifies for runGoal ("the per-attempt build and the judge
+  are injected collaborators, so the loop control is unit-tested without a
+  model"). Here the collaborators are the checklist (nextTask, markTask), the two
+  builders (buildTask wrapping run(), buildGoal wrapping runGoal()), the git
+  ratchet (commitGreen, park), and the clock (now, wait). Loop control — attempt
+  capping, retry routing, backoff placement, green decisions, park sequencing,
+  budget checks — is then unit-tested with no model, no network, and no git.
+
+  The git side effects live in one small module with a narrow surface, tested
+  against real temp repos. test/loop-fixtures.mjs already builds exactly those
+  repos for the shell tests and is reused rather than duplicated.
+
+  The bash scripts stay where they are. They remain the worked example for
+  driving Kodr from a shell without installing anything else, loop-scripts.yaml's
+  tests keep guarding them, and eval/loop-contract.eval.mjs keeps their jq
+  expressions honest against the real `--json` shape. Two implementations of one
+  contract is the point: the contract is written down and both are tested against
+  it.
+
+# What justifies the move, over and above running the same ratchet.
+beyond_the_scripts:
+  - >
+    A loop record. `.kodr/loops/<timestamp>.json`, rewritten after every task
+    transition, alongside the per-run records run() already writes to
+    .kodr/runs/. One entry per task: the task text, its kind, its outcome, the
+    attempts it took, the stoppedReason or goal reason, filesChanged, the commit
+    it produced, its usage, and the run-record filenames it generated. This is
+    the direct answer to the silent-failure class — "five phases never committed"
+    and "logs frozen while healthy" are both one read of this file — and because
+    it is rewritten per transition, its mtime distinguishes a dead loop from a
+    slow one without parsing a log.
+  - >
+    An aggregate budget across the whole session, the open item in goal.yaml's
+    own future section. Today the only ceilings are per-attempt (maxRunMs) and
+    per-task (maxAttempts, goal's own attempt cap); a 15-phase overnight run has
+    no wall-clock, token, or task ceiling of its own. Checked between tasks only,
+    never mid-task, so a budget stop always lands on a committed tree.
+  - >
+    Git failures as returned values, per AGENTS.md's module-boundary rule.
+    Bug 4's second half was a commit that failed while the loop carried on
+    against a false assumption; in bash that needed a hand-added `if ! { ...; }`
+    guard on each of two call sites, and nothing structural stops a third from
+    being added without one.
+  - >
+    The reporter channel (specs/reporter.yaml), so a loop is watchable live in
+    the TUI instead of only through a nohup log — the exact artifact bug 1 froze.
+  - >
+    Portability. No jq, no `bash >= 4.4`, so stock macOS and Windows work.
+
+inputs:
+  tasksFile:
+    type: string
+    required: false
+    description: >
+      The checklist (default TASKS.md — KODR_LOOP_TASKS_FILE, --tasks). Markdown
+      with `- [ ] ` items, the same format examples/crm-phases.md already uses;
+      a `GOAL: ` prefix routes that item to the judged loop. Marked `- [x] ` on
+      green and `- [!] ` on park, so the file is both the cursor and the report.
+  maxAttempts:
+    type: number
+    required: false
+    description: >
+      Outer retries per plain task before parking (default 3 —
+      KODR_LOOP_MAX_ATTEMPTS, --max-attempts).
+  goalMaxAttempts:
+    type: number
+    required: false
+    description: >
+      Attempt cap handed to runGoal per `GOAL: ` item (default 4 —
+      KODR_LOOP_GOAL_MAX_ATTEMPTS, --goal-max-attempts). One more than a plain
+      task gets, since a judged condition often needs an extra round.
+  retryBackoffMs:
+    type: number
+    required: false
+    description: >
+      Wait before retrying an attempt that ended stoppedReason "error" — a
+      transient backend failure, not a build failure (default 5000 —
+      KODR_LOOP_RETRY_BACKOFF_MS, --retry-backoff-ms; 0 disables).
+  resetPaths:
+    type: array
+    required: false
+    description: >
+      Gitignored paths to delete on park, alongside `git reset --hard` (empty by
+      default — KODR_LOOP_RESET_PATHS, --reset-paths, repeatable). `git reset
+      --hard` reverts only tracked files, so a database an abandoned attempt
+      migrated survives a park and carries that attempt's damage into every later
+      task.
+  maxLoopMs:
+    type: number
+    required: false
+    description: >
+      Wall-clock ceiling for the whole loop (default 0, disabled —
+      KODR_LOOP_MAX_MS, --max-loop-ms). Checked between tasks.
+  maxLoopCost:
+    type: number
+    required: false
+    description: >
+      Cumulative cost ceiling across every run and judge call in the loop
+      (default 0, disabled — KODR_LOOP_MAX_COST, --max-loop-cost). Checked
+      between tasks. Meaningful on a metered provider; local providers report 0.
+  maxTasks:
+    type: number
+    required: false
+    description: >
+      Ceiling on tasks attempted in one invocation (default 0, disabled —
+      KODR_LOOP_MAX_TASKS, --max-tasks). The cheap way to smoke-test a long
+      checklist before committing an evening to it.
+  options:
+    type: object
+    required: true
+    description: >
+      The options run() and runGoal() already take (cwd, provider, model,
+      testCommand, maxToolTurns, maxRunMs, requestTimeoutMs, memory, ...),
+      passed through per task. The loop adds no model surface of its own.
+
+outputs:
+  reason:
+    type: string
+    description: >
+      Why the loop stopped: "backlog-empty" (every item marked), "budget"
+      (maxLoopMs/maxLoopCost/maxTasks hit between tasks), "commit-failed" (a git
+      commit failed — the workspace may be inconsistent and the loop stops rather
+      than continue on a false assumption), or "error".
+  tasks:
+    type: array
+    description: >
+      One entry per task attempted — { task, kind ("task"|"goal"), status
+      ("green"|"parked"), attempts, stoppedReason, goalReason, filesChanged,
+      commit, usage, durationMs, runRecords }
+  green:
+    type: number
+    description: Tasks that went green and were committed
+  parked:
+    type: number
+    description: Tasks that exhausted their attempts and were reverted and marked '!'
+  usage:
+    type: object
+    description: "{ prompt, completion, cost } summed across every run and judge call"
+  durationMs:
+    type: number
+    description: Wall-clock across the whole loop
+  recordPath:
+    type: string
+    description: Path to the loop record written under .kodr/loops/
+
+constraints:
+  - >
+    The ratchet is specs/loop-scripts.yaml's, unchanged. Green for a plain task is
+    completed AND not noOpCompletion AND verification did not fail; green for a
+    `GOAL: ` item is met AND filesChanged non-empty AND verification did not fail.
+    A red plain task retries in place with the prior transcript replayed
+    (specs/continuation.yaml), up to maxAttempts. A `GOAL: ` item gets no outer
+    retry loop — runGoal already retried internally with its own continuation and
+    the judge's feedback, and re-running it fresh would repeat those attempts with
+    no memory of what the judge said.
+  - >
+    Mark-then-commit ordering on green, so the checklist tick rides in the same
+    commit as the code and survives a later task's `git reset --hard`. On park the
+    mark has to follow the reset, so it gets its own commit.
+  - >
+    The park sequence is reset --hard, then clean -fd (untracked debris from a
+    failed attempt silently fails the *next* task, since `node --test` and
+    friends auto-discover files regardless of tracking), then resetPaths, then
+    mark '!', then commit the mark. clean never gets -x: gitignored state is
+    resetPaths's job alone.
+  - >
+    resetPaths is path-jailed through path-jail.mjs (specs/tool-read-file.yaml's
+    jail, the same one the file tools use) rather than the shell version's
+    hand-rolled case statement, so '.', '..', '.git', an absolute path, and any
+    traversal out of cwd are refused by shared, already-tested code. A refused
+    path is a notice and the loop continues. A directory that is wiped is
+    recreated empty rather than left missing — a storage layer that opens a file
+    inside it typically never mkdirs it, so "wipe the database" otherwise becomes
+    "break every later task".
+  - >
+    Backoff fires only when an attempt's stoppedReason is "error" and only when
+    another attempt will follow. A genuine build or test failure gets no delay —
+    the model has to act, not wait — and a park already happening is not delayed.
+  - >
+    Every git operation returns { ok, error } rather than throwing, and a failed
+    commit stops the loop with reason "commit-failed" and a non-zero exit. The
+    loop never continues past a git failure on the assumption that it worked.
+  - >
+    The loop never runs outside a git repo, and refuses to start when the
+    checklist is missing — both are startup errors with an explicit message,
+    not a first-task failure.
+  - >
+    Budget checks happen between tasks only. A budget stop therefore always lands
+    on a committed tree with an accurate checklist, which is what makes the loop
+    resumable: re-invoking picks up at the first unchecked item, because the
+    marks are committed.
+  - >
+    The loop record is written after every task transition, not once at the end.
+    A loop that is SIGKILLed, OOM-killed, or whose host freezes still leaves
+    everything up to its last transition on disk — the same reasoning
+    specs/incident.yaml applies to a single run, at the loop's altitude.
+  - >
+    runLoop composes run() and runGoal() as an ordinary caller, with no test-only
+    hooks into either. Its collaborators are injected (checklist, builders, git,
+    clock), so loop control is unit-tested without a model, without network, and
+    without git.
+  - >
+    Every operational limit is configurable, per AGENTS.md — attempts, backoff,
+    the three loop budgets, and the per-task ceilings that pass through to run().
+  - Zero runtime dependencies. No ternaries in branch logic; errors at module
+    boundaries are returned values.
+
+tests:
+  unit:
+    # --- the ratchet, inherited from specs/loop-scripts.yaml ---
+    - a green task commits once, with the checklist tick inside the same commit as the code
+    - the checklist tick is committed before any later task can reset it (mark-then-commit order)
+    - a red task retries in place with the prior transcript replayed, up to maxAttempts
+    - a task that never goes green parks — reset, mark '!', and its own commit of the checklist
+    - an empty backlog exits cleanly with reason "backlog-empty"
+    - green requires completed AND not noOpCompletion AND verification not failed
+    - a no-op completion (completed, no files changed) is not green and does not commit
+    - 'a "GOAL: " line routes to runGoal with goalMaxAttempts, not to run()'
+    - a plain line routes to run()
+    - 'a GOAL: item gets exactly one runGoal invocation, then green or park'
+    - 'a GOAL: item''s green requires met AND filesChanged non-empty AND verification not failed'
+    - the park entry records the goal's attempts and reason
+    # --- the five live-found bugs, as loop-level regressions ---
+    - an attempt ending stoppedReason "error" waits retryBackoffMs before the retry
+    - no backoff before the final attempt — a park already happening is not delayed
+    - no backoff on a genuine build failure
+    - a park deletes a resetPaths entry the parked attempt mutated
+    - a wiped resetPaths directory is recreated empty, not left missing
+    - resetPaths refuses '.', '..', '.git', an absolute path, and traversal out of cwd, and continues
+    - a park removes untracked debris (clean -fd) but leaves gitignored state alone
+    - a failed commit after a green build stops the loop with reason "commit-failed"
+    - a failed park-mark commit stops the loop with reason "commit-failed"
+    # --- what the shell version could not do ---
+    - the loop record is written after every task transition, not only at the end
+    - the loop record names the commit, attempts, and run records for each task
+    - a loop killed mid-task leaves every completed transition on disk
+    - maxLoopMs stops between tasks with reason "budget", never mid-task
+    - maxLoopCost stops between tasks once summed usage crosses the ceiling
+    - maxTasks stops after the configured number of tasks
+    - a budget stop leaves a committed tree and an accurate checklist
+    - re-invoking after a budget stop resumes at the first unchecked item
+    - usage and durationMs are summed across every run and judge call
+    - the loop refuses to start outside a git repo, with an explicit message
+    - the loop refuses to start when the checklist is missing
+    - loop phases and notices reach the injected reporter
+    - parseArgs parses the loop subcommand, --tasks, --max-attempts, and the loop budgets
+  eval:
+    - >
+      a 2–3 item checklist mixing a plain task and a GOAL: item drives end to end
+      against a real model — each green item lands as its own commit, the
+      checklist ends fully marked, and the loop record agrees with git log
+
+deliverables:
+  - specs/loop.yaml (this file)
+  - src/loop.mjs — runLoop (pure orchestration) and the checklist reader/marker
+  - src/loop-git.mjs — the ratchet's git surface, each operation a returned value
+  - src/loop-record.mjs — the loop record writer
+  - test/loop.test.mjs — loop control with every collaborator injected
+  - test/loop-git.test.mjs — the git surface against real temp repos, reusing
+    test/loop-fixtures.mjs
+  - CLI wiring for `kodr loop`, its flags, --json, and the help text
+  - eval/loop.eval.mjs
+  - docs — examples/loop.md and examples/phased-loop.md gain a note that the
+    scripts are now the shell equivalent of a built-in command
+
+future:
+  - >
+    An arena-style JSON task queue as an alternative input — the { name, prompt,
+    verify } schema in specs/harness-arena.yaml — so a loop can be driven by the
+    same harness-agnostic tasks the arena uses, with each task's own verify as
+    the gate instead of one loop-wide test command.
+  - >
+    `kodr stats` over .kodr/loops/, the way it already aggregates .kodr/runs/ —
+    park rate, attempts-to-green distribution, cost per green task across many
+    sessions.
+  - >
+    Feed a parked task's final judge feedback or stoppedReason into MEMORY.md
+    (specs/memory.yaml), so the next session starts knowing why it stalled.
+    Carried over from goal.yaml's future section, and more useful here: a loop
+    parks tasks the operator never watched.
+  - >
+    Retire the bash scripts' duplicate ratchet once `kodr loop` has shipped and
+    been dogfooded through a full CRM-scale run, leaving them as thin wrappers
+    that call it. Not before — the scripts are what the tests and the eval
+    currently prove.

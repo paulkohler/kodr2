@@ -172,9 +172,10 @@ future:
     reason to do this work - but it is nearly free once the scripts are treated
     as code under test rather than as documentation.
   - >
-    Promote the ratchet into a first-class `kodr loop` driver over an
-    arena-style task queue, per goal.yaml's future section. These tests become
-    its acceptance criteria, and the bash scripts stay as the worked example.
+    Promote the ratchet into a first-class `kodr loop` driver, per goal.yaml's
+    future section - now specified in specs/loop.yaml, which adopts this
+    contract wholesale. The cases below are its acceptance criteria, and the
+    bash scripts stay as the worked example rather than being replaced.
   - >
     A slow, opt-in end-to-end case outside required CI - a 2-3 phase checklist
     against a real model - to cover what the stub cannot: that a real

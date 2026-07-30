@@ -178,7 +178,10 @@ future:
     across attempts rather than swapped every iteration.
   - Feed a parked goal's final judge feedback into MEMORY.md as a durable lesson
     (specs/memory.yaml), so the next session starts knowing why it stalled.
-  - A `kodr loop` driver that runs `kodr goal` per task over an arena-style task
-    queue (the { name, prompt, verify } schema in specs/harness-arena.yaml).
+  - A `kodr loop` driver that runs `kodr goal` per task over a checklist —
+    specified in specs/loop.yaml, with an arena-style task queue (the
+    { name, prompt, verify } schema in specs/harness-arena.yaml) as its own
+    future input.
   - An aggregate wall-clock / token budget across the whole loop, beyond the
-    attempt cap and each run()'s own maxRunMs.
+    attempt cap and each run()'s own maxRunMs — specified as maxLoopMs /
+    maxLoopCost in specs/loop.yaml.
