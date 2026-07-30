@@ -1,7 +1,7 @@
 # ACP — Agent Client Protocol in Kodr
 
 Kodr implements the [Agent Client Protocol](https://agentclientprotocol.com)
-(ACP): it runs as an ACP *agent* so any ACP-speaking editor can drive it as an
+(ACP): it runs as an ACP _agent_ so any ACP-speaking editor can drive it as an
 embeddable coding agent, instead of the CLI or TUI. This doc covers how to use
 that (including from VS Code) and how it's built. The core idea: ACP mode is a
 **fifth reporter** plus a **second approval channel** — the same two seams the
@@ -54,6 +54,7 @@ other ACP-client extensions work the same way, differing only in the settings ke
    flag to `args` and the key to `env` — e.g.
    `"args": [".../bin/kodr.mjs", "acp", "--provider", "openrouter"]` with
    `"env": { "OPENROUTER_API_KEY": "sk-..." }`.
+
 3. Open the ACP panel from the Activity Bar (or run **ACP: Connect to Agent**
    from the command palette), pick **Kodr**, and chat. The extension passes your
    open workspace folder as the session's working directory, so Kodr operates on
@@ -65,34 +66,34 @@ In the editor you get: streamed model text and a live tool-call/plan view (from
 in-flight model request (`session/cancel`). If the extension advertises the
 `fs/*` / `terminal/*` client capabilities, Kodr delegates reads, writes, and
 commands to the editor; if not, it operates directly on the workspace files on
-disk (still correct for a local editor) — see *Delegating fs and terminal*
+disk (still correct for a local editor) — see _Delegating fs and terminal_
 below.
 
 **Resuming the last conversation.** These ACP extensions don't yet get a session
 list from Kodr (the non-standard `session/list` method isn't implemented). If you
-just want each launch to *continue* your last conversation, add `--continue`,
+just want each launch to _continue_ your last conversation, add `--continue`,
 `last` to the args: `"args": [".../bin/kodr.mjs", "acp", "--continue", "last"]`.
 The model then resumes with full context from the previous run; note the chat
 pane still starts empty (Kodr doesn't replay history — see the front-end section).
 
 ### Other editors, and the current state of ACP
 
-`kodr acp` is client-agnostic — anything that speaks ACP as a *client* can drive
+`kodr acp` is client-agnostic — anything that speaks ACP as a _client_ can drive
 it, and Kodr gains each editor the moment that editor (or an extension) ships
 ACP-client support, with no change on Kodr's side. What varies today is whether
 a given editor can act as an ACP client at all:
 
-| Editor          | ACP-client support (as of early 2026)                             |
-|-----------------|-------------------------------------------------------------------|
-| **Zed**         | Native — add `kodr acp` as a custom agent server in Zed settings.  |
-| **VS Code**     | Via a community extension (above).                                 |
-| **JetBrains**   | Official ACP client — point it at `kodr acp`.                      |
-| **Cursor**      | No native ACP-*client* host yet — Cursor instead exposes its *own* agent over ACP (for JetBrains). As a VS Code fork it may run a VS Code ACP extension from Open VSX, but that path is unverified. |
-| **Antigravity** | ACP-client support is an open feature request, not yet shipped; same VS Code-fork caveat. |
+| Editor          | ACP-client support (as of early 2026)                                                                                                                                                               |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Zed**         | Native — add `kodr acp` as a custom agent server in Zed settings.                                                                                                                                   |
+| **VS Code**     | Via a community extension (above).                                                                                                                                                                  |
+| **JetBrains**   | Official ACP client — point it at `kodr acp`.                                                                                                                                                       |
+| **Cursor**      | No native ACP-_client_ host yet — Cursor instead exposes its _own_ agent over ACP (for JetBrains). As a VS Code fork it may run a VS Code ACP extension from Open VSX, but that path is unverified. |
+| **Antigravity** | ACP-client support is an open feature request, not yet shipped; same VS Code-fork caveat.                                                                                                           |
 
 The distinction that trips people up: some tools (Cursor, Gemini CLI, Claude
-Code) ship an ACP *agent* — the same role Kodr plays — so you can't point one at
-the other. To drive Kodr you need a *client* (an editor host), which today means
+Code) ship an ACP _agent_ — the same role Kodr plays — so you can't point one at
+the other. To drive Kodr you need a _client_ (an editor host), which today means
 Zed, JetBrains, or a VS Code ACP extension.
 
 ## What ACP is (the light touch)
@@ -117,29 +118,29 @@ paths are absolute; line numbers are 1-indexed.
 
 **Client → Agent**
 
-| Method                    | Purpose                                                    |
-|---------------------------|-----------------------------------------------------------|
-| `initialize`              | Handshake: negotiate protocol version and capabilities.   |
-| `authenticate`            | Authenticate, if the agent requires it.                   |
-| `session/new`             | Start a fresh conversation session.                       |
-| `session/load`            | Resume a prior session (optional).                        |
-| `session/prompt`          | Send a user turn; resolves with a `StopReason`.           |
-| `session/cancel`          | Interrupt the current turn (notification).                |
-| `session/set_mode`        | Switch operating modes (optional).                        |
+| Method             | Purpose                                                 |
+| ------------------ | ------------------------------------------------------- |
+| `initialize`       | Handshake: negotiate protocol version and capabilities. |
+| `authenticate`     | Authenticate, if the agent requires it.                 |
+| `session/new`      | Start a fresh conversation session.                     |
+| `session/load`     | Resume a prior session (optional).                      |
+| `session/prompt`   | Send a user turn; resolves with a `StopReason`.         |
+| `session/cancel`   | Interrupt the current turn (notification).              |
+| `session/set_mode` | Switch operating modes (optional).                      |
 
 **Agent → Client**
 
-| Method                      | Purpose                                                    |
-|-----------------------------|-----------------------------------------------------------|
-| `session/update`            | Stream progress: text, tool calls, plans (notification).  |
-| `session/request_permission`| Ask the human to authorize a tool call before it runs.    |
+| Method                       | Purpose                                                  |
+| ---------------------------- | -------------------------------------------------------- |
+| `session/update`             | Stream progress: text, tool calls, plans (notification). |
+| `session/request_permission` | Ask the human to authorize a tool call before it runs.   |
 
 **Client-provided capabilities the agent may call**
 
-| Method                                                 | Purpose                     |
-|--------------------------------------------------------|-----------------------------|
-| `fs/read_text_file`, `fs/write_text_file`              | Read/write through the editor, so unsaved buffers and the editor's own view of the workspace stay authoritative. |
-| `terminal/create`, `terminal/output`, `terminal/wait_for_exit`, `terminal/kill`, `terminal/release` | Run commands in the editor's terminal instead of the agent's own child process. |
+| Method                                                                                              | Purpose                                                                                                          |
+| --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `fs/read_text_file`, `fs/write_text_file`                                                           | Read/write through the editor, so unsaved buffers and the editor's own view of the workspace stay authoritative. |
+| `terminal/create`, `terminal/output`, `terminal/wait_for_exit`, `terminal/kill`, `terminal/release` | Run commands in the editor's terminal instead of the agent's own child process.                                  |
 
 ### A prompt turn
 
@@ -182,8 +183,8 @@ agent**. Concretely:
 
 The whole design already existed in miniature. Read
 [`src/reporter.mjs`](../src/reporter.mjs) — the run's one-way output channel — and
-its own doc comment: *"The interactive TUI is a fourth reporter that pushes
-events into its render state."* An ACP agent is the fifth. The mapping is
+its own doc comment: _"The interactive TUI is a fourth reporter that pushes
+events into its render state."_ An ACP agent is the fifth. The mapping is
 almost mechanical because the harness ([`src/harness.mjs`](../src/harness.mjs))
 already threads two injectable seams through every run:
 
@@ -198,15 +199,15 @@ already threads two injectable seams through every run:
 **Reporter → `session/update`.** Kodr's reporter methods line up almost
 one-to-one with ACP update variants:
 
-| Reporter method            | ACP `session/update` variant             |
-|----------------------------|-------------------------------------------|
-| `token(text)`              | `agent_message_chunk`                     |
-| `toolCall({ name, args })` | `tool_call` (status `pending`/`in_progress`) |
+| Reporter method                | ACP `session/update` variant                                 |
+| ------------------------------ | ------------------------------------------------------------ |
+| `token(text)`                  | `agent_message_chunk`                                        |
+| `toolCall({ name, args })`     | `tool_call` (status `pending`/`in_progress`)                 |
 | `toolResult({ name, result })` | `tool_call_update` (`completed`/`failed`, with content/diff) |
-| `phase(name)`              | `plan` update (build/verify/heal/review)  |
-| `verification(result)`     | `tool_call_update` or a diagnostic chunk  |
-| `summary(result)` `.usage` | `usage_update`                            |
-| `notice`, `heartbeat`      | diagnostic `agent_message_chunk`s         |
+| `phase(name)`                  | `plan` update (build/verify/heal/review)                     |
+| `verification(result)`         | `tool_call_update` or a diagnostic chunk                     |
+| `summary(result)` `.usage`     | `usage_update`                                               |
+| `notice`, `heartbeat`          | diagnostic `agent_message_chunk`s                            |
 
 So an `createAcpReporter(session)` — sibling to `createTuiReporter` in
 [`src/tui-reporter.mjs`](../src/tui-reporter.mjs) — translates each method into a
@@ -240,7 +241,7 @@ The JSON-RPC transport and method dispatcher — the ACP analogue of `runTui` in
   id and the client-provided cwd). Within a session, each prompt threads the
   prior run's messages so a multi-turn conversation continues — the same
   continuation the CLI's `--continue` uses. **Launching with `kodr acp --continue
-  <ref>`** (`last` or a run id) seeds the *first* session with a prior run's
+<ref>`** (`last` or a run id) seeds the _first_ session with a prior run's
   conversation, so the model resumes it across an editor relaunch (one-shot;
   later sessions start fresh). This gives the model memory, not visible history:
   it does not replay the prior turns to the client, so the editor's chat pane
@@ -259,13 +260,13 @@ The JSON-RPC transport and method dispatcher — the ACP analogue of `runTui` in
 `RunResult.stoppedReason` already carries the outcome; translation is a small
 table:
 
-| Kodr `stoppedReason` | ACP `StopReason`                    |
-|----------------------|-------------------------------------|
-| `complete`           | `end_turn`                          |
-| `budget-exceeded`    | `max_turn_requests` (or `cancelled`)|
-| tool-turn limit hit  | `max_turn_requests`                 |
+| Kodr `stoppedReason` | ACP `StopReason`                         |
+| -------------------- | ---------------------------------------- |
+| `complete`           | `end_turn`                               |
+| `budget-exceeded`    | `max_turn_requests` (or `cancelled`)     |
+| tool-turn limit hit  | `max_turn_requests`                      |
 | `error`              | surfaced as a JSON-RPC error / `refusal` |
-| client cancellation  | `cancelled`                         |
+| client cancellation  | `cancelled`                              |
 
 ### Delegating fs and terminal to the client (implemented)
 
@@ -337,7 +338,7 @@ Reasons, roughly in order of weight:
   align.** ACP has no term for `verify`, `heal`, `compaction`, `review`,
   `memory`, or the build→verify→heal→review `phase` lifecycle — the concepts
   that make Kodr a self-repairing harness rather than a generic editor agent.
-  Renaming only the concepts that *do* have ACP names produces a hybrid
+  Renaming only the concepts that _do_ have ACP names produces a hybrid
   vocabulary (`agent_message_chunk` next to `healTurn` and `compaction`), which
   reads worse than one consistent house vocabulary. Partial alignment is worse
   than either pure option.
@@ -366,7 +367,7 @@ Reasons, roughly in order of weight:
   Renaming the codebase and its specs to delete a small table is a lot of churn
   to avoid a little — and it buys coupling to a moving external schema in return.
 
-**Where selective alignment *is* worth it**, and the line we'd draw:
+**Where selective alignment _is_ worth it**, and the line we'd draw:
 
 - Inside the ACP adapter and its spec, speak fluent ACP natively (StopReason,
   `session/update` variants). That's implementing the protocol correctly, not
@@ -389,9 +390,9 @@ Three layers, so each kind of failure is caught at the cheapest place that can c
 
 - **In-process unit tests** ([`test/acp-protocol.test.mjs`](../test/acp-protocol.test.mjs), [`test/acp-reporter.test.mjs`](../test/acp-reporter.test.mjs), [`test/acp.test.mjs`](../test/acp.test.mjs), [`test/acp-backend.test.mjs`](../test/acp-backend.test.mjs)) — the protocol routing, StopReason/reporter/tool-kind maps, session lifecycle, permission flow, and fs/terminal delegation logic, all against a fake connection. Fast, deterministic, no subprocess.
 - **Real-stdio transport test** ([`test/acp-stdio.test.mjs`](../test/acp-stdio.test.mjs)) — spawns an actual `kodr acp` process and exercises everything up to `session/prompt` (initialize + capability capture, deterministic session ids, `-32601`/`-32700`, a stray cancel) over the real pipe. Model-free, so it runs in CI where the evals can't.
-- **Live eval** ([`eval/acp.eval.mjs`](../eval/acp.eval.mjs), skip-gated on LM Studio) — drives a real model through a full session and asserts the protocol *invariants* that only hold end-to-end: a model's `write_file`/`read_file` actually delegate to the client's `fs/*`, `run_command` gates through `session/request_permission` and runs via `terminal/*`, and `session/cancel` interrupts a live generation.
+- **Live eval** ([`eval/acp.eval.mjs`](../eval/acp.eval.mjs), skip-gated on LM Studio) — drives a real model through a full session and asserts the protocol _invariants_ that only hold end-to-end: a model's `write_file`/`read_file` actually delegate to the client's `fs/*`, `run_command` gates through `session/request_permission` and runs via `terminal/*`, and `session/cancel` interrupts a live generation.
 
-The last two share one reusable ACP *client* — [`eval/support/acp-client.mjs`](../eval/support/acp-client.mjs), the client half of the protocol (the half an editor implements): spawn, JSON-RPC framing, answer the server→client requests, capture `session/update`s. Import it to write more ACP tests.
+The last two share one reusable ACP _client_ — [`eval/support/acp-client.mjs`](../eval/support/acp-client.mjs), the client half of the protocol (the half an editor implements): spawn, JSON-RPC framing, answer the server→client requests, capture `session/update`s. Import it to write more ACP tests.
 
 ## References
 
@@ -399,4 +400,7 @@ The last two share one reusable ACP *client* — [`eval/support/acp-client.mjs`]
 - Kodr's reporter contract: [`src/reporter.mjs`](../src/reporter.mjs), [`specs/reporter.yaml`](../specs/reporter.yaml)
 - The TUI as a reporter consumer (the pattern to mirror): [`specs/tui.yaml`](../specs/tui.yaml), [`src/tui-reporter.mjs`](../src/tui-reporter.mjs)
 - The command-approval seam: `--approve-commands`, `confirm()` in [`src/tui.mjs`](../src/tui.mjs)
+
+```
+
 ```
