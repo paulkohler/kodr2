@@ -15,18 +15,69 @@ jobs, and a second (bigger) cross-cutting retrofit for multi-tenancy — so
 there's enough runway for "many phases in one sitting" to actually mean
 something as a harness stress test, not just a longer todo list.
 
-**Run it:**
-
-```bash
-mkdir -p /path/to/a/throwaway/crm && cd /path/to/a/throwaway/crm
-git init -q
-cp /path/to/kodr2/examples/crm-phases.md TASKS.md
-/path/to/kodr2/examples/phased-loop.sh
-```
-
 Four of the fifteen phases below are `GOAL: ` lines. That ratio is
 deliberate — most of a real build is crisply testable, and the judge should
 only be in the loop where a test command genuinely can't express "done."
+
+## Run it
+
+Set `KODR=/path/to/kodr2` and `CRM=/path/to/a/throwaway/crm`, then paste the
+rest as-is. Every line matters; the notes below say why.
+
+```bash
+KODR=/path/to/kodr2
+CRM=/path/to/a/throwaway/crm
+
+# 1. A git repo. The ratchet commits every green phase and reverts every
+#    parked one, so git is the substrate, not an afterthought.
+mkdir -p "$CRM" && cd "$CRM"
+git init -q
+
+# 2. The checklist, as TASKS.md — what phased-loop.sh reads and marks.
+cp "$KODR/examples/crm-phases.md" TASKS.md
+
+# 3. Ignore the state that isn't source. data/ is the SQLite file phase 0
+#    scaffolds; .kodr/ is Kodr's own run transcripts.
+printf 'data/\n.kodr/\nnode_modules/\n' > .gitignore
+
+# 4. COMMIT, before launching. A park runs `git reset --hard` + `git clean
+#    -fd`; with nothing tracked, reset is a no-op and clean deletes every
+#    untracked file — TASKS.md included. The script now refuses to start
+#    without a commit rather than let that happen, so this is not optional.
+git add -A && git commit -qm "CRM phase plan"
+
+# 5. Launch detached. Fifteen phases, four of them a judged multi-attempt
+#    loop, is a multi-hour run; a foreground shell may be culled.
+RESET_PATHS=data \
+REQUEST_TIMEOUT_MS=1200000 \
+RUN_MS=1800000 \
+  nohup "$KODR/examples/phased-loop.sh" >phased-loop.out 2>&1 & disown
+```
+
+Watch it, and read the result:
+
+```bash
+tail -f phased-loop.out             # live progress
+git log --oneline                   # one commit per green phase — the output
+grep '^- \[!\]' TASKS.md            # phases that parked and need you
+kodr stats                          # heal / retry / verify rates for the run
+```
+
+**Why each override:**
+
+- `RESET_PATHS=data` — phase 0 scaffolds SQLite under `data/`, which is
+  gitignored, and `git reset --hard` only reverts *tracked* files. Without
+  this, a parked phase's schema changes survive its own revert and poison
+  every later phase, invisibly. A live run of this exact plan hit that:
+  three parked phases left permanent drift in `data/crm.db` with zero trace
+  in any commit.
+- `REQUEST_TIMEOUT_MS` / `RUN_MS` — a large local model under load can
+  outrun the 10-minute default on a single request well before the run's own
+  budget is spent. Raise both together for an overnight run.
+
+To resume after a stop, fix or re-open any `- [!]` line in `TASKS.md` and
+launch step 5 again — the loop picks up at the first unchecked item, because
+every mark is committed.
 
 ---
 
@@ -260,19 +311,23 @@ added. Same shape as phase 5, just bigger — same reason it's a GOAL: line.
 
 ## Notes on running this
 
-- `TEST_CMD` defaults to `npm test` — make sure phase 0 actually wires that
-  script up, since every later phase depends on it as the hard gate.
-- `GOAL_MAX_ATTEMPTS` (default 4) applies per GOAL: phase; if a phase parks,
-  `phased-loop.sh` leaves the broken/partial state reverted and the tasks
-  file marked `[!]` — re-run the script after inspecting `phased-loop.log`
-  and, if needed, hand-editing the checklist line before continuing.
-- This is a long run by design — fifteen phases, four of them a multi-attempt
-  judged loop on top of a multi-turn build. Launch it detached
-  (see phased-loop.sh's header) rather than in a foreground shell.
-- Set `RESET_PATHS=data` (phase 0 scaffolds storage under `data/`, gitignored).
-  A parked phase's `git reset --hard` only reverts tracked files — without
-  `RESET_PATHS`, a since-reverted attempt's schema/migration changes to the
-  live database persist forever, invisible in git, and can break every phase
-  after it. A live run of this exact plan hit that: three separate parked
-  phases left permanent schema drift in `data/crm.db` with zero trace in any
-  commit.
+- **Phase 0 carries the whole run.** `TEST_CMD` defaults to `npm test`, and
+  every later phase depends on it as the hard gate — so if phase 0 doesn't
+  actually wire that script up, nothing after it can go green. It's the one
+  phase worth watching live before walking away.
+- **A parked phase is a checkpoint, not a failure.** `phased-loop.sh` reverts
+  the partial work and marks the line `[!]`, then carries on to the next
+  phase. Inspect `phased-loop.log` and the parked attempt's transcript in
+  `.kodr/runs/`, then either fix the phase by hand or reword the checklist
+  line and re-launch — the loop resumes at the first unchecked item.
+- **`GOAL_MAX_ATTEMPTS` (default 4) is per judged phase**, and those phases
+  are the expensive ones: each attempt is a full build *plus* a read-only
+  judge pass over the workspace.
+- **Expect it to take hours**, and expect some phases to park. Fifteen phases
+  against a local model is a harness stress test, not a delivery pipeline —
+  the interesting output is as much `kodr stats` and the parked transcripts
+  as it is the CRM itself.
+
+For the general version of this workflow — any checklist, not just this one —
+see [Drive a whole backlog unattended](../docs/usage.md#13-drive-a-whole-backlog-unattended--the-loop-scripts)
+in the usage guide.
