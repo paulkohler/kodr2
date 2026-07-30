@@ -82,8 +82,19 @@ GIT_DIR="$(git rev-parse --git-dir 2>/dev/null)" || { echo "not a git repo" >&2;
 # git commit` that follows. Plain `git add -A` with no explicit pathspec
 # always skips an ignored file cleanly, exit 0, regardless of which
 # mechanism ignores it -- so ignore locally and never pathspec-exclude.
+#
+# .kodr/ is on the same list for a related but worse reason. Kodr writes a run
+# transcript there per attempt, *during* the attempt. Unignored, a green phase
+# swept a few hundred lines of JSON conversation into every commit -- and a
+# parked phase's record was still untracked when the park path's `git clean
+# -fd` ran, so it was deleted outright. The phases that FAILED are the ones
+# worth a post-mortem, and they were the only ones being destroyed; the
+# successful ones survived as history noise. Ignoring the directory fixes both
+# halves at once: `git add -A` skips an ignored path, and `git clean` without
+# -x leaves one alone. A relocated runs directory (KODR_RUNS_DIR / --runs-dir)
+# is the operator's own to ignore.
 mkdir -p "$GIT_DIR/info"
-for f in phased-loop.out phased-loop.log; do
+for f in phased-loop.out phased-loop.log .kodr/; do
   grep -qxF "$f" "$GIT_DIR/info/exclude" 2>/dev/null || echo "$f" >> "$GIT_DIR/info/exclude"
 done
 

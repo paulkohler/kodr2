@@ -704,3 +704,83 @@ describe('regression: bug 5 — untracked debris contaminated the next task', ()
     assert.equal(readRepoFile(ctx.repo, 'data/keep.db'), 'still here\n');
   });
 });
+
+describe("regression: bug 6 — a park destroyed the failed attempt's transcript", () => {
+  // Found live driving a 4-task checklist with gemma-4-26b on LM Studio
+  // (/Users/paul/src/loop-test-1). The scripts protect their own log files from
+  // the park path but never protected .kodr/, where Kodr writes a run
+  // transcript per attempt. Two halves, one cause: on green the transcripts
+  // were swept into the project's history as commit noise, and on park they
+  // were still untracked when `git clean -fd` ran, so they were deleted. The
+  // attempts that FAILED are the ones worth a post-mortem, and they were the
+  // only ones being destroyed.
+
+  const RUN_RECORD = '.kodr/runs/2026-07-31T00-00-00-000Z.json';
+
+  it('registers .kodr/ in .git/info/exclude at startup, in both scripts', async (t) => {
+    if (guard(t)) {
+      return;
+    }
+    ctx = await createLoopRepo({ tasks: ['add a feature'] });
+
+    runLoop(ctx, { script: LOOP_SH, responses: [runGreen()] });
+    assert.match(readRepoFile(ctx.repo, '.git/info/exclude'), /^\.kodr\/$/m);
+
+    ctx = await createLoopRepo({ tasks: ['add a feature'] });
+    runLoop(ctx, { script: PHASED_LOOP_SH, responses: [runGreen()] });
+    assert.match(readRepoFile(ctx.repo, '.git/info/exclude'), /^\.kodr\/$/m);
+  });
+
+  it("keeps a parked attempt's run record — git clean must not take it", async (t) => {
+    if (guard(t)) {
+      return;
+    }
+    ctx = await createLoopRepo({ tasks: ['never goes green'] });
+
+    const withRecord = runRed({
+      write: { [RUN_RECORD]: '{"stoppedReason":"tool-limit"}\n' },
+    });
+    const result = runLoop(ctx, {
+      script: LOOP_SH,
+      responses: [withRecord, withRecord, withRecord],
+      env: { MAX_ATTEMPTS: '3' },
+    });
+
+    assert.equal(result.status, 0);
+    // The whole point of a park is that the attempt is abandoned — which makes
+    // its transcript the only surviving evidence of why.
+    assert.equal(
+      repoFileExists(ctx.repo, RUN_RECORD),
+      true,
+      "the parked attempt's run record was deleted by the park path",
+    );
+  });
+
+  it('never commits a run record into the project history', async (t) => {
+    if (guard(t)) {
+      return;
+    }
+    ctx = await createLoopRepo({ tasks: ['add a feature'] });
+
+    const result = runLoop(ctx, {
+      script: LOOP_SH,
+      responses: [
+        runGreen({
+          'src/feature.mjs': 'export const feature = true;\n',
+          [RUN_RECORD]: '{"stoppedReason":"complete"}\n',
+        }),
+      ],
+    });
+
+    assert.equal(result.status, 0);
+    const committed = allCommittedFiles(ctx.repo);
+    assert.ok(
+      committed.includes('src/feature.mjs'),
+      `the code should still be committed: ${committed}`,
+    );
+    assert.ok(
+      !committed.some((file) => file.startsWith('.kodr/')),
+      `a run transcript was committed: ${committed}`,
+    );
+  });
+});

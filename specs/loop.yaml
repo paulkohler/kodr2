@@ -194,6 +194,18 @@ constraints:
     mark '!', then commit the mark. clean never gets -x: gitignored state is
     resetPaths's job alone.
   - >
+    Kodr's own artifact directories — .kodr/runs/ and the .kodr/loops/ record
+    this spec adds — are excluded from the ratchet's `add` and survive its
+    `clean`, and the loop registers them at startup the way the shell version
+    registers its log files. Both halves matter and have the same cause: a
+    transcript is written *during* an attempt, so unignored it is swept into a
+    green task's commit as history noise, and a parked task's is still
+    untracked when `clean -fd` runs and is deleted outright. That destroys the
+    records of exactly the attempts worth a post-mortem while keeping the
+    successful ones. Found live on examples/loop.sh driving gemma-4-26b over a
+    4-task checklist, and fixed there too (specs/loop-scripts.yaml, bug 6); the
+    loop record raises the stakes, since losing it loses the whole session's
+    post-mortem rather than one attempt's.
     resetPaths is path-jailed through path-jail.mjs (specs/tool-read-file.yaml's
     jail, the same one the file tools use) rather than the shell version's
     hand-rolled case statement, so '.', '..', '.git', an absolute path, and any
@@ -258,6 +270,7 @@ tests:
     - a wiped resetPaths directory is recreated empty, not left missing
     - resetPaths refuses '.', '..', '.git', an absolute path, and traversal out of cwd, and continues
     - a park removes untracked debris (clean -fd) but leaves gitignored state alone
+    - a parked task's run and loop records survive the park, and are never committed
     - a failed commit after a green build stops the loop with reason "commit-failed"
     - a failed park-mark commit stops the loop with reason "commit-failed"
     # --- what the shell version could not do ---

@@ -122,6 +122,18 @@ which mechanism ignores it) and stops outright with a clear error if a
 commit ever fails after a green build, rather than silently continuing on
 a false assumption.
 
+`.kodr/` goes on that same exclude list, for a related but worse reason.
+Kodr writes a run transcript there per attempt, *during* the attempt. Left
+unignored, a green phase swept a few hundred lines of JSON conversation
+into every commit — and a parked phase's transcript was still untracked
+when the park's `git clean -fd` ran, so it was deleted outright. That
+destroyed the records of exactly the phases worth a post-mortem while
+keeping the successful ones as history noise. Ignoring the directory fixes
+both halves at once: `git add -A` skips an ignored path, and `git clean`
+without `-x` leaves one alone. If you relocate the runs directory
+(`KODR_RUNS_DIR` / `--runs-dir`) inside the repo, ignore it yourself — the
+script only knows about the default.
+
 A plain task's attempt that ends with `stoppedReason: "error"` gets a
 `RETRY_BACKOFF_S`-second
 pause (default 5) before the next attempt, since retrying a transient LM

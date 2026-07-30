@@ -28,7 +28,15 @@ description: >
   This spec proposes: (1) writing down what the scripts guarantee, so there is
   a contract to test against, and (2) test/loop-scripts.test.mjs, which drives
   both scripts end to end against a scripted `kodr` on PATH, with each of the
-  five live-found bugs as a named regression case.
+  live-found bugs as a named regression case.
+
+  A sixth arrived on the very next live run, which is the point restated: a
+  4-task checklist driven by gemma-4-26b found that neither script protected
+  .kodr/ from the park path, so a green task committed its run transcript as
+  history noise while a parked task's transcript was deleted by `git clean
+  -fd` -- destroying the record of exactly the attempts worth investigating.
+  Nothing about it needed a model to reproduce, and it is now three unit cases
+  below.
 
 approach: >
   The seam already exists. Both scripts resolve their collaborators off PATH
@@ -136,6 +144,10 @@ tests:
     - "bug 5: untracked debris from a failed attempt is removed on park (git clean -fd)"
     - "bug 5: git clean does not touch a gitignored path - that is RESET_PATHS's job alone"
     - "bug 5: a RESET_PATHS directory is recreated empty, not left missing"
+    # --- regression: bug 6, found live driving gemma-4-26b over a 4-task checklist ---
+    - "bug 6: both scripts register .kodr/ in .git/info/exclude at startup"
+    - "bug 6: a parked attempt's run transcript survives the park - git clean must not take it"
+    - "bug 6: a run transcript is never committed into the project's history"
     # --- the drift guard's own guard ---
     # jq collapses a missing field to a clean "false", so the scripts' own
     # expressions cannot tell a renamed field from a genuinely red run. The
