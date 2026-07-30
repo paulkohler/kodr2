@@ -9,13 +9,18 @@ rest in roughly descending order of how often you reach for them. For the
 "what it is / why it exists" overview see the [README](../README.md); for the
 exact contracts see the specs in [`specs/`](../specs/).
 
-There are two ways to drive Kodr:
+There are three ways to drive Kodr:
 
 - **One-shot runs** (`kodr "…"`) — fire a task, watch it stream, get the
   result. Scripts and pipelines use this.
 - **The interactive TUI** (`kodr tui`) — a full-screen, multi-turn REPL that
   keeps the conversation going across follow-ups. This is the nicest way to
   work by hand, and it's covered in [§3](#3-the-terminal-ui-interactive).
+- **Unattended over a backlog** (`./examples/loop.sh`) — hand it a `TASKS.md`
+  checklist and it works down the list for hours, committing each task that
+  passes and parking the ones it can't finish. This is how you get a night's
+  work out of it; see
+  [§13](#13-drive-a-whole-backlog-unattended--the-loop-scripts).
 
 Everything below assumes `kodr` is on your `PATH` (see the README's
 [Quick start](../README.md#quick-start)). From a checkout you can always
@@ -299,9 +304,132 @@ errors (`build-error`).
 
 `--json` prints a machine-readable summary (`{ met, reason, attempts, verdicts,
 usage, … }`); the process exits `0` only when the goal was met (unless
-`--no-fail`). For a *backlog* of tasks rather than one goal, wrap `kodr` in a
-shell loop — see [`examples/loop.sh`](../examples/loop.sh). Full contract:
-[`specs/goal.yaml`](../specs/goal.yaml).
+`--no-fail`). Full contract: [`specs/goal.yaml`](../specs/goal.yaml). For a
+*backlog* of tasks rather than one goal, see the next section.
+
+---
+
+## 13. Drive a whole backlog unattended — the loop scripts
+
+`kodr goal` loops toward *one* outcome. When you have a list of things to build
+and want them built while you're asleep, wrap Kodr in the shipped driver script.
+Kodr deliberately doesn't build the loop in — it exposes the seams (`--json`,
+exit codes, `--continue`) and the loop is an ordinary shell script you can read
+and edit.
+
+Two are shipped:
+
+| Script | Use it when |
+| --- | --- |
+| [`examples/loop.sh`](../examples/loop.sh) | Every task is checkable by a test command |
+| [`examples/phased-loop.sh`](../examples/phased-loop.sh) | Some tasks aren't — it adds `GOAL: ` lines, judged by `kodr goal` |
+
+### The flow
+
+**1. Write a `TASKS.md` checklist.** One `- [ ]` line per task, in order:
+
+```markdown
+- [ ] Add Company (name, domain) and Contact (name, email, company_id) with full
+      CRUD. Validate input with clear 400s for missing fields and malformed
+      email. Add tests per route, including the validation-failure cases.
+- [ ] GOAL: every endpoint has an owner check and the README documents all of them
+```
+
+**2. Launch it detached** — a real backlog runs for hours, and a foreground
+shell may be culled:
+
+```bash
+cd /path/to/your/project        # must be a git repo
+nohup ./examples/loop.sh >loop.out 2>&1 & disown
+```
+
+**3. Come back and read `git log`.** That's the deliverable.
+
+### Why you can leave it alone — the ratchet
+
+Each task is one iteration, and only one outcome commits:
+
+- **Green** — the run *completed*, actually changed files, and didn't fail
+  `TEST_CMD`. The task's code and its `- [x]` tick land in the **same commit**,
+  so a later task can never silently un-tick it.
+- **Red** — retries in place with `--continue last`, up to `MAX_ATTEMPTS`. The
+  broken code stays on disk for the model to fix, and it sees what it just
+  tried. A transient backend error (an HTTP 500, a timeout) backs off first.
+- **Gives up** — `git reset --hard` + `git clean -fd` puts the tree back to the
+  last green commit, and the task is marked `- [!]` so it isn't picked again.
+
+So the tree is green at every commit, and a failed task can't contaminate the
+next one. That's the property that makes an unattended overnight run worth
+trusting rather than a random walk.
+
+### Writing a checklist that actually finishes
+
+This is where the value is won or lost:
+
+- **One task ≈ one commit's worth of work.** "Build the app" parks; "add the
+  Company CRUD routes with validation tests" goes green.
+- **Name the files and the acceptance criteria in the task.** The tasks that
+  succeed first-try read like a small PR description — which module, which
+  behaviour, which test cases.
+- **`TEST_CMD` is the gate, so every task must be able to pass it.** A task
+  whose success would break an existing test will burn every attempt and park.
+- **Order matters.** Each task starts from the previous one's commit, so put
+  scaffolding first; a task can't depend on something later in the list.
+- **Use `GOAL: ` only where a test command genuinely can't express "done"** —
+  "every endpoint has an owner check", "the README documents all of it". Most
+  of a real build is crisply testable; keep the judge for the rest.
+  [`examples/crm-phases.md`](../examples/crm-phases.md) is a worked 15-phase
+  plan with that mix.
+
+### Config
+
+All environment variables, all optional:
+
+| Var | Default | What it does |
+| --- | --- | --- |
+| `TASKS_FILE` | `TASKS.md` | The checklist |
+| `TEST_CMD` | `npm test` | The gate; empty string disables `--test` |
+| `MAX_ATTEMPTS` | `3` | Retries per task before parking |
+| `GOAL_MAX_ATTEMPTS` | `4` | `kodr goal` attempts per `GOAL: ` line (phased only) |
+| `TOOL_TURNS` | `30` | Tool-turn ceiling per attempt |
+| `RUN_MS` | `900000` | Wall-clock budget per attempt |
+| `REQUEST_TIMEOUT_MS` | kodr's `600000` | Per-request ceiling; raise for a big local model |
+| `RETRY_BACKOFF_S` | `5` | Pause before retrying a *transient* error |
+| `RESET_PATHS` | *(empty)* | Gitignored paths to wipe on park — see below |
+
+```bash
+MAX_ATTEMPTS=5 TEST_CMD="node --test" RESET_PATHS=data ./examples/loop.sh
+```
+
+### Reading the results
+
+```bash
+git log --oneline          # one commit per green task — the actual output
+grep '^- \[!\]' TASKS.md   # what parked, and needs you
+kodr stats                 # heal / retry / verify rates across the whole run
+tail -f loop.out           # live progress while it runs
+```
+
+Parked tasks are the interesting ones: their run transcripts are in
+`.kodr/runs/`, and `kodr replay last` re-runs one from scratch to see whether it
+reproduces.
+
+### Gotchas
+
+- **Needs `jq`, `git`, and bash ≥ 4.4.** macOS ships bash 3.2 — make sure
+  `env bash` finds a newer one (Homebrew's).
+- **`git reset --hard` only reverts *tracked* files.** A database or cache a
+  parked task migrated survives and poisons every later task. Set
+  `RESET_PATHS="data"` (space-separated) to wipe those on park; it refuses `.`,
+  `..`, `.git`, absolute paths, and traversal.
+- **Don't add `loop.out`/`loop.log` to your project's `.gitignore`.** The script
+  registers them in `.git/info/exclude` itself, along with `.kodr/` — which is
+  what keeps a parked attempt's transcript from being deleted by the park.
+
+Deep dives, including the live failures behind each of these rules:
+[`examples/loop.md`](../examples/loop.md),
+[`examples/phased-loop.md`](../examples/phased-loop.md). Contract:
+[`specs/loop-scripts.yaml`](../specs/loop-scripts.yaml).
 
 ---
 
@@ -337,7 +465,9 @@ Runs are saved under `.kodr/` in the workspace:
 
 - `.kodr/runs/` — one JSON transcript per run (plus any `--debug` sidecar);
   what `--continue`, `replay`, and `stats` read. Change the location with
-  `--runs-dir` / `KODR_RUNS_DIR`, or skip saving with `--no-save`.
+  `--runs-dir` / `KODR_RUNS_DIR`, or skip saving with `--no-save`. Add `.kodr/`
+  to your `.gitignore` — it's diagnostic output, not source. (The loop scripts
+  do this for you, repo-locally.)
 - `.kodr/hooks.json` — SessionStart/Stop/tool hooks (see
   [`specs/hooks.yaml`](../specs/hooks.yaml)).
 - `.kodr/skills/<name>/SKILL.md` — workspace skills the model can load on
@@ -369,6 +499,9 @@ kodr "/compact" --continue last
 
 # Check the environment before a big run
 kodr doctor
+
+# Build a whole TASKS.md backlog overnight, committing each task as it goes
+nohup ./examples/loop.sh >loop.out 2>&1 & disown
 ```
 
 For the full flag reference, run `kodr --help`.
