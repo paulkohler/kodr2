@@ -9,7 +9,7 @@
 # for "every endpoint has an owner check retrofitted" or "the README
 # documents every endpoint" — no test command can grep for "did the model
 # actually audit everything," only a grounded model judge can (see
-# specs/goal.yaml). A realistic multi-phase build (see examples/crm-phases.md)
+# specs/goal.yaml). A realistic multi-phase build (see examples/crm/TASKS.md)
 # has both kinds of item in the same plan.
 #
 # This script is loop.sh's ratchet (commit on green, retry in place on red,
@@ -115,6 +115,28 @@ done
 # done. A GOAL: prefix (if present) rides along in the returned text — the
 # branch below strips it, next_task doesn't need to know about it.
 next_task() { grep -m1 '^- \[ \] ' "$TASKS_FILE" 2>/dev/null | sed 's/^- \[ \] //'; }
+
+# A task must be ONE line. next_task is a `grep -m1`, which returns the matching
+# line and nothing else -- so an item wrapped onto a continuation line silently
+# sends only its first line to the model and drops the rest. Caught live: a
+# 15-phase CRM checklist whose every item was wrapped sent phase 0 to the model
+# as "Scaffold a zero-dependency Node CRM API: package.json with no" and then
+# spent hours building against truncated prompts.
+#
+# Refuse at startup with the offending line numbers rather than truncate in
+# silence. Reflowing wrapped markdown list items in shell is the hazardous
+# alternative -- one line per task is the contract instead.
+wrapped="$(awk '
+  /^- \[[ x!]\] / { item = NR; next }
+  item && /^[[:space:]]+[^[:space:]]/ { print item; item = 0; next }
+  { item = 0 }
+' "$TASKS_FILE")"
+if [ -n "$wrapped" ]; then
+  echo "$TASKS_FILE: these checklist items wrap onto a continuation line:" >&2
+  echo "$wrapped" | sed 's/^/  line /' >&2
+  echo "  Each task must be a single line -- only the first line is ever sent to the model." >&2
+  exit 1
+fi
 
 # Flip the FIRST unchecked line's marker to $1 (x = done, ! = blocked). Portable
 # awk rewrite — next_task always hands us the first unchecked line, so "first"

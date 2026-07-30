@@ -83,7 +83,7 @@ inputs:
     required: false
     description: >
       The checklist (default TASKS.md — KODR_LOOP_TASKS_FILE, --tasks). Markdown
-      with `- [ ] ` items, the same format examples/crm-phases.md already uses;
+      with `- [ ] ` items, the same format examples/crm/TASKS.md already uses;
       a `GOAL: ` prefix routes that item to the judged loop. Marked `- [x] ` on
       green and `- [!] ` on park, so the file is both the cursor and the report.
   maxAttempts:

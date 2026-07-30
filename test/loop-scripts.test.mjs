@@ -372,7 +372,7 @@ describe('the --json consumption contract', () => {
 
 // --- Regressions ----------------------------------------------------------
 // Each case below is a bug that actually happened, found by hand across two
-// five-hour runs of examples/phased-loop.sh against examples/crm-phases.md and
+// five-hour runs of examples/phased-loop.sh against examples/crm/ and
 // fixed in 2adb55d. Four of the five failed silently — the run looked healthy
 // while it was already broken — which is exactly the class a live run catches
 // only by luck and a test catches for free.
@@ -786,7 +786,7 @@ describe("regression: bug 6 — a park destroyed the failed attempt's transcript
 });
 
 describe('regression: bug 7 — a park in an uncommitted repo ate the checklist', () => {
-  // examples/crm-phases.md's own "Run it" block said: git init, copy the
+  // examples/crm/'s own "Run it" block said: git init, copy the
   // checklist, launch. Nothing commits it, so nothing is tracked -- and
   // `git reset --hard` is a silent no-op with no HEAD, dropping the park
   // straight into `git clean -fd`, which deletes every untracked file in the
@@ -817,4 +817,56 @@ describe('regression: bug 7 — a park in an uncommitted repo ate the checklist'
       assert.equal(repoFileExists(ctx.repo, 'TASKS.md'), true);
     });
   }
+});
+
+describe('regression: bug 8 — a wrapped checklist item was silently truncated', () => {
+  // next_task is a `grep -m1`, which returns the matching line and nothing
+  // else. Every item in examples/crm/ was wrapped for readability, so
+  // a live 15-phase run sent phase 0 to the model as the 11 words that fit on
+  // the first line -- "Scaffold a zero-dependency Node CRM API: package.json
+  // with no" -- and kept going, building against truncated prompts with
+  // nothing in the log to say so. Reflowing markdown list items in shell is
+  // the hazardous fix; one line per task is the contract instead, enforced
+  // here so the truncation can never be silent again.
+
+  for (const [name, script] of [
+    ['loop.sh', LOOP_SH],
+    ['phased-loop.sh', PHASED_LOOP_SH],
+  ]) {
+    it(`${name} refuses a checklist whose item wraps, naming the line`, async (t) => {
+      if (guard(t)) {
+        return;
+      }
+      ctx = await createLoopRepo({
+        tasks: [
+          'add a feature',
+          'Scaffold a zero-dependency Node CRM API: package.json with no\n      dependencies and an npm test script',
+        ],
+      });
+
+      const result = runLoop(ctx, { script, responses: [runGreen()] });
+
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /wrap onto a continuation line/);
+      // The line number points at the item's *first* line, which is what you
+      // have to go and rejoin.
+      assert.match(result.stderr, /line 4/);
+      // Refused before spending a model call on the truncated prompt.
+      assert.equal(result.invocations.length, 0);
+    });
+  }
+
+  it('accepts a checklist whose items are each one line, however long', async (t) => {
+    if (guard(t)) {
+      return;
+    }
+    const long = `Scaffold a zero-dependency Node CRM API: ${'a long single-line task '.repeat(20)}`;
+    ctx = await createLoopRepo({ tasks: [long] });
+
+    const result = runLoop(ctx, { script: LOOP_SH, responses: [runGreen()] });
+
+    assert.equal(result.status, 0);
+    // The whole task reaches the model, not just what fit on a first line.
+    assert.equal(result.invocations[0][1], long);
+  });
 });

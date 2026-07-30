@@ -111,10 +111,10 @@ It needs a real interactive terminal (it can't be combined with `--json`,
 - **A live run per turn.** Each prompt is a full `run()` — streamed into the
   scrollback with a status header showing model, phase, tokens, cost, and
   elapsed time.
-- **Multi-turn by default.** A follow-up continues the *same* conversation
+- **Multi-turn by default.** A follow-up continues the _same_ conversation
   (the same mechanism as `--continue` below) — no need to restate context.
 - **One run at a time.** Type a follow-up while a run is active and it's
-  *queued* (a single slot, shown in the header); it starts automatically when
+  _queued_ (a single slot, shown in the header); it starts automatically when
   the current turn finishes.
 - **Markdown rendering.** Assistant text is rendered inline — bold, italic,
   `code`, bullets, and headings.
@@ -233,7 +233,7 @@ kodr "…" --memory --memory-auto-apply   # trust the loop; skip the prompt
 
 ## 10. A second pair of eyes — `--review-model`
 
-After a successful build, run a review pass on a *different* model. Kodr owns
+After a successful build, run a review pass on a _different_ model. Kodr owns
 the LM Studio load/unload/verify sequencing for both models via the `lms`
 CLI, so you can build on a fast model and review on a stronger one.
 
@@ -246,7 +246,7 @@ Related tuning: `--review-context-window`, `--review-min-tool-calls`,
 
 ## 11. Slash commands for the TUI
 
-Slash commands are TUI meta-commands: they act on the *session* — the
+Slash commands are TUI meta-commands: they act on the _session_ — the
 conversation, the config, the view — rather than being sent to the model as a
 prompt. Type a `/`-prefixed word at the start of the input. An unrecognized
 `/word` is **not** swallowed — it's sent to the model as an ordinary prompt —
@@ -256,24 +256,24 @@ Most commands work mid-run (they act on the session, not the model). A few
 that would corrupt an in-flight turn — `/compact`, `/clear`, `/retry`,
 `/model`, `/test` — are declined with a notice while a run is active.
 
-| Command | What it does |
-| --- | --- |
-| `/help`, `/?` | List the available slash commands and their descriptions |
-| `/compact` | Compress the conversation into a summary and continue |
-| `/clear`, `/new` | Start a fresh conversation, dropping the prior history |
-| `/retry` | Re-run the last prompt fresh, discarding that turn's result |
-| `/stop`, `/cancel` | Abort the in-flight run (via the cancel path) without quitting |
-| `/model [id]` | Show the current model, or switch to another for the next turn |
-| `/provider` | Show the current provider |
-| `/context`, `/tokens` | Show context-window and token counts for the session |
-| `/cost` | Show accumulated cost (OpenRouter; `$0` locally) |
-| `/diff` | Show the `git diff` of everything changed this session |
-| `/history`, `/messages` | Show the conversation so far |
-| `/test [command]` | Show or set the verification command for the next turn |
-| `/approve` | Toggle per-command approval on or off mid-session |
-| `/reasoning` | Toggle reasoning tokens (where the provider supports it) |
-| `/doctor` | Run the preflight checks inline |
-| `/quit`, `/exit` | Leave the TUI (equivalent to Ctrl-C) |
+| Command                 | What it does                                                   |
+| ----------------------- | -------------------------------------------------------------- |
+| `/help`, `/?`           | List the available slash commands and their descriptions       |
+| `/compact`              | Compress the conversation into a summary and continue          |
+| `/clear`, `/new`        | Start a fresh conversation, dropping the prior history         |
+| `/retry`                | Re-run the last prompt fresh, discarding that turn's result    |
+| `/stop`, `/cancel`      | Abort the in-flight run (via the cancel path) without quitting |
+| `/model [id]`           | Show the current model, or switch to another for the next turn |
+| `/provider`             | Show the current provider                                      |
+| `/context`, `/tokens`   | Show context-window and token counts for the session           |
+| `/cost`                 | Show accumulated cost (OpenRouter; `$0` locally)               |
+| `/diff`                 | Show the `git diff` of everything changed this session         |
+| `/history`, `/messages` | Show the conversation so far                                   |
+| `/test [command]`       | Show or set the verification command for the next turn         |
+| `/approve`              | Toggle per-command approval on or off mid-session              |
+| `/reasoning`            | Toggle reasoning tokens (where the provider supports it)       |
+| `/doctor`               | Run the preflight checks inline                                |
+| `/quit`, `/exit`        | Leave the TUI (equivalent to Ctrl-C)                           |
 
 Behavior, edge cases, and the test contract live in
 [`specs/tui-slash-commands.yaml`](../specs/tui-slash-commands.yaml). (`/memory`
@@ -283,10 +283,10 @@ is deferred — see the spec.)
 
 ## 12. Loop toward a goal — `kodr goal`
 
-A single `kodr run` is one shot. `kodr goal` is the *outer loop*: it re-runs the
+A single `kodr run` is one shot. `kodr goal` is the _outer loop_: it re-runs the
 task until a model judge confirms your goal is met, or it hits an attempt cap.
 Where `--test` is a deterministic gate ("tests pass"), the judge handles a
-*fuzzy* goal a shell command can't express.
+_fuzzy_ goal a shell command can't express.
 
 ```bash
 kodr goal "the /health route is documented in the README and has a test" \
@@ -305,13 +305,13 @@ errors (`build-error`).
 `--json` prints a machine-readable summary (`{ met, reason, attempts, verdicts,
 usage, … }`); the process exits `0` only when the goal was met (unless
 `--no-fail`). Full contract: [`specs/goal.yaml`](../specs/goal.yaml). For a
-*backlog* of tasks rather than one goal, see the next section.
+_backlog_ of tasks rather than one goal, see the next section.
 
 ---
 
 ## 13. Drive a whole backlog unattended — the loop scripts
 
-`kodr goal` loops toward *one* outcome. When you have a list of things to build
+`kodr goal` loops toward _one_ outcome. When you have a list of things to build
 and want them built while you're asleep, wrap Kodr in the shipped driver script.
 Kodr deliberately doesn't build the loop in — it exposes the seams (`--json`,
 exit codes, `--continue`) and the loop is an ordinary shell script you can read
@@ -319,9 +319,9 @@ and edit.
 
 Two are shipped:
 
-| Script | Use it when |
-| --- | --- |
-| [`examples/loop.sh`](../examples/loop.sh) | Every task is checkable by a test command |
+| Script                                                  | Use it when                                                       |
+| ------------------------------------------------------- | ----------------------------------------------------------------- |
+| [`examples/loop.sh`](../examples/loop.sh)               | Every task is checkable by a test command                         |
 | [`examples/phased-loop.sh`](../examples/phased-loop.sh) | Some tasks aren't — it adds `GOAL: ` lines, judged by `kodr goal` |
 
 ### The flow
@@ -329,8 +329,8 @@ Two are shipped:
 **1. Write a `TASKS.md` checklist.** One `- [ ]` line per task, in order:
 
 ```markdown
-- [ ] Add Company (name, domain) and Contact (name, email, company_id) with full
-      CRUD. Validate input with clear 400s for missing fields and malformed
+- [ ] Add Company (`name`, `domain`) and Contact (`name`, `email`, `company_id`) with
+      full CRUD. Validate input with clear 400s for missing fields and malformed
       email. Add tests per route, including the validation-failure cases.
 - [ ] GOAL: every endpoint has an owner check and the README documents all of them
 ```
@@ -355,7 +355,7 @@ let that happen.
 
 Each task is one iteration, and only one outcome commits:
 
-- **Green** — the run *completed*, actually changed files, and didn't fail
+- **Green** — the run _completed_, actually changed files, and didn't fail
   `TEST_CMD`. The task's code and its `- [x]` tick land in the **same commit**,
   so a later task can never silently un-tick it.
 - **Red** — retries in place with `--continue last`, up to `MAX_ATTEMPTS`. The
@@ -372,6 +372,11 @@ trusting rather than a random walk.
 
 This is where the value is won or lost:
 
+- **One task per line — no wrapping.** The checklist is read with `grep -m1`,
+  which returns a single line, so a task wrapped across two lines would send
+  only its first line to the model. The scripts refuse to start on a wrapped
+  item rather than truncate it, but write them long and unwrapped from the
+  start.
 - **One task ≈ one commit's worth of work.** "Build the app" parks; "add the
   Company CRUD routes with validation tests" goes green.
 - **Name the files and the acceptance criteria in the task.** The tasks that
@@ -384,24 +389,24 @@ This is where the value is won or lost:
 - **Use `GOAL: ` only where a test command genuinely can't express "done"** —
   "every endpoint has an owner check", "the README documents all of it". Most
   of a real build is crisply testable; keep the judge for the rest.
-  [`examples/crm-phases.md`](../examples/crm-phases.md) is a worked 15-phase
+  [`examples/crm/`](../examples/crm/) is a worked 15-phase
   plan with that mix.
 
 ### Config
 
 All environment variables, all optional:
 
-| Var | Default | What it does |
-| --- | --- | --- |
-| `TASKS_FILE` | `TASKS.md` | The checklist |
-| `TEST_CMD` | `npm test` | The gate; empty string disables `--test` |
-| `MAX_ATTEMPTS` | `3` | Retries per task before parking |
-| `GOAL_MAX_ATTEMPTS` | `4` | `kodr goal` attempts per `GOAL: ` line (phased only) |
-| `TOOL_TURNS` | `30` | Tool-turn ceiling per attempt |
-| `RUN_MS` | `900000` | Wall-clock budget per attempt |
-| `REQUEST_TIMEOUT_MS` | kodr's `600000` | Per-request ceiling; raise for a big local model |
-| `RETRY_BACKOFF_S` | `5` | Pause before retrying a *transient* error |
-| `RESET_PATHS` | *(empty)* | Gitignored paths to wipe on park — see below |
+| Var                  | Default         | What it does                                         |
+| -------------------- | --------------- | ---------------------------------------------------- |
+| `TASKS_FILE`         | `TASKS.md`      | The checklist                                        |
+| `TEST_CMD`           | `npm test`      | The gate; empty string disables `--test`             |
+| `MAX_ATTEMPTS`       | `3`             | Retries per task before parking                      |
+| `GOAL_MAX_ATTEMPTS`  | `4`             | `kodr goal` attempts per `GOAL: ` line (phased only) |
+| `TOOL_TURNS`         | `30`            | Tool-turn ceiling per attempt                        |
+| `RUN_MS`             | `900000`        | Wall-clock budget per attempt                        |
+| `REQUEST_TIMEOUT_MS` | kodr's `600000` | Per-request ceiling; raise for a big local model     |
+| `RETRY_BACKOFF_S`    | `5`             | Pause before retrying a _transient_ error            |
+| `RESET_PATHS`        | _(empty)_       | Gitignored paths to wipe on park — see below         |
 
 ```bash
 MAX_ATTEMPTS=5 TEST_CMD="node --test" RESET_PATHS=data ./examples/loop.sh
@@ -424,7 +429,7 @@ reproduces.
 
 - **Needs `jq`, `git`, and bash ≥ 4.4.** macOS ships bash 3.2 — make sure
   `env bash` finds a newer one (Homebrew's).
-- **`git reset --hard` only reverts *tracked* files.** A database or cache a
+- **`git reset --hard` only reverts _tracked_ files.** A database or cache a
   parked task migrated survives and poisons every later task. Set
   `RESET_PATHS="data"` (space-separated) to wipe those on park; it refuses `.`,
   `..`, `.git`, absolute paths, and traversal.
@@ -443,13 +448,13 @@ Deep dives, including the live failures behind each of these rules:
 
 Beyond `run` and `tui`, Kodr ships a handful of read-mostly subcommands:
 
-| Command | What it does |
-| --- | --- |
-| `kodr models` | List models and their loaded-vs-max context windows; flag unused headroom |
-| `kodr doctor` | Preflight the provider, model, git, and Node version; exit non-zero only on a real failure |
-| `kodr stats` | Aggregate rates (heal, retry, compaction, verify) across saved runs |
-| `kodr replay <last\|path>` | Re-run a saved run's *original* prompt fresh, to check whether a failure reproduces |
-| `kodr acp` | Serve Kodr as an [ACP](https://agentclientprotocol.com) agent over stdio for an editor (see [`docs/acp.md`](acp.md)) |
+| Command                    | What it does                                                                                                         |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `kodr models`              | List models and their loaded-vs-max context windows; flag unused headroom                                            |
+| `kodr doctor`              | Preflight the provider, model, git, and Node version; exit non-zero only on a real failure                           |
+| `kodr stats`               | Aggregate rates (heal, retry, compaction, verify) across saved runs                                                  |
+| `kodr replay <last\|path>` | Re-run a saved run's _original_ prompt fresh, to check whether a failure reproduces                                  |
+| `kodr acp`                 | Serve Kodr as an [ACP](https://agentclientprotocol.com) agent over stdio for an editor (see [`docs/acp.md`](acp.md)) |
 
 ```bash
 kodr models

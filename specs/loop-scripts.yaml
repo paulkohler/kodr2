@@ -9,7 +9,7 @@ description: >
 
   That gap is not theoretical. Commit 2adb55d fixed five bugs in these two
   scripts, all found by hand during a 15-phase CRM dogfooding run
-  (examples/crm-phases.md) that took roughly five hours per pass. Their shape
+  (examples/crm/TASKS.md) that took roughly five hours per pass. Their shape
   is what matters here: four of the five failed *silently* — a run whose logs
   froze after the first success while it was still healthy; five phases that
   built correctly and were never committed because a `git add` advisory exit
@@ -152,7 +152,7 @@ tests:
     - "bug 6: both scripts register .kodr/ in .git/info/exclude at startup"
     - "bug 6: a parked attempt's run transcript survives the park - git clean must not take it"
     - "bug 6: a run transcript is never committed into the project's history"
-    # --- regression: bug 7, found by reading crm-phases.md's own setup block ---
+    # --- regression: bug 7, found by reading the CRM example's own setup block ---
     - "bug 7: both scripts refuse to start in a repo with no commits, before any model call"
     - "bug 7: the refusal leaves the checklist on disk"
     # --- the drift guard's own guard ---

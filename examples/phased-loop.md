@@ -49,7 +49,7 @@ non-met result the item goes straight to parked.
 ## Why the split matters
 
 A test suite can be green and the feature can still be wrong — see
-[`examples/crm-phases.md`](./crm-phases.md)'s phase 7, `/search-all`: a real
+[`examples/crm/`](./crm/)'s phase 7, `/search-all`: a real
 run of that exact feature shipped with one whole entity silently missing
 from the search results, fully documented and fully tested as if it were
 complete. The tests passing was never in question; whether the model
@@ -60,7 +60,7 @@ The reverse mistake is just as real: routing *everything* through `kodr
 goal` would burn a build-time judge assessment on tasks a test command
 already settles for free — "add input validation" doesn't need a model to
 read the diff and confirm it exists; the test suite already proves it. The
-`crm-phases.md` example keeps `GOAL:` to four of its fifteen phases —
+`examples/crm/` example keeps `GOAL:` to four of its fifteen phases —
 the ones that are claims about the whole codebase (auth retrofit, hardening,
 multi-tenancy) or where "tests are green" has already been seen to lie
 (search-all) — and leaves the rest as plain tasks.
@@ -70,7 +70,9 @@ multi-tenancy) or where "tests are green" has already been seen to lie
 ```bash
 mkdir -p /path/to/a/throwaway/crm && cd /path/to/a/throwaway/crm
 git init -q
-cp /path/to/kodr2/examples/crm-phases.md TASKS.md
+cp /path/to/kodr2/examples/crm/TASKS.md .
+cp /path/to/kodr2/examples/crm/AGENTS.md .
+git add -A && git commit -qm "checklist"   # the loop refuses to start without one
 
 # defaults: MAX_ATTEMPTS=3, GOAL_MAX_ATTEMPTS=4, TEST_CMD="npm test"
 /path/to/kodr2/examples/phased-loop.sh
