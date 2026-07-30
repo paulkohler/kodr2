@@ -126,8 +126,14 @@ export async function createLoopRepo(options) {
     writeFileSync(join(repo, '.gitignore'), options.gitignore);
   }
 
-  git(repo, ['add', '-A']);
-  git(repo, ['commit', '-q', '-m', 'init']);
+  // noInitialCommit leaves a bare `git init` with nothing tracked — what an
+  // operator has after following a "git init, copy the checklist, launch" style
+  // of instruction. Nothing is tracked, so a park's `git clean -fd` would take
+  // the checklist itself.
+  if (!options.noInitialCommit) {
+    git(repo, ['add', '-A']);
+    git(repo, ['commit', '-q', '-m', 'init']);
+  }
 
   // After the initial commit, so these stay untracked (or ignored) exactly as a
   // real run would leave them.

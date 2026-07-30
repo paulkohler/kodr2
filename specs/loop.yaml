@@ -223,9 +223,13 @@ constraints:
     commit stops the loop with reason "commit-failed" and a non-zero exit. The
     loop never continues past a git failure on the assumption that it worked.
   - >
-    The loop never runs outside a git repo, and refuses to start when the
-    checklist is missing — both are startup errors with an explicit message,
-    not a first-task failure.
+    The loop never runs outside a git repo, refuses to start when the checklist
+    is missing, and refuses a repo with no commits — all startup errors with an
+    explicit message, not a first-task failure. The last one matters more than
+    it looks: `git reset --hard` is a silent no-op without a HEAD, so a park
+    falls through to `clean -fd` with nothing tracked and deletes the checklist
+    itself, ending the run with the plan gone (specs/loop-scripts.yaml, bug 7).
+    A destructive path needs a baseline to be destructive *relative to*.
   - >
     Budget checks happen between tasks only. A budget stop therefore always lands
     on a committed tree with an accurate checklist, which is what makes the loop
@@ -285,6 +289,7 @@ tests:
     - usage and durationMs are summed across every run and judge call
     - the loop refuses to start outside a git repo, with an explicit message
     - the loop refuses to start when the checklist is missing
+    - the loop refuses to start in a repo with no commits, leaving the checklist intact
     - loop phases and notices reach the injected reporter
     - parseArgs parses the loop subcommand, --tasks, --max-attempts, and the loop budgets
   eval:

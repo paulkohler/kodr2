@@ -74,6 +74,19 @@ command -v jq   >/dev/null || { echo "jq not on PATH (needed by this loop)" >&2;
 [ -f "$TASKS_FILE" ] || { echo "no $TASKS_FILE" >&2; exit 1; }
 GIT_DIR="$(git rev-parse --git-dir 2>/dev/null)" || { echo "not a git repo" >&2; exit 1; }
 
+# ...and a repo with at least one commit. `git reset --hard` is a silent no-op
+# when there is no HEAD, so a park falls straight through to `git clean -fd`
+# with nothing tracked -- which deletes every untracked file in the tree, the
+# checklist included. The run then dies on the next mark with the plan gone.
+# Refuse at startup instead: it is the operator's very first action, and a
+# one-line fix, but a confusing three-error cascade an hour into an unattended
+# run if it fires there.
+git rev-parse --verify HEAD >/dev/null 2>&1 || {
+  echo "no commits in this repo yet -- commit $TASKS_FILE before starting" >&2
+  echo "  (a park runs 'git clean -fd'; with nothing tracked, that deletes the checklist)" >&2
+  exit 1
+}
+
 # Ignore this script's own log files locally (.git/info/exclude), not the
 # project's tracked .gitignore. A *tracked* .gitignore entry for the same
 # path makes an explicit `git add -A -- . ':!path'` exit non-zero (git's

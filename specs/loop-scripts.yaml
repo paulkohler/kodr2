@@ -60,6 +60,10 @@ scope:
   in:
     - examples/loop.sh and examples/phased-loop.sh — the ratchet, the retry
       loop, the park path, checklist marking, commit ordering, RESET_PATHS.
+    - The startup preconditions both scripts enforce before spending a model
+      call - kodr and jq on PATH, the checklist present, a git repo, and at
+      least one commit in it. The last is not fussiness: the park path is
+      destructive, and with nothing tracked it destroys the checklist.
     - The scripts' consumption contract with `kodr --json` — which fields they
       read and how they combine them into a green/not-green decision.
   out:
@@ -148,6 +152,9 @@ tests:
     - "bug 6: both scripts register .kodr/ in .git/info/exclude at startup"
     - "bug 6: a parked attempt's run transcript survives the park - git clean must not take it"
     - "bug 6: a run transcript is never committed into the project's history"
+    # --- regression: bug 7, found by reading crm-phases.md's own setup block ---
+    - "bug 7: both scripts refuse to start in a repo with no commits, before any model call"
+    - "bug 7: the refusal leaves the checklist on disk"
     # --- the drift guard's own guard ---
     # jq collapses a missing field to a clean "false", so the scripts' own
     # expressions cannot tell a renamed field from a genuinely red run. The

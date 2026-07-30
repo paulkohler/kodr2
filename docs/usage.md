@@ -335,13 +335,19 @@ Two are shipped:
 - [ ] GOAL: every endpoint has an owner check and the README documents all of them
 ```
 
-**2. Launch it detached** — a real backlog runs for hours, and a foreground
-shell may be culled:
+**2. Commit it, then launch detached** — a real backlog runs for hours, and a
+foreground shell may be culled:
 
 ```bash
-cd /path/to/your/project        # must be a git repo
+cd /path/to/your/project
+git add -A && git commit -m "checklist"   # the loop needs a baseline to reset to
 nohup ./examples/loop.sh >loop.out 2>&1 & disown
 ```
+
+The commit isn't ceremony: a park runs `git reset --hard` + `git clean -fd`,
+and with nothing tracked yet that deletes every untracked file — the checklist
+included. Both scripts refuse to start in a repo with no commits rather than
+let that happen.
 
 **3. Come back and read `git log`.** That's the deliverable.
 

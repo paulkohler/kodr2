@@ -784,3 +784,37 @@ describe("regression: bug 6 — a park destroyed the failed attempt's transcript
     );
   });
 });
+
+describe('regression: bug 7 — a park in an uncommitted repo ate the checklist', () => {
+  // examples/crm-phases.md's own "Run it" block said: git init, copy the
+  // checklist, launch. Nothing commits it, so nothing is tracked -- and
+  // `git reset --hard` is a silent no-op with no HEAD, dropping the park
+  // straight into `git clean -fd`, which deletes every untracked file in the
+  // tree. Reproduced against the real script: the first park removed TASKS.md
+  // itself, then mark_first's awk failed, then `git add TASKS.md` failed, and
+  // the run died on phase 0 with the plan gone.
+
+  for (const [name, script] of [
+    ['loop.sh', LOOP_SH],
+    ['phased-loop.sh', PHASED_LOOP_SH],
+  ]) {
+    it(`${name} refuses to start in a repo with no commits`, async (t) => {
+      if (guard(t)) {
+        return;
+      }
+      ctx = await createLoopRepo({
+        tasks: ['scaffold the project'],
+        noInitialCommit: true,
+      });
+
+      const result = runLoop(ctx, { script, responses: [runRed()] });
+
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /no commits in this repo yet/);
+      // Refused before spending a single model call.
+      assert.equal(result.invocations.length, 0);
+      // And above all, the checklist is still there.
+      assert.equal(repoFileExists(ctx.repo, 'TASKS.md'), true);
+    });
+  }
+});
