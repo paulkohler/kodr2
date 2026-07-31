@@ -169,10 +169,16 @@ Same shape as phase 5, just bigger.
   every later phase depends on it as the hard gate — so if phase 0 doesn't
   actually wire that script up, nothing after it can go green. It's the one
   phase worth watching live before walking away.
-- **A parked phase is a checkpoint, not a failure.** `phased-loop.sh` reverts
-  the partial work and marks the line `[!]`, then carries on to the next phase.
-  Inspect `phased-loop.log` and the parked attempt's transcript in `.kodr/runs/`,
-  then either fix the phase by hand or reword the checklist line and re-launch.
+- **A parked phase stops the run, and should.** `phased-loop.sh` reverts the
+  partial work, marks the line `[!]`, commits that mark, and exits — because
+  this is a *phase* plan and everything after a parked phase would be built on
+  a foundation that was just reverted. A live run proved the point: it parked
+  the Notes/Tasks phase and then spent the next (judged, so expensive) phase
+  retrofitting ownership scoping across "companies, contacts, deals, notes,
+  tasks" with the last two nonexistent. Inspect `phased-loop.log` and the
+  parked attempt's transcript in `.kodr/runs/`, then either build that phase by
+  hand or reword its checklist line and relaunch — the loop resumes at the
+  first unchecked item. `STOP_ON_PARK=0` carries on regardless.
 - **`GOAL_MAX_ATTEMPTS` (default 4) is per judged phase**, and those phases are
   the expensive ones: each attempt is a full build *plus* a read-only judge pass
   over the workspace.

@@ -270,7 +270,8 @@ describe('phased-loop.sh — the GOAL: branch', () => {
       env: { MAX_ATTEMPTS: '3' },
     });
 
-    assert.equal(result.status, 0);
+    // Exit 1: phased-loop.sh stops on a park by default (see STOP_ON_PARK).
+    assert.equal(result.status, 1);
     // kodr goal already retried internally; re-running it fresh would repeat the
     // same attempts with no memory of what the judge said.
     assert.equal(
@@ -297,7 +298,8 @@ describe('phased-loop.sh — the GOAL: branch', () => {
       ],
     });
 
-    assert.equal(result.status, 0);
+    // Exit 1: phased-loop.sh stops on a park by default (see STOP_ON_PARK).
+    assert.equal(result.status, 1);
     // met, but nothing changed — not green, so it parks rather than committing.
     assert.deepEqual(commitSubjects(ctx.repo), [
       'kodr: park GOAL: nothing actually changed',
@@ -817,6 +819,93 @@ describe('regression: bug 7 — a park in an uncommitted repo ate the checklist'
       assert.equal(repoFileExists(ctx.repo, 'TASKS.md'), true);
     });
   }
+});
+
+describe('STOP_ON_PARK — a park stops an ordered checklist', () => {
+  // A checklist is ordered, and a later item usually builds on an earlier one,
+  // so carrying on past a park builds everything remaining against a
+  // foundation that was just reverted. Caught live: a CRM plan parked its
+  // Notes/Tasks phase and the next phase — a judged one, costing a build plus
+  // a judge pass per attempt — went on to retrofit ownership scoping across
+  // "companies, contacts, deals, notes, tasks" with the last two nonexistent.
+  //
+  // phased-loop.sh defaults to stopping (a phase plan is ordered by
+  // definition); loop.sh defaults to carrying on (a backlog is often
+  // independent tasks). Both honour the variable either way.
+
+  it('phased-loop.sh stops after a park by default, leaving later tasks untouched', async (t) => {
+    if (guard(t)) {
+      return;
+    }
+    ctx = await createLoopRepo({ tasks: ['parks', 'never reached'] });
+
+    const result = runLoop(ctx, {
+      script: PHASED_LOOP_SH,
+      responses: [runRed(), runRed(), runRed()],
+      env: { MAX_ATTEMPTS: '3' },
+    });
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /stopping after a park/);
+    // The park is committed before stopping, so a relaunch resumes cleanly.
+    assert.deepEqual(commitSubjects(ctx.repo), ['kodr: park parks', 'init']);
+    const tasks = readRepoFile(ctx.repo, 'TASKS.md');
+    assert.match(tasks, /- \[!\] parks/);
+    assert.match(tasks, /- \[ \] never reached/);
+    // It never started the second task.
+    assert.equal(result.invocations.filter((a) => a[0] === 'run').length, 3);
+  });
+
+  it('loop.sh carries on after a park by default', async (t) => {
+    if (guard(t)) {
+      return;
+    }
+    ctx = await createLoopRepo({ tasks: ['parks', 'still runs'] });
+
+    const result = runLoop(ctx, {
+      script: LOOP_SH,
+      responses: [runRed(), runGreen()],
+      env: { MAX_ATTEMPTS: '1' },
+    });
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /backlog empty\./);
+    assert.match(readRepoFile(ctx.repo, 'TASKS.md'), /- \[x\] still runs/);
+  });
+
+  it('STOP_ON_PARK=1 makes loop.sh stop too', async (t) => {
+    if (guard(t)) {
+      return;
+    }
+    ctx = await createLoopRepo({ tasks: ['parks', 'never reached'] });
+
+    const result = runLoop(ctx, {
+      script: LOOP_SH,
+      responses: [runRed()],
+      env: { MAX_ATTEMPTS: '1', STOP_ON_PARK: '1' },
+    });
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /stopping after a park/);
+    assert.match(readRepoFile(ctx.repo, 'TASKS.md'), /- \[ \] never reached/);
+  });
+
+  it('STOP_ON_PARK=0 makes phased-loop.sh carry on', async (t) => {
+    if (guard(t)) {
+      return;
+    }
+    ctx = await createLoopRepo({ tasks: ['parks', 'still runs'] });
+
+    const result = runLoop(ctx, {
+      script: PHASED_LOOP_SH,
+      responses: [runRed(), runGreen()],
+      env: { MAX_ATTEMPTS: '1', STOP_ON_PARK: '0' },
+    });
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /backlog empty\./);
+    assert.match(readRepoFile(ctx.repo, 'TASKS.md'), /- \[x\] still runs/);
+  });
 });
 
 describe('regression: bug 8 — a wrapped checklist item was silently truncated', () => {

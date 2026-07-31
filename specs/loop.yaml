@@ -115,6 +115,20 @@ inputs:
       --hard` reverts only tracked files, so a database an abandoned attempt
       migrated survives a park and carries that attempt's damage into every later
       task.
+  stopOnPark:
+    type: boolean
+    required: false
+    description: >
+      Stop the whole loop when a task parks, rather than carrying on to the
+      next (KODR_LOOP_STOP_ON_PARK, --stop-on-park/--no-stop-on-park). A
+      checklist is ordered and a later item usually builds on an earlier one,
+      so carrying on past a park builds everything remaining against a
+      foundation that was just reverted — found live when a CRM plan parked its
+      Notes/Tasks phase and the next phase, a judged one costing a build plus a
+      judge pass per attempt, went on to retrofit ownership scoping across five
+      entities of which two no longer existed. The shell scripts split the
+      default by kind (phased-loop.sh stops, loop.sh carries on); `kodr loop`
+      has one entry point, so it defaults to stopping and the flag opts out.
   maxLoopMs:
     type: number
     required: false
@@ -275,6 +289,8 @@ tests:
     - resetPaths refuses '.', '..', '.git', an absolute path, and traversal out of cwd, and continues
     - a park removes untracked debris (clean -fd) but leaves gitignored state alone
     - a parked task's run and loop records survive the park, and are never committed
+    - a park stops the loop by default, with the park committed first so a rerun resumes
+    - stopOnPark false carries on to the next task after a park
     - a failed commit after a green build stops the loop with reason "commit-failed"
     - a failed park-mark commit stops the loop with reason "commit-failed"
     # --- what the shell version could not do ---

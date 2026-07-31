@@ -58,6 +58,11 @@
 #                      a users table, organization_id columns) permanently baked into
 #                      data/crm.db, with zero trace in any committed source file. Opt
 #                      in per project once you know which paths are safe to wipe.
+#   STOP_ON_PARK       stop the whole loop when a phase parks, instead of carrying on to
+#                      the next one (default 1). A phase plan is ordered by definition --
+#                      each phase builds on the last -- so continuing past a park builds
+#                      every later phase on a foundation that was just reverted. Set to 0
+#                      to carry on regardless.
 set -uo pipefail
 
 MAX_ATTEMPTS=${MAX_ATTEMPTS:-3}
@@ -68,6 +73,7 @@ TOOL_TURNS=${TOOL_TURNS:-30}
 RUN_MS=${RUN_MS:-900000}
 RETRY_BACKOFF_S=${RETRY_BACKOFF_S:-5}
 RESET_PATHS=${RESET_PATHS:-}
+STOP_ON_PARK=${STOP_ON_PARK:-1}
 
 command -v kodr >/dev/null || { echo "kodr not on PATH" >&2; exit 1; }
 command -v jq   >/dev/null || { echo "jq not on PATH (needed by this loop)" >&2; exit 1; }
@@ -270,6 +276,20 @@ while task="$(next_task)"; [ -n "$task" ]; do
     # instead of riding along with one that already happened.
     if ! { git add "$TASKS_FILE" && git commit -q -m "kodr: park $task"; }; then
       echo "  ERROR: failed to commit the park mark — stopping; a later park's reset could silently un-park this task" >&2
+      exit 1
+    fi
+    if [ "$STOP_ON_PARK" != "0" ]; then
+      # Stop rather than carry on. A checklist is ordered, and a later item
+      # usually builds on an earlier one -- so continuing past a park means
+      # every remaining item is built against a foundation that was just
+      # reverted. Caught live: a CRM plan parked its Notes/Tasks phase, and the
+      # next phase (a judged, build-plus-judge-per-attempt one) spent itself
+      # retrofitting ownership scoping across "companies, contacts, deals,
+      # notes, tasks" with the last two nonexistent. The park is committed
+      # first, so relaunching resumes cleanly at the first unchecked item.
+      echo "  stopping after a park -- later tasks build on this one." >&2
+      echo "  Fix it by hand or reword the checklist line, then relaunch." >&2
+      echo "  (STOP_ON_PARK=0 to carry on to the next task instead)" >&2
       exit 1
     fi
   fi

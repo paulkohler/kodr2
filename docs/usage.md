@@ -363,6 +363,10 @@ Each task is one iteration, and only one outcome commits:
   tried. A transient backend error (an HTTP 500, a timeout) backs off first.
 - **Gives up** — `git reset --hard` + `git clean -fd` puts the tree back to the
   last green commit, and the task is marked `- [!]` so it isn't picked again.
+  `phased-loop.sh` then **stops**: a phase plan is ordered, so everything after
+  a parked phase would build on a foundation that was just reverted.
+  `loop.sh` carries on, on the assumption that a backlog is often independent
+  tasks. `STOP_ON_PARK` overrides either way.
 
 So the tree is green at every commit, and a failed task can't contaminate the
 next one. That's the property that makes an unattended overnight run worth
@@ -407,6 +411,7 @@ All environment variables, all optional:
 | `REQUEST_TIMEOUT_MS` | kodr's `600000` | Per-request ceiling; raise for a big local model     |
 | `RETRY_BACKOFF_S`    | `5`             | Pause before retrying a _transient_ error            |
 | `RESET_PATHS`        | _(empty)_       | Gitignored paths to wipe on park — see below         |
+| `STOP_ON_PARK`       | `0` / `1` phased | Stop the run when a task parks, rather than carry on |
 
 ```bash
 MAX_ATTEMPTS=5 TEST_CMD="node --test" RESET_PATHS=data ./examples/loop.sh

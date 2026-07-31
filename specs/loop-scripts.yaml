@@ -152,6 +152,12 @@ tests:
     - "bug 6: both scripts register .kodr/ in .git/info/exclude at startup"
     - "bug 6: a parked attempt's run transcript survives the park - git clean must not take it"
     - "bug 6: a run transcript is never committed into the project's history"
+    # --- STOP_ON_PARK: a park stops an ordered checklist ---
+    - phased-loop.sh stops after a park by default, leaving later tasks untouched
+    - the park is committed before the loop stops, so a relaunch resumes cleanly
+    - loop.sh carries on after a park by default
+    - STOP_ON_PARK=1 makes loop.sh stop too
+    - STOP_ON_PARK=0 makes phased-loop.sh carry on
     # --- regression: bug 7, found by reading the CRM example's own setup block ---
     - "bug 7: both scripts refuse to start in a repo with no commits, before any model call"
     - "bug 7: the refusal leaves the checklist on disk"
