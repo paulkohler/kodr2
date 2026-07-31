@@ -10,8 +10,16 @@ Three files live here, and they have different jobs:
 | File | What it is |
 | --- | --- |
 | [`TASKS.md`](./TASKS.md) | The checklist. Copied into the target repo as-is; this is all the loop reads. |
-| [`AGENTS.md`](./AGENTS.md) | Workspace guidance — stack, SQLite patterns, API shape, style. Copied in too; Kodr reads it into every run's system prompt. |
+| [`AGENTS.md`](./AGENTS.md) | Workspace guidance — stack, layout, API shape, style. Copied in too; Kodr reads it into **every** run's system prompt, so it stays short. |
+| [`skills/`](./skills/) | On-demand guidance. Copied to `.kodr/skills/`; the model sees each skill's one-line description and loads the body with `load_skill` when it applies. |
 | `README.md` | This file. Setup and rationale — **not** copied into the target repo. |
+
+The `AGENTS.md`/skill split is deliberate. `AGENTS.md` costs context on every
+run, so it holds only what applies to all of them; `skills/sqlite-testing/`
+holds the detail that matters when a task touches storage or its tests, and
+costs nothing until it's loaded. That skill exists because test-file
+contamination against the shared SQLite database is what parked a phase across
+two separate runs — see the notes at the end.
 
 This expands on two prior runs of the same idea: `kodr2-no-deps-crm` (built
 with `kodr run`/`kodr goal` directly) and a comparison repo that built the
@@ -41,10 +49,13 @@ CRM=/path/to/a/throwaway/crm
 mkdir -p "$CRM" && cd "$CRM"
 git init -q
 
-# 2. The checklist and the workspace guidance. TASKS.md is what the loop
-#    reads; AGENTS.md is what the model reads on every single run.
+# 2. The checklist, the always-on guidance, and the on-demand skills.
+#    TASKS.md is what the loop reads; AGENTS.md is what the model reads on
+#    every run; .kodr/skills/ is what it can load when a task calls for it.
 cp "$KODR/examples/crm/TASKS.md" .
 cp "$KODR/examples/crm/AGENTS.md" .
+mkdir -p .kodr/skills
+cp -R "$KODR/examples/crm/skills/." .kodr/skills/
 
 # 3. Ignore the state that isn't source. data/ is the SQLite file phase 0
 #    scaffolds; .kodr/ is Kodr's own run transcripts.
@@ -182,6 +193,15 @@ Same shape as phase 5, just bigger.
 - **`GOAL_MAX_ATTEMPTS` (default 4) is per judged phase**, and those phases are
   the expensive ones: each attempt is a full build *plus* a read-only judge pass
   over the workspace.
+- **The Notes/Tasks phase is harder than it reads**, and that's why the
+  `sqlite-testing` skill exists. It adds the second and third
+  database-touching test files to the suite — and `node --test` runs test files
+  in parallel, one process each, against the same `data/crm.db`. So the moment
+  a second such file exists, one file's `DELETE FROM` cleanup starts deleting
+  rows another file is mid-assertion on, and the failures look random. It's the
+  first phase where that's even possible, nothing in the task text hints at it,
+  and it parked six attempts across two runs before being built by hand. The
+  skill's first section is exactly this.
 - **Expect it to take hours**, and expect some phases to park. Fifteen phases
   against a local model is a harness stress test, not a delivery pipeline — the
   interesting output is as much `kodr stats` and the parked transcripts as it is
