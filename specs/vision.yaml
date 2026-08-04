@@ -1,5 +1,5 @@
 name: vision
-status: proposed
+status: implemented
 description: >
   Let a vision-capable model see image files in the workspace. A `view_image`
   tool reads a jailed image, and the tool loop feeds it to the model as an
