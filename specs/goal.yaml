@@ -145,6 +145,13 @@ constraints:
 
 tests:
   unit:
+    - withReviewGate short-circuits the judge with a not-met verdict when the build's review blocked
+    - withReviewGate carries the reviewer's findings into the feedback, attributed to the review
+    - withReviewGate marks a synthesized verdict source "review"
+    - withReviewGate says so plainly when a blocked review produced no usable findings
+    - withReviewGate returns the judge unchanged when failOnReview is off
+    - withReviewGate calls the judge when the review passed, was skipped, or never ran
+    - summarizeGoalResult reports each verdict's source, defaulting an unlabelled one to the judge
     - parseVerdict ignores a VERDICT the judge wrote inside a think block
     - parseVerdict reads "VERDICT: MET" as met
     - parseVerdict reads "VERDICT: NOT MET" as not met

@@ -101,6 +101,26 @@ async function gatherDiff(cwd, filesChanged, options = {}) {
 const REVIEW_SYSTEM = loadPrompt('review');
 const REVIEW_NUDGE = loadPrompt('review-nudge');
 const REVIEW_VERDICT_NUDGE = loadPrompt('review-verdict-nudge');
+const REVIEW_RETRY = loadPrompt('review-retry');
+const REVIEW_RETRY_UNGROUNDED = loadPrompt('review-retry-ungrounded');
+
+/**
+ * Frame a failed review for the builder's next attempt: the reviewer's
+ * findings, plus the original task restated so the model still knows what it
+ * was asked for. Paired with the continuation the loop already replays
+ * (priorMessages/priorFilesChanged) this is the same shape as `--continue`
+ * with a follow-up, and the sibling of goal.mjs's buildRetryPrompt.
+ * @param {string} task
+ * @param {ReviewResult} review
+ * @returns {string}
+ */
+export function buildReviewRetryPrompt(task, review) {
+  const findings = review?.findings?.trim();
+  if (!findings) {
+    return `${REVIEW_RETRY_UNGROUNDED}\nTask:\n${task}`;
+  }
+  return `${REVIEW_RETRY}\nReview findings:\n${findings}\n\nTask:\n${task}`;
+}
 
 /**
  * Whether a blocking review verdict should fail the process or block a commit.

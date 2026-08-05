@@ -10,6 +10,8 @@ const KNOWN_PROMPTS = [
   'review',
   'review-nudge',
   'review-verdict-nudge',
+  'review-retry',
+  'review-retry-ungrounded',
   'retrospective',
   'compact',
 ];

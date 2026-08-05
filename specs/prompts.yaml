@@ -15,6 +15,8 @@ files:
   - prompts/review.md — review pass system prompt (review.mjs)
   - prompts/review-nudge.md — grounding nudge appended on the review retry (review.mjs)
   - prompts/review-verdict-nudge.md — verdict-line nudge appended on the review retry when the reply carried no parseable verdict (review.mjs)
+  - prompts/review-retry.md — frames a blocked review's findings for the builder's next attempt (review.mjs)
+  - prompts/review-retry-ungrounded.md — the same, for a blocked review that produced no usable findings (review.mjs)
   - prompts/retrospective.md — memory retrospective system prompt (memory.mjs)
   - prompts/compact.md — compaction summary system prompt (compact.mjs)
 

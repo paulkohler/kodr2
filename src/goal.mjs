@@ -13,6 +13,7 @@
 
 import { loadPrompt } from './prompts.mjs';
 import { createNullReporter } from './reporter.mjs';
+import { reviewBlocks } from './review.mjs';
 import { runToolLoop } from './tool-loop.mjs';
 import { createToolRegistry } from './tools/index.mjs';
 import {
@@ -110,7 +111,56 @@ export function parseVerdict(text) {
  * @property {number} toolTurns
  * @property {{ prompt: number, completion: number, cost: number }} usage
  * @property {number} retries
+ * @property {string} [source] - "judge" (the default, implied when absent) or
+ *   "review" for a verdict synthesized from a blocking review verdict
  */
+
+/**
+ * Wrap a judge so a blocking review short-circuits it: an attempt the reviewer
+ * failed is not met regardless of what the judge would say, and spending a
+ * judge call -- plus, on one LM Studio, a model swap -- to be told so is
+ * waste.
+ *
+ * The synthesized verdict carries the reviewer's findings as its feedback, so
+ * runGoal's existing buildRetryPrompt hands them to the next attempt with no
+ * change to the loop itself. runGoal is not modified; loop control stays pure.
+ * @param {(result: import('./harness.mjs').RunResult, attempt: number) => Promise<Verdict>} evaluate
+ * @param {boolean} failOnReview
+ * @returns {(result: import('./harness.mjs').RunResult, attempt: number) => Promise<Verdict>}
+ */
+export function withReviewGate(evaluate, failOnReview) {
+  if (!failOnReview) {
+    return evaluate;
+  }
+  return async (result, attempt) => {
+    if (!reviewBlocks(result?.review)) {
+      return evaluate(result, attempt);
+    }
+    return {
+      met: false,
+      // Grounded in the sense that matters here: this verdict rests on a
+      // review that actually happened, so runGoal should act on it rather
+      // than treat it as an unreliable judge reply and continue.
+      grounded: true,
+      feedback: reviewFeedback(result.review),
+      toolTurns: 0,
+      usage: { prompt: 0, completion: 0, cost: 0 },
+      retries: 0,
+      source: 'review',
+    };
+  };
+}
+
+// buildRetryPrompt frames its feedback as "Assessment from the judge". These
+// words are the reviewer's, so say so rather than let the next attempt be
+// told the judge found something the judge never looked at.
+function reviewFeedback(review) {
+  const findings = review?.findings?.trim();
+  if (!findings) {
+    return 'A separate review model inspected the change and did not pass it, but produced no usable findings.';
+  }
+  return `A separate review model inspected the change and did not pass it:\n${findings}`;
+}
 
 function buildJudgeMessages(goal, filesChanged) {
   const fileList =
@@ -424,6 +474,10 @@ export function summarizeGoalResult(result) {
     verdicts: (result.verdicts ?? []).map((verdict) => ({
       met: verdict.met,
       grounded: verdict.grounded,
+      // "judge" or "review" -- so --json says *why* an attempt was not met,
+      // rather than leaving a review-blocked attempt looking like the judge
+      // read the workspace and disagreed.
+      source: verdict.source ?? 'judge',
     })),
     stoppedReason: result.lastResult?.stoppedReason ?? null,
     verified: result.lastResult?.verification?.passed ?? null,

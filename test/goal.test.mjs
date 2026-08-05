@@ -14,6 +14,7 @@ import {
   parseVerdict,
   runGoal,
   summarizeGoalResult,
+  withReviewGate,
 } from '../src/goal.mjs';
 import { createNullReporter } from '../src/reporter.mjs';
 
@@ -550,7 +551,88 @@ describe('summarizeGoalResult', () => {
     assert.equal(s.verified, true);
     assert.deepEqual(s.filesChanged, ['a.mjs']);
     assert.equal(s.verdicts.length, 2);
-    assert.deepEqual(s.verdicts[1], { met: true, grounded: true });
+    assert.deepEqual(s.verdicts[1], {
+      met: true,
+      grounded: true,
+      source: 'judge',
+    });
+  });
+
+  it("reports each verdict's source, defaulting an unlabelled one to the judge", () => {
+    const s = summarizeGoalResult({
+      verdicts: [
+        verdict({ met: false }),
+        verdict({ met: false, source: 'review' }),
+      ],
+    });
+    assert.equal(s.verdicts[0].source, 'judge');
+    assert.equal(s.verdicts[1].source, 'review');
+  });
+});
+
+describe('withReviewGate', () => {
+  const blocked = {
+    review: {
+      skipped: false,
+      verdict: 'fail',
+      grounded: true,
+      findings: 'a.mjs imports a module that does not exist.',
+    },
+  };
+
+  it("short-circuits the judge with a not-met verdict when the build's review blocked", async () => {
+    let judgeCalled = false;
+    const gated = withReviewGate(async () => {
+      judgeCalled = true;
+      return verdict({ met: true });
+    }, true);
+
+    const v = await gated(blocked, 1);
+    assert.equal(judgeCalled, false);
+    assert.equal(v.met, false);
+    assert.equal(v.grounded, true);
+  });
+
+  it("carries the reviewer's findings into the feedback, attributed to the review", async () => {
+    const gated = withReviewGate(async () => verdict({ met: true }), true);
+    const v = await gated(blocked, 1);
+    // runGoal feeds this to buildRetryPrompt, whose frame says "from the
+    // judge" -- so the words have to name their real author.
+    assert.match(v.feedback, /separate review model/);
+    assert.match(v.feedback, /imports a module that does not exist/);
+  });
+
+  it('marks a synthesized verdict source "review"', async () => {
+    const gated = withReviewGate(async () => verdict({ met: true }), true);
+    assert.equal((await gated(blocked, 1)).source, 'review');
+  });
+
+  it('says so plainly when a blocked review produced no usable findings', async () => {
+    const gated = withReviewGate(async () => verdict({ met: true }), true);
+    const v = await gated(
+      { review: { skipped: false, verdict: 'fail', findings: '' } },
+      1,
+    );
+    assert.match(v.feedback, /no usable findings/);
+  });
+
+  it('returns the judge unchanged when failOnReview is off', async () => {
+    const judge = async () => verdict({ met: true });
+    assert.equal(withReviewGate(judge, false), judge);
+  });
+
+  it('calls the judge when the review passed, was skipped, or never ran', async () => {
+    let calls = 0;
+    const gated = withReviewGate(async () => {
+      calls += 1;
+      return verdict({ met: true });
+    }, true);
+
+    await gated({ review: { skipped: false, verdict: 'pass' } }, 1);
+    await gated({ review: { skipped: true } }, 1);
+    await gated({ review: { skipped: true, error: 'ECONNREFUSED' } }, 1);
+    await gated({}, 1);
+    assert.equal(calls, 4);
   });
 });
 

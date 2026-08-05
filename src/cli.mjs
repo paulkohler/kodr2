@@ -14,7 +14,12 @@ import {
   formatSimpleModelsList,
   formatStats,
 } from './format.mjs';
-import { evaluateGoal, runGoal, summarizeGoalResult } from './goal.mjs';
+import {
+  evaluateGoal,
+  runGoal,
+  summarizeGoalResult,
+  withReviewGate,
+} from './goal.mjs';
 import {
   DEFAULT_HEARTBEAT_MS,
   resolveContextWindow,
@@ -1433,19 +1438,22 @@ export async function runGoalCommand(args) {
           priorMessages: continuation?.priorMessages,
           priorFilesChanged: continuation?.priorFilesChanged,
         }),
-      evaluate: (result) =>
-        evaluateGoal({
-          client,
-          modelId: judgeModelId,
-          cwd,
-          goal,
-          filesChanged: result.filesChanged || [],
-          maxRunMs: args.maxRunMs,
-          contextWindow: judgeContextWindow,
-          heartbeatMs: args.heartbeatMs,
-          envPassthrough: args.env,
-          reporter: judgeReporter,
-        }),
+      evaluate: withReviewGate(
+        (result) =>
+          evaluateGoal({
+            client,
+            modelId: judgeModelId,
+            cwd,
+            goal,
+            filesChanged: result.filesChanged || [],
+            maxRunMs: args.maxRunMs,
+            contextWindow: judgeContextWindow,
+            heartbeatMs: args.heartbeatMs,
+            envPassthrough: args.env,
+            reporter: judgeReporter,
+          }),
+        failOnReviewEnabled(args.failOnReview),
+      ),
     });
     if (args.json) {
       process.stdout.write(
@@ -1584,19 +1592,22 @@ export async function runLoopCommand(args) {
       maxAttempts: loopGoalMaxAttempts(args.goalMaxAttempts),
       reporter,
       runTask: buildTask,
-      evaluate: (result) =>
-        evaluateGoal({
-          client,
-          modelId: judgeModelId,
-          cwd,
-          goal: goalText,
-          filesChanged: result.filesChanged || [],
-          maxRunMs: args.maxRunMs,
-          contextWindow: judgeContextWindow,
-          heartbeatMs: args.heartbeatMs,
-          envPassthrough: args.env,
-          reporter,
-        }),
+      evaluate: withReviewGate(
+        (result) =>
+          evaluateGoal({
+            client,
+            modelId: judgeModelId,
+            cwd,
+            goal: goalText,
+            filesChanged: result.filesChanged || [],
+            maxRunMs: args.maxRunMs,
+            contextWindow: judgeContextWindow,
+            heartbeatMs: args.heartbeatMs,
+            envPassthrough: args.env,
+            reporter,
+          }),
+        failOnReviewEnabled(args.failOnReview),
+      ),
     });
 
   const controller = new AbortController();
@@ -1619,6 +1630,7 @@ export async function runLoopCommand(args) {
       maxAttempts: args.maxAttempts,
       retryBackoffMs: args.retryBackoffMs,
       stopOnPark: args.stopOnPark,
+      failOnReview: args.failOnReview,
       maxLoopMs: args.maxLoopMs,
       maxLoopCost: args.maxLoopCost,
       maxTasks: args.maxTasks,

@@ -1040,3 +1040,163 @@ describe('parseArgs (loop subcommand)', () => {
     assert.equal(args.stopOnPark, true);
   });
 });
+
+describe('the review gate in the loop', () => {
+  const blockedReview = {
+    skipped: false,
+    verdict: 'fail',
+    grounded: true,
+    passed: false,
+    findings: 'greet.mjs contains literal \\n escapes.',
+  };
+  const passedReview = {
+    skipped: false,
+    verdict: 'pass',
+    grounded: true,
+    passed: true,
+    findings: 'No findings.',
+  };
+
+  it('taskIsGreen ignores a failed review unless failOnReview is set', () => {
+    const result = fakeRunResult({ review: blockedReview });
+    assert.equal(taskIsGreen(result), true);
+    assert.equal(taskIsGreen(result, { failOnReview: true }), false);
+  });
+
+  it('goalIsGreen ignores a failed review unless failOnReview is set', () => {
+    const goalResult = fakeGoalResult({
+      met: true,
+      lastResult: fakeRunResult({ review: blockedReview }),
+    });
+    assert.equal(goalIsGreen(goalResult), true);
+    assert.equal(goalIsGreen(goalResult, { failOnReview: true }), false);
+  });
+
+  it('a task whose review verdict is FAIL is not green and is not committed', async () => {
+    const git = fakeGit();
+    const result = await runLoop({
+      checklist: fakeChecklist(['add greet.mjs']),
+      buildTask: async () => fakeRunResult({ review: blockedReview }),
+      buildGoal: async () => fakeGoalResult(),
+      git,
+      clock: fakeClock(),
+      maxAttempts: 2,
+      failOnReview: true,
+      stopOnPark: true,
+    });
+
+    assert.equal(result.green, 0);
+    assert.equal(result.parked, 1);
+    assert.equal(git.commitCalls.length, 1); // the park's own mark commit
+    assert.match(git.commitCalls[0], /^kodr: park /);
+    assert.equal(git.parkCalls.length, 1);
+  });
+
+  it('a review FAIL is advisory by default -- the task still goes green and commits', async () => {
+    const git = fakeGit();
+    const result = await runLoop({
+      checklist: fakeChecklist(['add greet.mjs']),
+      buildTask: async () => fakeRunResult({ review: blockedReview }),
+      buildGoal: async () => fakeGoalResult(),
+      git,
+      clock: fakeClock(),
+      maxAttempts: 2,
+    });
+
+    assert.equal(result.green, 1);
+    assert.equal(result.parked, 0);
+    assert.equal(git.parkCalls.length, 0);
+  });
+
+  it("retries a review FAIL with the reviewer's findings in the prompt", async () => {
+    const prompts = [];
+    const notices = [];
+    const reviews = [blockedReview, passedReview];
+    let n = 0;
+    const result = await runLoop({
+      checklist: fakeChecklist(['add greet.mjs']),
+      buildTask: async (prompt) => {
+        prompts.push(prompt);
+        return fakeRunResult({ review: reviews[n++] ?? passedReview });
+      },
+      buildGoal: async () => fakeGoalResult(),
+      git: fakeGit(),
+      clock: fakeClock(),
+      reporter: { ...createNullReporter(), notice: (m) => notices.push(m) },
+      maxAttempts: 3,
+      failOnReview: true,
+    });
+
+    assert.equal(result.green, 1);
+    assert.equal(prompts.length, 2);
+    // First attempt gets the bare task; the retry gets the findings plus the
+    // task restated.
+    assert.equal(prompts[0], 'add greet.mjs');
+    assert.match(prompts[1], /literal \\n escapes/);
+    assert.match(prompts[1], /add greet\.mjs/);
+    assert.match(prompts[1], /Do not start over/);
+    assert.ok(notices.some((m) => /failed review/.test(m)));
+  });
+
+  it('parks a task whose review keeps failing, after maxAttempts', async () => {
+    let calls = 0;
+    const result = await runLoop({
+      checklist: fakeChecklist(['add greet.mjs']),
+      buildTask: async () => {
+        calls += 1;
+        return fakeRunResult({ review: blockedReview });
+      },
+      buildGoal: async () => fakeGoalResult(),
+      git: fakeGit(),
+      clock: fakeClock(),
+      maxAttempts: 3,
+      failOnReview: true,
+    });
+
+    assert.equal(calls, 3);
+    assert.equal(result.parked, 1);
+  });
+
+  it('never blocks a commit on a skipped review', async () => {
+    const git = fakeGit();
+    const result = await runLoop({
+      checklist: fakeChecklist(['add greet.mjs']),
+      buildTask: async () =>
+        fakeRunResult({ review: { skipped: true, error: 'ECONNREFUSED' } }),
+      buildGoal: async () => fakeGoalResult(),
+      git,
+      clock: fakeClock(),
+      failOnReview: true,
+    });
+
+    assert.equal(result.green, 1);
+    assert.equal(git.parkCalls.length, 0);
+  });
+
+  it('records the review verdict on the loop record entry', async () => {
+    const result = await runLoop({
+      checklist: fakeChecklist(['add greet.mjs']),
+      buildTask: async () => fakeRunResult({ review: passedReview }),
+      buildGoal: async () => fakeGoalResult(),
+      git: fakeGit(),
+      clock: fakeClock(),
+    });
+
+    assert.deepEqual(result.tasks[0].review, {
+      verdict: 'pass',
+      grounded: true,
+      passed: true,
+    });
+  });
+
+  it('leaves the loop record entry review null when no review ran', async () => {
+    const result = await runLoop({
+      checklist: fakeChecklist(['add greet.mjs']),
+      buildTask: async () => fakeRunResult(),
+      buildGoal: async () => fakeGoalResult(),
+      git: fakeGit(),
+      clock: fakeClock(),
+    });
+    assert.equal(result.tasks[0].review, null);
+  });
+});

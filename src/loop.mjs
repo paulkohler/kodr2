@@ -18,6 +18,11 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { createLoopRecord } from './loop-record.mjs';
 import { createNullReporter } from './reporter.mjs';
+import {
+  buildReviewRetryPrompt,
+  failOnReviewEnabled,
+  reviewBlocks,
+} from './review.mjs';
 
 export const DEFAULT_MAX_ATTEMPTS = 3;
 export const DEFAULT_GOAL_MAX_ATTEMPTS = 4;
@@ -250,7 +255,10 @@ export async function markFirstTask(tasksFile, mark) {
  * @param {import('./harness.mjs').RunResult} result
  * @returns {boolean}
  */
-export function taskIsGreen(result) {
+export function taskIsGreen(result, options = {}) {
+  if (options.failOnReview && reviewBlocks(result?.review)) {
+    return false;
+  }
   return (
     result?.stoppedReason === 'complete' &&
     !result?.noOpCompletion &&
@@ -264,7 +272,13 @@ export function taskIsGreen(result) {
  * @param {import('./goal.mjs').GoalResult} goalResult
  * @returns {boolean}
  */
-export function goalIsGreen(goalResult) {
+export function goalIsGreen(goalResult, options = {}) {
+  // Belt and braces: with withReviewGate wired the judge already returned
+  // not-met for a blocked review, so `met` is false here. This still holds for
+  // a caller that drives runGoal without the wrapper.
+  if (options.failOnReview && reviewBlocks(goalResult?.lastResult?.review)) {
+    return false;
+  }
   const filesChanged = goalResult?.lastResult?.filesChanged ?? [];
   const verifiedFailed = goalResult?.lastResult?.verification?.passed === false;
   return Boolean(goalResult?.met) && filesChanged.length > 0 && !verifiedFailed;
@@ -340,18 +354,20 @@ function addUsage(total, usage) {
  */
 async function attemptTask(text, ctx) {
   const { buildTask, maxAttempts, backoffMs, clock, reporter, onAttempt } = ctx;
+  const failOnReview = Boolean(ctx.failOnReview);
   let attempt = 0;
   let continuation = null;
   let result = null;
   let isGreen = false;
+  let prompt = text;
   const usage = { prompt: 0, completion: 0, cost: 0 };
 
   while (attempt < maxAttempts) {
     attempt += 1;
-    result = await buildTask(text, continuation);
+    result = await buildTask(prompt, continuation);
     addUsage(usage, result.usage);
     onAttempt(result);
-    isGreen = taskIsGreen(result);
+    isGreen = taskIsGreen(result, { failOnReview });
     if (isGreen) {
       break;
     }
@@ -367,6 +383,18 @@ async function attemptTask(text, ctx) {
       priorMessages: result.messages || [],
       priorFilesChanged: result.filesChanged || [],
     };
+    // A blocked review is the one failure that comes with an explanation, so
+    // hand it over instead of re-sending the task verbatim and hoping the
+    // model lands somewhere different. run() only reviews a completed build,
+    // so reaching here with a blocking review means the attempt would
+    // otherwise have been green -- this can never mask a test failure.
+    prompt = text;
+    if (failOnReview && reviewBlocks(result.review)) {
+      prompt = buildReviewRetryPrompt(text, result.review);
+      reporter.notice(
+        `attempt ${attempt} failed review -- retrying with the reviewer's findings`,
+      );
+    }
     if (result.stoppedReason === 'error' && attempt < maxAttempts) {
       reporter.notice(
         `attempt ${attempt} ended in a transient error -- backing off ${backoffMs}ms before retry`,
@@ -378,6 +406,24 @@ async function attemptTask(text, ctx) {
   }
 
   return { isGreen, attempts: attempt, result, usage };
+}
+
+// Just the decision, not the findings -- the loop record is a per-task
+// summary, and the full review (findings included) is already on the run
+// record in .kodr/runs. Enough to answer "which tasks did the reviewer
+// block?" from one file after an overnight run.
+function reviewEntry(review) {
+  if (!review) {
+    return null;
+  }
+  if (review.skipped) {
+    return { skipped: true };
+  }
+  return {
+    verdict: review.verdict,
+    grounded: review.grounded ?? null,
+    passed: review.passed ?? null,
+  };
 }
 
 /**
@@ -457,6 +503,7 @@ export async function runLoop(params) {
   const maxAttempts = loopMaxAttempts(params.maxAttempts);
   const backoffMs = loopRetryBackoffMs(params.retryBackoffMs);
   const stopOnPark = loopStopOnPark(params.stopOnPark);
+  const failOnReview = failOnReviewEnabled(params.failOnReview);
   const maxLoopMs = loopMaxLoopMs(params.maxLoopMs);
   const maxLoopCost = loopMaxLoopCost(params.maxLoopCost);
   const maxTasks = loopMaxTasks(params.maxTasks);
@@ -533,7 +580,7 @@ export async function runLoop(params) {
       const goalResult = await buildGoal(text);
       addUsage(usage, goalResult.usage);
       retries += goalResult.retries || 0;
-      isGreen = goalIsGreen(goalResult);
+      isGreen = goalIsGreen(goalResult, { failOnReview });
       cancelled = goalWasCancelled(goalResult);
       entry = {
         task,
@@ -543,6 +590,7 @@ export async function runLoop(params) {
         goalReason: goalResult.reason,
         filesChanged: goalResult.lastResult?.filesChanged ?? [],
         usage: goalResult.usage ?? { prompt: 0, completion: 0, cost: 0 },
+        review: reviewEntry(goalResult.lastResult?.review),
         durationMs: clock.now() - taskStart,
         // Not populated in P0 -- run() doesn't return the path its own
         // saved transcript landed at, only .kodr/runs/ on disk.
@@ -555,6 +603,7 @@ export async function runLoop(params) {
         backoffMs,
         clock,
         reporter,
+        failOnReview,
         onAttempt: (result) => {
           addUsage(usage, result.usage);
           retries += result.retries || 0;
@@ -571,6 +620,7 @@ export async function runLoop(params) {
         stoppedReason: result?.stoppedReason ?? null,
         filesChanged: result?.filesChanged ?? [],
         usage: taskUsage,
+        review: reviewEntry(result?.review),
         durationMs: clock.now() - taskStart,
         runRecords: [],
       };

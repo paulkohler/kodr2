@@ -1,5 +1,5 @@
 name: loop
-status: proposed
+status: implemented
 description: >
   `kodr loop` — a first-class driver that ratchets a checklist into git, one
   task at a time, unattended for hours. It is the ratchet examples/loop.sh and
@@ -195,6 +195,27 @@ outputs:
 
 constraints:
   - >
+    With --fail-on-review, a blocking review verdict is folded into the
+    existing retry engines rather than given a collaborator of its own. A
+    plain task's FAIL consumes an attempt and the next one is prompted with
+    the reviewer's findings on top of the usual transcript replay; a GOAL:
+    item's FAIL short-circuits the judge (withReviewGate) into a not-met
+    verdict whose feedback is those findings, which runGoal's own
+    buildRetryPrompt then hands forward. Both park on exhaustion through the
+    path that already existed. A collaborator between the cancel check and
+    the commit branch would either run a second review -- another model call,
+    and on one LM Studio another load/unload cycle, when run() just did one --
+    or merely read result.review, which is a predicate, not a collaborator.
+  - >
+    Reaching the retry with a blocking review implies the attempt would
+    otherwise have been green, since run() only reviews a completed build. So
+    the review branch can never mask a test failure or a no-op completion.
+  - >
+    Each loop-record entry carries the review's decision (verdict, grounded,
+    passed) but not its findings -- the full review is already on the run
+    record in .kodr/runs. Enough to answer "which tasks did the reviewer
+    block?" from one file after an overnight run.
+  - >
     The ratchet is specs/loop-scripts.yaml's, unchanged. Green for a plain task is
     completed AND not noOpCompletion AND verification did not fail; green for a
     `GOAL: ` item is met AND filesChanged non-empty AND verification did not fail.
@@ -273,6 +294,15 @@ constraints:
 
 tests:
   unit:
+    - taskIsGreen ignores a failed review unless failOnReview is set
+    - goalIsGreen ignores a failed review unless failOnReview is set
+    - a task whose review verdict is FAIL is not green and is not committed
+    - a review FAIL is advisory by default -- the task still goes green and commits
+    - retries a review FAIL with the reviewer's findings in the prompt
+    - parks a task whose review keeps failing, after maxAttempts
+    - never blocks a commit on a skipped review
+    - records the review verdict on the loop record entry
+    - leaves the loop record entry review null when no review ran
     # --- the ratchet, inherited from specs/loop-scripts.yaml ---
     - a green task commits once, with the checklist tick inside the same commit as the code
     - the checklist tick is committed before any later task can reset it (mark-then-commit order)
