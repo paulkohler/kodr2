@@ -165,6 +165,19 @@ constraints:
     nothing in the common case. reviewVerdictMissingRate in specs/stats.yaml
     is how often that is happening.
   - >
+    Reviewer selection is load-bearing, and reasoning ability is not the
+    axis that matters -- willingness to use the read-only tools is. Measured
+    on one workspace (a module importing a name its dependency does not
+    export, so it throws at import time), same prompt, same harness:
+    phi-4-reasoning-plus returned PASS ungrounded after 1 tool call, 44,725
+    completion tokens and 1,234 seconds, having hypothesised a behaviour for
+    the missing function rather than opening the file that would have settled
+    it; gpt-oss-20b returned FAIL grounded after 4 tool calls, 447 completion
+    tokens and 8 seconds, naming the broken export exactly. A hundred times
+    the tokens bought a worse answer. reviewGroundedRate in specs/stats.yaml
+    is the pre-flight check: at 0% the verdicts are worthless whichever way
+    they fall, and --fail-on-review should not be enabled.
+  - >
     Grounding is advisory, not a gate. An ungrounded PASS is recorded, named
     in the notice, and counted in reviewGroundedRate, but it does not block.
     The symmetric rule from specs/goal.yaml (an ungrounded MET never stops the

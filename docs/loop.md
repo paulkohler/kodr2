@@ -83,7 +83,7 @@ green decision: a reviewer read the diff and didn't fail it.
 
 ```bash
 kodr loop --test "npm test" \
-  --review-model microsoft/phi-4-reasoning-plus \
+  --review-model openai/gpt-oss-20b \
   --review-base-url http://localhost:1235/v1 --no-review-swap \
   --fail-on-review
 ```
@@ -98,8 +98,12 @@ Nothing blocks on a review that didn't happen: an empty changeset, a build
 that never completed, a reviewer that crashed. Each loop-record entry carries
 the verdict, so one file answers "which tasks did the reviewer block?"
 
-The two model-load caveats matter here more than anywhere — see
-[Keeping both models resident](usage.md#keeping-both-models-resident).
+Two things matter more here than anywhere. The model-load cost, since a loop
+pays it per attempt — see
+[Keeping both models resident](usage.md#keeping-both-models-resident). And
+the reviewer's willingness to open files, since an unattended loop has nobody
+to notice it isn't: check `grounded` in `kodr stats` before letting a verdict
+park anything. See [Choosing a reviewer](usage.md#choosing-a-reviewer).
 
 ## Flags
 

@@ -238,18 +238,22 @@ read-only conversation over the diff, with `read_file`/`list_files`/`search`
 so it can check the change against the real files instead of reacting to a
 pasted diff. Kodr owns the LM Studio load/unload/verify sequencing for both
 models via the `lms` CLI, so you can build on a fast model and review on a
-stronger one — a reasoning model is a good fit here.
+different one.
 
 ```bash
-kodr "…" --review-model microsoft/phi-4-reasoning-plus
+kodr "…" --review-model openai/gpt-oss-20b
 ```
+
+**Pick the reviewer for whether it uses its tools, not for how clever it
+is.** See [Choosing a reviewer](#choosing-a-reviewer) below — this matters
+more than any flag on this page.
 
 The reviewer ends with `VERDICT: PASS` or `VERDICT: FAIL`. By default that's
 advisory — it's printed, saved to the run record, and counted by
 `kodr stats`, but it changes nothing. **`--fail-on-review` makes it a gate:**
 
 ```bash
-kodr "…" --review-model microsoft/phi-4-reasoning-plus --fail-on-review
+kodr "…" --review-model openai/gpt-oss-20b --fail-on-review
 ```
 
 Now a FAIL exits non-zero, and in [`kodr loop`](loop.md) it blocks the
@@ -277,14 +281,52 @@ endpoint and turn the swap off:
 ```bash
 # builder hot on :1234, reviewer hot on :1235 — zero load/unload cycles
 kodr loop --test "npm test" \
-  --review-model microsoft/phi-4-reasoning-plus \
+  --review-model openai/gpt-oss-20b \
   --review-base-url http://localhost:1235/v1 \
   --no-review-swap --fail-on-review
 ```
 
+This needs enough memory for both models at once. On a machine that can't,
+LM Studio refuses the second load outright and you're stuck with the swap —
+another reason to prefer a small reviewer.
+
 `--review-provider` moves the reviewer to a different provider entirely (a
 cloud reviewer over a local builder, say). Note it does _not_ inherit the
 build's base URL — a different provider brings its own default.
+
+### Choosing a reviewer
+
+A review is only worth its verdict if the reviewer actually opens files. The
+prompt tells it to; not every model listens, and the ones that reason hardest
+are not the ones that listen best.
+
+Measured on one workspace — a module importing a name its dependency doesn't
+export, so it throws at import time — with the identical prompt and harness:
+
+| | `phi-4-reasoning-plus` | `gpt-oss-20b` |
+| --- | --- | --- |
+| Verdict | `PASS` — wrong | `FAIL` — correct |
+| Grounded | no (1 tool call) | yes (4 tool calls) |
+| Completion tokens | 44,725 | 447 |
+| Wall clock | 1,234s | 8s |
+
+The reasoning model spotted a related arithmetic discrepancy, hypothesised a
+behaviour for the missing function that would explain it, never opened the
+one file that would have settled the question, and passed the change. The
+small model made four tool calls and named the broken export in eight
+seconds. A hundred times the tokens bought a worse answer.
+
+So: **prefer a model that investigates over one that deliberates**, and
+verify before you trust a gate with your commits. The check is one number —
+
+```bash
+kodr stats     # review attempted: 100%  passed: 66%  grounded: 0%  no verdict: 0%
+```
+
+`grounded: 0%` means your reviewer is answering from the diff without reading
+anything, and its verdicts are worth nothing regardless of which way they
+fall. Run a handful of tasks advisory-only, read that number, and only then
+add `--fail-on-review`.
 
 Related tuning: `--review-context-window`, `--review-min-tool-calls`,
 `--review-max-tool-turns` (see [`specs/review.yaml`](../specs/review.yaml)).
