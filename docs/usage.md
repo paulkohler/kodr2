@@ -16,11 +16,11 @@ There are three ways to drive Kodr:
 - **The interactive TUI** (`kodr tui`) — a full-screen, multi-turn REPL that
   keeps the conversation going across follow-ups. This is the nicest way to
   work by hand, and it's covered in [§3](#3-the-terminal-ui-interactive).
-- **Unattended over a backlog** (`./examples/loop.sh`) — hand it a `TASKS.md`
-  checklist and it works down the list for hours, committing each task that
-  passes and parking the ones it can't finish. This is how you get a night's
-  work out of it; see
-  [§13](#13-drive-a-whole-backlog-unattended--the-loop-scripts).
+- **Unattended over a backlog** (`kodr loop`) — hand it a `TASKS.md` checklist
+  and it works down the list for hours, committing each task that passes and
+  parking the ones it can't finish. This is how you get a night's work out of
+  it; see [§13](#13-drive-a-whole-backlog-unattended--kodr-loop) and the full
+  guide, [`docs/loop.md`](loop.md).
 
 Everything below assumes `kodr` is on your `PATH` (see the README's
 [Quick start](../README.md#quick-start)). From a checkout you can always
@@ -309,15 +309,25 @@ _backlog_ of tasks rather than one goal, see the next section.
 
 ---
 
-## 13. Drive a whole backlog unattended — the loop scripts
+## 13. Drive a whole backlog unattended — `kodr loop`
 
 `kodr goal` loops toward _one_ outcome. When you have a list of things to build
-and want them built while you're asleep, wrap Kodr in the shipped driver script.
-Kodr deliberately doesn't build the loop in — it exposes the seams (`--json`,
-exit codes, `--continue`) and the loop is an ordinary shell script you can read
-and edit.
+and want them built while you're asleep, `kodr loop` is the outer driver: hand
+it a `TASKS.md` checklist and it works down the list, committing each task that
+goes green and parking the ones it can't finish.
 
-Two are shipped:
+```bash
+cd /path/to/your/project
+git add -A && git commit -m "checklist"   # the loop needs a baseline to reset to
+nohup kodr loop --test "npm test" >loop.out 2>&1 & disown
+```
+
+Full guide — flags, the loop record, `GOAL: ` lines, gotchas found dogfooding
+it live — in [`docs/loop.md`](loop.md). The rest of this section covers the
+same ratchet's original form: two shipped bash scripts that predate the
+built-in subcommand and remain a lighter-weight alternative — no Kodr install
+needed beyond the binary itself, and a script you can read and hand-edit
+without touching Kodr's own source.
 
 | Script                                                  | Use it when                                                       |
 | ------------------------------------------------------- | ----------------------------------------------------------------- |

@@ -208,5 +208,6 @@ Same shape as phase 5, just bigger.
   the CRM itself.
 
 For the general version of this workflow — any checklist, not just this one —
-see [Drive a whole backlog unattended](../../docs/usage.md#13-drive-a-whole-backlog-unattended--the-loop-scripts)
-in the usage guide.
+see [Drive a whole backlog unattended](../../docs/usage.md#13-drive-a-whole-backlog-unattended--kodr-loop)
+in the usage guide, and [`docs/loop.md`](../../docs/loop.md) for the built-in
+`kodr loop` subcommand.

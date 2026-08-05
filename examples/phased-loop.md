@@ -13,6 +13,12 @@ model judge, until the judge says `MET`.
 single checklist can use both constructs where each one actually earns its
 keep, instead of picking one for the whole plan.
 
+This same `GOAL: `-mixing ratchet also ships as a first-class subcommand,
+`kodr loop` (specs/loop.yaml) — one entry point for both kinds of checklist
+line, a `.kodr/loops/` run record, and an aggregate loop-wide budget. This
+script stays as the worked example for driving Kodr from a shell without
+installing anything else, and everything below still applies to it.
+
 ## The convention
 
 A checklist line is either:

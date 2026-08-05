@@ -166,12 +166,12 @@ attempt as a continuation. It stops early on a two-attempt no-change stall or a
 build error, and `--json` prints `{ met, reason, attempts, … }`. See
 [specs/goal.yaml](specs/goal.yaml) and the [usage guide](docs/usage.md).
 
-For a *backlog* of tasks rather than one goal, the shipped driver scripts run
-Kodr over a `TASKS.md` checklist unattended for hours — committing each task
-that goes green, retrying the ones that don't, and reverting and parking the
-ones it gives up on, so the tree is green at every commit. See
-[Drive a whole backlog unattended](docs/usage.md#13-drive-a-whole-backlog-unattended--the-loop-scripts)
-for the flow, and [`examples/loop.sh`](examples/loop.sh) for the script itself.
+For a *backlog* of tasks rather than one goal, `kodr loop` runs Kodr over a
+`TASKS.md` checklist unattended for hours — committing each task that goes
+green, retrying the ones that don't, and reverting and parking the ones it
+gives up on, so the tree is green at every commit. See
+[Drive a whole backlog unattended](docs/usage.md#13-drive-a-whole-backlog-unattended--kodr-loop)
+and [`docs/loop.md`](docs/loop.md) for the full guide.
 
 ```
 $ kodr goal "the /health route is documented and has a test" --test "node --test"

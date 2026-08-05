@@ -6,6 +6,13 @@ loop in (zero runtime deps, one job done well); instead it exposes the seams a
 loop needs, and the loop is an ordinary shell script. [`loop.sh`](./loop.sh) is a
 runnable one.
 
+The same ratchet also ships as a first-class subcommand, `kodr loop`
+(specs/loop.yaml) — no `jq`/bash >= 4.4 dependency, a `.kodr/loops/`
+run record written after every task transition, and an aggregate
+wall-clock/cost/task budget across the whole session. This script stays as
+the worked example for driving Kodr from a shell without installing
+anything else, and everything below still applies to it.
+
 ## The two seams
 
 - **Exit code** — `kodr run` exits `0` only when the run reached `complete` *and*
