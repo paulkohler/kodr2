@@ -6,6 +6,7 @@
 
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
+import { splitThinking } from './think.mjs';
 
 export const DEFAULT_BASE_URL = 'http://localhost:1234/v1';
 const DEFAULT_TIMEOUT = 600_000; // 10 minutes
@@ -236,6 +237,19 @@ function resolveConfiguredModel(model) {
  * Accumulates content, reasoning, and tool calls, invoking callbacks as
  * deltas arrive.
  */
+// Streamed reasoning and an inline think block can both be present; keep the
+// streamed field first, matching splitMessageThinking's ordering.
+function joinReasoning(streamed, inline) {
+  const parts = [];
+  if (streamed) {
+    parts.push(streamed);
+  }
+  if (inline) {
+    parts.push(inline);
+  }
+  return parts.join('\n\n');
+}
+
 function createAssembler(onToken, onToolCall) {
   let role = 'assistant';
   let content = '';
@@ -280,6 +294,13 @@ function createAssembler(onToken, onToolCall) {
       reasoning += delta.reasoning;
     }
 
+    // DeepSeek, vLLM, and LM Studio's own reasoning parser use this name
+    // rather than OpenRouter's `reasoning`. Both feed the same accumulator so
+    // downstream sees one field regardless of which backend produced it.
+    if (delta.reasoning_content) {
+      reasoning += delta.reasoning_content;
+    }
+
     if (delta.reasoning_details) {
       reasoningDetails.push(...delta.reasoning_details);
     }
@@ -292,9 +313,19 @@ function createAssembler(onToken, onToolCall) {
   }
 
   function result() {
-    const message = { role, content };
-    if (reasoning) {
-      message.reasoning = reasoning;
+    // A local thinking model has no reasoning field to stream into, so its
+    // scratchpad arrives inline in content wrapped in <think> tags. Split it
+    // here, the one place every caller funnels through, so nothing downstream
+    // has to know: a verdict parser scanning for a marker, or the text-form
+    // tool-call recovery, would otherwise read what the model merely
+    // contemplated as something it decided. The tokens still streamed live to
+    // the terminal via onToken -- watching a model think is useful; acting on
+    // it is not.
+    const split = splitThinking(content);
+    const message = { role, content: split.visible };
+    const allReasoning = joinReasoning(reasoning, split.thinking);
+    if (allReasoning) {
+      message.reasoning = allReasoning;
     }
     if (reasoningDetails.length > 0) {
       message.reasoning_details = reasoningDetails;

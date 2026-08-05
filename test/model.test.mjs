@@ -164,6 +164,42 @@ describe('assembleResponse', () => {
     assert.equal(result.message.reasoning_details, undefined);
   });
 
+  it('accumulates delta.reasoning_content alongside delta.reasoning', () => {
+    const result = assembleResponse([
+      { choices: [{ delta: { reasoning_content: 'weighing ' } }] },
+      { choices: [{ delta: { reasoning_content: 'it up' } }] },
+      { choices: [{ delta: { content: 'answer' } }] },
+    ]);
+    assert.equal(result.message.reasoning, 'weighing it up');
+    assert.equal(result.message.content, 'answer');
+  });
+
+  it('moves an inline think block out of content and onto reasoning', () => {
+    const result = assembleResponse([
+      { choices: [{ delta: { content: '<think>\nscratch\n' } }] },
+      { choices: [{ delta: { content: '</think>\nVERDICT: PASS' } }] },
+    ]);
+    assert.equal(result.message.content, 'VERDICT: PASS');
+    assert.equal(result.message.reasoning, 'scratch');
+  });
+
+  it('appends an inline think block after streamed reasoning', () => {
+    const result = assembleResponse([
+      { choices: [{ delta: { reasoning: 'streamed' } }] },
+      { choices: [{ delta: { content: '<think>\ninline\n</think>\nout' } }] },
+    ]);
+    assert.equal(result.message.content, 'out');
+    assert.equal(result.message.reasoning, 'streamed\n\ninline');
+  });
+
+  it('leaves a message with no thinking untouched', () => {
+    const result = assembleResponse([
+      { choices: [{ delta: { content: 'just an answer' } }] },
+    ]);
+    assert.equal(result.message.content, 'just an answer');
+    assert.equal(result.message.reasoning, undefined);
+  });
+
   it('captures usage from a chunk whose delta is present but near-empty (e.g. OpenRouter final chunk)', () => {
     const result = assembleResponse([
       { choices: [{ delta: { content: 'ok' } }] },

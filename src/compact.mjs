@@ -32,6 +32,14 @@ export function estimateTokens(messages, charsPerToken = CHARS_PER_TOKEN) {
     if (typeof message.content === 'string') {
       chars += message.content.length;
     }
+    // A reasoning model's scratchpad is replayed to the provider on every
+    // turn like any other part of the message, so it costs prompt tokens --
+    // and since model.mjs now moves inline <think> text out of content and
+    // onto this field, leaving it uncounted would make the estimate
+    // structurally worse for exactly the models that produce the most of it.
+    if (typeof message.reasoning === 'string') {
+      chars += message.reasoning.length;
+    }
     for (const call of message.tool_calls || []) {
       chars += (call.function?.name || '').length;
       chars += (call.function?.arguments || '').length;

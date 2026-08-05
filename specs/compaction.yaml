@@ -142,6 +142,7 @@ tests:
     - compactMessages forwards timeoutMs to the summary chat call
     - compactMessages forwards heartbeatMs and onHeartbeat to the summary chat call
     - estimateTokens approximates prompt tokens from content and tool-call length
+    - estimateTokens counts reasoning text alongside content and tool calls
     - tool loop compacts in place when a turn crosses the threshold
     - tool loop compacts using an estimate when the provider reports no prompt usage
     - tool loop caps the compaction summary call to the remaining run budget

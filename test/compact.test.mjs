@@ -123,6 +123,17 @@ describe('estimateTokens', () => {
   it('ignores messages with non-string content', () => {
     assert.equal(estimateTokens([{ role: 'tool', content: null }]), 0);
   });
+
+  it('counts reasoning text alongside content and tool calls', () => {
+    const messages = [
+      {
+        role: 'assistant',
+        content: 'x'.repeat(20),
+        reasoning: 'y'.repeat(20),
+      },
+    ];
+    assert.equal(estimateTokens(messages), 40 / CHARS_PER_TOKEN);
+  });
 });
 
 describe('configuredContextWindow', () => {
