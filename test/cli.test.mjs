@@ -95,6 +95,25 @@ describe('parseArgs', () => {
     assert.equal(args.reasoning, null);
   });
 
+  it('parses --review-min-tool-calls and --review-max-tool-turns', () => {
+    const args = parseArgs([
+      'run',
+      'hi',
+      '--review-min-tool-calls',
+      '4',
+      '--review-max-tool-turns',
+      '20',
+    ]);
+    assert.equal(args.reviewMinToolCalls, 4);
+    assert.equal(args.reviewMaxToolTurns, 20);
+  });
+
+  it('defaults --review-min-tool-calls and --review-max-tool-turns to null so their env vars can still take effect', () => {
+    const args = parseArgs(['run', 'hi']);
+    assert.equal(args.reviewMinToolCalls, null);
+    assert.equal(args.reviewMaxToolTurns, null);
+  });
+
   it('parses --openrouter-no-zdr as a boolean flag', () => {
     const args = parseArgs(['run', 'hi', '--openrouter-no-zdr']);
     assert.equal(args.openrouterNoZdr, true);

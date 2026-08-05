@@ -51,10 +51,6 @@ import {
   createNullReporter,
   createTerminalReporter,
 } from './reporter.mjs';
-import {
-  DEFAULT_MIN_REVIEW_TOOL_CALLS,
-  DEFAULT_REVIEW_MAX_TOOL_TURNS,
-} from './review.mjs';
 import { computeStats, loadRunRecords } from './stats.mjs';
 import { MAX_TOOL_TURNS } from './tool-loop.mjs';
 
@@ -92,8 +88,8 @@ import { MAX_TOOL_TURNS } from './tool-loop.mjs';
  * @property {number|null} contextWindow
  * @property {string|null} reviewModel
  * @property {number|null} reviewContextWindow
- * @property {number} reviewMinToolCalls
- * @property {number} reviewMaxToolTurns
+ * @property {number|null} reviewMinToolCalls
+ * @property {number|null} reviewMaxToolTurns
  * @property {boolean} quiet
  * @property {string[]} env
  * @property {string|null} continue
@@ -263,8 +259,8 @@ export async function main(argv) {
     return;
   }
   if (
-    !Number.isInteger(args.reviewMinToolCalls) ||
-    args.reviewMinToolCalls < 0
+    args.reviewMinToolCalls !== null &&
+    (!Number.isInteger(args.reviewMinToolCalls) || args.reviewMinToolCalls < 0)
   ) {
     process.stderr.write(
       '--review-min-tool-calls must be a non-negative integer.\n',
@@ -273,8 +269,8 @@ export async function main(argv) {
     return;
   }
   if (
-    !Number.isInteger(args.reviewMaxToolTurns) ||
-    args.reviewMaxToolTurns < 1
+    args.reviewMaxToolTurns !== null &&
+    (!Number.isInteger(args.reviewMaxToolTurns) || args.reviewMaxToolTurns < 1)
   ) {
     process.stderr.write(
       '--review-max-tool-turns must be a positive integer.\n',
@@ -602,8 +598,13 @@ export function parseArgs(argv) {
     contextWindow: null,
     reviewModel: null,
     reviewContextWindow: null,
-    reviewMinToolCalls: DEFAULT_MIN_REVIEW_TOOL_CALLS,
-    reviewMaxToolTurns: DEFAULT_REVIEW_MAX_TOOL_TURNS,
+    // null (not the numeric default) so the KODR_REVIEW_MIN_TOOL_CALLS and
+    // KODR_REVIEW_MAX_TOOL_TURNS env vars still reach their resolvers when the
+    // flags aren't passed -- minReviewToolCalls/reviewMaxToolTurns in
+    // review.mjs return any integer they're handed, so a numeric default here
+    // made both env vars permanently unreachable through the CLI.
+    reviewMinToolCalls: null,
+    reviewMaxToolTurns: null,
     quiet: false,
     env: [],
     continue: null,
