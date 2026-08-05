@@ -233,16 +233,64 @@ kodr "…" --memory --memory-auto-apply   # trust the loop; skip the prompt
 
 ## 10. A second pair of eyes — `--review-model`
 
-After a successful build, run a review pass on a _different_ model. Kodr owns
-the LM Studio load/unload/verify sequencing for both models via the `lms`
-CLI, so you can build on a fast model and review on a stronger one.
+After a successful build, run a review pass on a _different_ model: a fresh
+read-only conversation over the diff, with `read_file`/`list_files`/`search`
+so it can check the change against the real files instead of reacting to a
+pasted diff. Kodr owns the LM Studio load/unload/verify sequencing for both
+models via the `lms` CLI, so you can build on a fast model and review on a
+stronger one — a reasoning model is a good fit here.
 
 ```bash
-kodr "…" --review-model qwen/qwen3.6-35b-a3b
+kodr "…" --review-model microsoft/phi-4-reasoning-plus
 ```
+
+The reviewer ends with `VERDICT: PASS` or `VERDICT: FAIL`. By default that's
+advisory — it's printed, saved to the run record, and counted by
+`kodr stats`, but it changes nothing. **`--fail-on-review` makes it a gate:**
+
+```bash
+kodr "…" --review-model microsoft/phi-4-reasoning-plus --fail-on-review
+```
+
+Now a FAIL exits non-zero, and in [`kodr loop`](loop.md) it blocks the
+commit, retries the task with the reviewer's findings, and parks if it never
+passes. This is the one thing that catches output `--test` can't — code that
+is syntactically valid and passes a thin test suite while being wrong.
+
+Two caveats worth internalising before you leave it on:
+
+- **A review FAIL is not a test failure.** The reviewer can't run anything;
+  it's a second model's static read. Real signal, weaker than an exit code,
+  and now holding the same veto. Keep `--test` as the primary gate.
+- **Verdict parsing is fail-closed.** A reply with no parseable verdict line
+  reads as FAIL (after one nudge retry). If your reviewer can't reliably
+  produce that final line, `kodr stats` will show it as
+  `no verdict: <n>%` rather than leaving you guessing why everything fails.
+
+### Keeping both models resident
+
+On one LM Studio, a review costs **two full model loads per attempt** —
+`lms unload --all` runs first, and the build model reloads on the next
+attempt. Across a checklist that dominates the run. Give the reviewer its own
+endpoint and turn the swap off:
+
+```bash
+# builder hot on :1234, reviewer hot on :1235 — zero load/unload cycles
+kodr loop --test "npm test" \
+  --review-model microsoft/phi-4-reasoning-plus \
+  --review-base-url http://localhost:1235/v1 \
+  --no-review-swap --fail-on-review
+```
+
+`--review-provider` moves the reviewer to a different provider entirely (a
+cloud reviewer over a local builder, say). Note it does _not_ inherit the
+build's base URL — a different provider brings its own default.
 
 Related tuning: `--review-context-window`, `--review-min-tool-calls`,
 `--review-max-tool-turns` (see [`specs/review.yaml`](../specs/review.yaml)).
+Grounding is advisory: a PASS from a reviewer that opened no files is
+recorded and warned about, but doesn't block. `kodr stats`'
+`reviewGroundedRate` tells you whether that's costing you anything.
 
 ## 11. Slash commands for the TUI
 

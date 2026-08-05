@@ -76,6 +76,31 @@ Every git operation is a returned value, never a throw — a failed commit
 stops the loop with reason `commit-failed` rather than continuing on a false
 assumption that it worked.
 
+### A second model as a gate
+
+With `--review-model` and `--fail-on-review`, a fourth condition joins the
+green decision: a reviewer read the diff and didn't fail it.
+
+```bash
+kodr loop --test "npm test" \
+  --review-model microsoft/phi-4-reasoning-plus \
+  --review-base-url http://localhost:1235/v1 --no-review-swap \
+  --fail-on-review
+```
+
+A `VERDICT: FAIL` consumes an attempt like any other failure, and the next
+attempt is prompted with the reviewer's findings on top of the usual
+transcript replay — so the model is told *what* was wrong, not just asked
+again. A task the reviewer never passes parks. A `GOAL: ` item works the same
+way, with the reviewer's findings short-circuiting the judge.
+
+Nothing blocks on a review that didn't happen: an empty changeset, a build
+that never completed, a reviewer that crashed. Each loop-record entry carries
+the verdict, so one file answers "which tasks did the reviewer block?"
+
+The two model-load caveats matter here more than anywhere — see
+[Keeping both models resident](usage.md#keeping-both-models-resident).
+
 ## Flags
 
 All of the ordinary run options work here too and are passed through per task
@@ -93,6 +118,7 @@ All of the ordinary run options work here too and are passed through per task
 | `--max-loop-ms <n>`                    | `KODR_LOOP_MAX_MS`             | `0` (off)  | Wall-clock ceiling for the whole loop, checked between tasks              |
 | `--max-loop-cost <n>`                  | `KODR_LOOP_MAX_COST`           | `0` (off)  | Cumulative cost ceiling across the loop, checked between tasks            |
 | `--max-tasks <n>`                      | `KODR_LOOP_MAX_TASKS`          | `0` (off)  | Stop after this many tasks — the cheap way to smoke-test a long checklist |
+| `--fail-on-review`                     | `KODR_FAIL_ON_REVIEW`          | off        | A review `VERDICT: FAIL` blocks the commit and retries with the findings |
 
 `KODR_LOOP_RESET_PATHS` is space-separated, matching
 [`examples/loop.sh`](../examples/loop.sh)'s own `RESET_PATHS` convention.
@@ -125,7 +151,7 @@ Same advice as the bash scripts, because it's the same ratchet underneath:
 ```bash
 git log --oneline          # one commit per green task — the actual output
 grep '^- \[!\]' TASKS.md   # what parked, and needs you
-kodr stats                 # heal / retry / verify rates across the whole run
+kodr stats                 # heal / retry / verify / review rates across the run
 ```
 
 `kodr loop` also writes a **loop record** to `.kodr/loops/<timestamp>.json`,
@@ -144,14 +170,17 @@ it reproduces.
 
 ## Gotchas
 
-- **`--test` is the only thing that can catch broken output.** Green means
-  *completed + files changed + verification didn't fail* — with no `--test`
-  configured, a model that writes syntactically broken code still goes green,
-  because there's nothing to check it against. Verified live: a checklist run
-  against a 70B model with no `--test` produced a file whose model-generated
-  content had literally double-escaped `\n` sequences (valid JSON, broken
-  JS) — the harness wrote exactly what it was told, and the ratchet had no
-  way to know. This isn't a bug to fix; it's the reason `--test` exists.
+- **Without a gate, nothing catches broken output.** Green means *completed +
+  files changed + verification didn't fail* — with no `--test` configured, a
+  model that writes syntactically broken code still goes green, because
+  there's nothing to check it against. Verified live: a checklist run against
+  a 70B model with no `--test` produced a file whose model-generated content
+  had literally double-escaped `\n` sequences (valid JSON, broken JS) — the
+  harness wrote exactly what it was told, and the ratchet had no way to know.
+  `--test` is the primary answer, and `--review-model … --fail-on-review` is
+  the second one: a reviewer reading that diff has every chance of catching
+  it, and it also covers what a thin test suite passes over. See
+  [§10 of the usage guide](usage.md#10-a-second-pair-of-eyes----review-model).
 - **A no-op "complete" still parks.** A model can call no tools at all, or
   reply as if it finished without touching a file — some providers'
   tool-calling is unreliable enough that this happens (seen live: a model

@@ -277,6 +277,8 @@ routing docs](https://openrouter.ai/docs/features/provider-routing).
 --openrouter-provider-only <a,b>
                         Restrict/prioritize OpenRouter's upstream providers (or KODR_OPENROUTER_PROVIDER_ONLY)
 --test <command>        Verification command (e.g. "npm test")
+--review-model <id>     Review the change on a second model after a successful build
+--fail-on-review        Treat that review's FAIL verdict as a failure (or KODR_FAIL_ON_REVIEW)
 --heal-turns <n>        Max repair turns (default: 3)
 --max-tool-turns <n>    Tool-turn ceiling per loop (default: 20)
 --heartbeat-ms <n>      "Still running" notice interval for Stop hooks and model requests (or KODR_HEARTBEAT_MS; default: 30000, 0 disables)
