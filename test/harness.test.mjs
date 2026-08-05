@@ -77,6 +77,40 @@ describe('createRunRecord', () => {
     assert.equal(record.retries, 0);
   });
 
+  it('persists the review verdict, grounded flag, and findings', () => {
+    // runReview builds its own message array that never joins result.messages,
+    // so the record is the only place these findings exist on disk.
+    const review = {
+      skipped: false,
+      findings: 'a.mjs imports a module that does not exist.',
+      verdict: 'fail',
+      verdictFound: true,
+      passed: false,
+      grounded: true,
+      toolTurns: 3,
+    };
+    const record = createRunRecord(
+      {
+        metadata: {},
+        filesChanged: ['a.mjs'],
+        toolTurns: 0,
+        usage: {},
+        messages: [],
+        review,
+      },
+      {},
+    );
+    assert.deepEqual(record.review, review);
+  });
+
+  it('leaves review null when no review pass ran', () => {
+    const record = createRunRecord(
+      { metadata: {}, filesChanged: [], toolTurns: 0, usage: {}, messages: [] },
+      {},
+    );
+    assert.equal(record.review, null);
+  });
+
   it('records the tool schemas offered to the model, so the log is self-describing', () => {
     const toolDefinitions = [
       { name: 'write_file', description: 'write', parameters: {} },

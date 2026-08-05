@@ -53,6 +53,31 @@ outputs:
   verifyPassRate:
     type: number
     description: Fraction of verified runs that passed (null when verification never ran in this set)
+  reviewAttemptedRate:
+    type: number
+    description: >
+      Fraction of runs where a review pass actually assessed the change. A
+      skipped review -- no changed files, an incomplete build, a failed model
+      switch, a reviewer that crashed -- is not an attempt. That distinction
+      is the point: "half my phases silently never got reviewed" is the
+      failure this makes visible, and folding skips into attempts buries it.
+  reviewPassRate:
+    type: number
+    description: Fraction of reviewed runs the reviewer passed (null when nothing in this set was reviewed)
+  reviewGroundedRate:
+    type: number
+    description: >
+      Fraction of reviewed runs where the reviewer met the tool-call floor
+      (null when nothing was reviewed). Grounding does not gate -- see
+      specs/review.yaml -- so this is the number that says whether that was
+      the right call.
+  reviewVerdictMissingRate:
+    type: number
+    description: >
+      Fraction of reviewed runs whose reply carried no parseable verdict line
+      even after the nudge (null when nothing was reviewed). Requiring a
+      trailing line makes the prompt load-bearing; this is how you find out
+      your reviewer cannot honour it before it silently fails everything.
   avgToolTurns:
     type: number
     description: Average tool-call round trips per run
@@ -93,6 +118,11 @@ tests:
     - computeStats computes retryRate and avgRetries
     - computeStats computes verifyAttemptedRate and verifyPassRate
     - computeStats reports verifyPassRate as null when no run in the set was verified
+    - computeStats computes reviewAttemptedRate, reviewPassRate, and reviewGroundedRate
+    - computeStats counts a review skipped for an incomplete build as not attempted
+    - computeStats reports reviewPassRate as null when no run in the set was reviewed
+    - computeStats computes reviewVerdictMissingRate from verdictFound
+    - formatStats renders the review line, with n/a when no run in the set was reviewed
     - computeStats computes avgToolTurns and avgDurationMs across the set
     - computeStats sums prompt/completion/cost usage across the set
     - formatStats renders total runs, stopped-reason breakdown, and every rate

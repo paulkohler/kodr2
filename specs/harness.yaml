@@ -118,6 +118,13 @@ constraints:
     run budget (budget-exceeded).
   - When such a near-deadline request times out *because* it was capped to the last of the run budget (the budget is exceeded by the time it throws), the tool loop reports stoppedReason "budget-exceeded" rather than a hard "error" -- the run merely ran out of wall-clock. A timeout with no run budget (or budget still remaining) is still a genuine error
   - Retries used by every model request in the run (main loop, compaction, heal, review, memory) are summed into a single retries count on the result, the --json summary, and the saved run record
+  - >
+    The whole ReviewResult, findings included, is persisted on the run record.
+    runReview builds its own message array that never joins result.messages,
+    so without this the findings exist nowhere on disk -- and once a verdict
+    can block a commit, "why did the reviewer fail this?" has to survive the
+    terminal scrollback. It is also what kodr stats aggregates its review
+    rates from (specs/stats.yaml)
   - When maxRunMs is set, the initial verification is capped to hold back a heal reserve (KODR_HEAL_RESERVE / healReserve option, default 0.25) so a hanging Stop hook cannot starve the heal pass
   - While a Stop hook runs, a heartbeat notice is written to stderr on an interval (KODR_HEARTBEAT_MS / --heartbeat-ms, default 30,000ms, 0 disables), tagged with the hook's name, so a legitimately slow command (a big test suite, a cold build) doesn't look indistinguishable from a stuck harness for its whole timeout
   - The same heartbeat interval also applies to every chat request (the main tool loop, heal turns, and compaction summaries) -- a large prompt can spend minutes in prefill before the first token streams, which is otherwise silent for the whole request timeout, indistinguishable from a stuck process to any external supervisor watching for output
@@ -204,6 +211,8 @@ tests:
     - compaction forwards heartbeatMs and onHeartbeat to the summary chat call
     - run records include metadata and duration
     - run records include the tool schemas offered to the model, null when none were offered
+    - run records persist the review verdict, grounded flag, and findings
+    - run records leave review null when no review pass ran
     - run records include a local-time-zone timestamp alongside the UTC one, the same instant
     - toLocalIso formats a date in the local zone with a UTC offset, parsing back to the same instant
     - run records include package-manager commands and error metadata

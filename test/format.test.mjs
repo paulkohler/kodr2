@@ -263,6 +263,10 @@ describe('formatStats', () => {
         avgRetries: 0.75,
         verifyAttemptedRate: 0.5,
         verifyPassRate: 1,
+        reviewAttemptedRate: 1,
+        reviewPassRate: 1,
+        reviewGroundedRate: 1,
+        reviewVerdictMissingRate: 0,
         avgToolTurns: 3.5,
         avgDurationMs: 1234,
         totalUsage: { prompt: 100, completion: 40, cost: 0 },
@@ -290,6 +294,10 @@ describe('formatStats', () => {
         avgRetries: 0,
         verifyAttemptedRate: 0,
         verifyPassRate: null,
+        reviewAttemptedRate: 0,
+        reviewPassRate: null,
+        reviewGroundedRate: null,
+        reviewVerdictMissingRate: null,
         avgToolTurns: 1,
         avgDurationMs: null,
         totalUsage: { prompt: 100, completion: 40, cost: 0.0123 },
@@ -312,6 +320,10 @@ describe('formatStats', () => {
         avgRetries: 0,
         verifyAttemptedRate: 0,
         verifyPassRate: null,
+        reviewAttemptedRate: 0,
+        reviewPassRate: null,
+        reviewGroundedRate: null,
+        reviewVerdictMissingRate: null,
         avgToolTurns: 1,
         avgDurationMs: null,
         totalUsage: { prompt: 0, completion: 0, cost: 0 },
@@ -320,6 +332,9 @@ describe('formatStats', () => {
 
     assert.doesNotMatch(out, /NaN/);
     assert.match(out, /n\/a/);
+    // The review line must degrade to n/a like every other conditional rate,
+    // not read as "0% passed" when nothing was reviewed at all.
+    assert.match(out, /review attempted: 0%\s+passed: n\/a/);
   });
 
   it('reports no run records found for an empty set', () => {

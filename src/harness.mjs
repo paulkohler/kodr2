@@ -1298,6 +1298,12 @@ export function createRunRecord(result, finish = {}) {
     retries: result.retries ?? 0,
     error: result.error ?? null,
     verified: result.verification?.passed ?? null,
+    // The whole ReviewResult, findings included. runReview builds its own
+    // message array that never joins result.messages, so if the record
+    // doesn't hold the findings they exist nowhere on disk -- and once a
+    // verdict can block a commit, "why did the reviewer fail this?" has to be
+    // answerable after the terminal scrollback is gone.
+    review: result.review ?? null,
     noOpCompletion: result.noOpCompletion ?? false,
     healed: result.healed ?? null,
     healTurns: result.healTurns ?? null,

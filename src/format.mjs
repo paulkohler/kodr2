@@ -316,6 +316,9 @@ export function formatStats(stats) {
     `  ${DIM}verify attempted:${RESET} ${pct(stats.verifyAttemptedRate)}${DIM}  passed:${RESET} ${pctOrNA(stats.verifyPassRate)}`,
   );
   lines.push(
+    `  ${DIM}review attempted:${RESET} ${pct(stats.reviewAttemptedRate)}${DIM}  passed:${RESET} ${pctOrNA(stats.reviewPassRate)}${DIM}  grounded:${RESET} ${pctOrNA(stats.reviewGroundedRate)}${DIM}  no verdict:${RESET} ${pctOrNA(stats.reviewVerdictMissingRate)}`,
+  );
+  lines.push(
     `  ${DIM}avg tool turns:${RESET} ${stats.avgToolTurns.toFixed(1)}`,
   );
   lines.push(

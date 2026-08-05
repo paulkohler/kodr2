@@ -171,6 +171,67 @@ describe('computeStats', () => {
     assert.equal(stats.verifyPassRate, null);
   });
 
+  it('computes reviewAttemptedRate, reviewPassRate, and reviewGroundedRate', () => {
+    const stats = computeStats([
+      record({
+        review: {
+          skipped: false,
+          passed: true,
+          grounded: true,
+          verdictFound: true,
+        },
+      }),
+      record({
+        review: {
+          skipped: false,
+          passed: false,
+          grounded: false,
+          verdictFound: true,
+        },
+      }),
+      record({ review: null }),
+    ]);
+    assert.equal(stats.reviewAttemptedRate, 2 / 3);
+    assert.equal(stats.reviewPassRate, 0.5);
+    assert.equal(stats.reviewGroundedRate, 0.5);
+  });
+
+  it('counts a review skipped for an incomplete build as not attempted', () => {
+    // "Half my phases silently never got reviewed" is the failure this metric
+    // exists to surface; folding skips into attempts would bury it.
+    const stats = computeStats([
+      record({ review: { skipped: true, reason: 'build did not complete' } }),
+      record({
+        review: {
+          skipped: false,
+          passed: true,
+          grounded: true,
+          verdictFound: true,
+        },
+      }),
+    ]);
+    assert.equal(stats.reviewAttemptedRate, 0.5);
+    assert.equal(stats.reviewPassRate, 1);
+  });
+
+  it('reports reviewPassRate as null when no run in the set was reviewed', () => {
+    const stats = computeStats([record({ review: null })]);
+    assert.equal(stats.reviewAttemptedRate, 0);
+    assert.equal(stats.reviewPassRate, null);
+    assert.equal(stats.reviewGroundedRate, null);
+    assert.equal(stats.reviewVerdictMissingRate, null);
+  });
+
+  it('computes reviewVerdictMissingRate from verdictFound', () => {
+    const stats = computeStats([
+      record({
+        review: { skipped: false, passed: false, verdictFound: false },
+      }),
+      record({ review: { skipped: false, passed: true, verdictFound: true } }),
+    ]);
+    assert.equal(stats.reviewVerdictMissingRate, 0.5);
+  });
+
   it('computes avgToolTurns and avgDurationMs across the set', () => {
     const stats = computeStats([
       record({ toolTurns: 2, durationMs: 100 }),

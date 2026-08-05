@@ -43,6 +43,10 @@ export async function loadRunRecords(runsDir) {
  * @property {number} [avgRetries]
  * @property {number} [verifyAttemptedRate]
  * @property {number|null} [verifyPassRate]
+ * @property {number} [reviewAttemptedRate]
+ * @property {number|null} [reviewPassRate]
+ * @property {number|null} [reviewGroundedRate]
+ * @property {number|null} [reviewVerdictMissingRate]
  * @property {number} [avgToolTurns]
  * @property {number|null} [avgDurationMs]
  * @property {{ prompt: number, completion: number, cost: number }} [totalUsage]
@@ -58,6 +62,8 @@ export async function loadRunRecords(runsDir) {
  * @property {number} [compactions]
  * @property {number} [retries]
  * @property {boolean} [verified]
+ * @property {{ skipped: boolean, passed?: boolean, grounded?: boolean,
+ *   verdictFound?: boolean }|null} [review]
  * @property {number} [toolTurns]
  * @property {number} [durationMs]
  * @property {string[]} [filesChanged]
@@ -65,6 +71,16 @@ export async function loadRunRecords(runsDir) {
  * @property {{ prompt: number, completion: number, cost: number }} [usage]
  * @property {{ message?: string }} [error]
  */
+
+// null, not 0, when nothing was measured. A zero denominator means "no data",
+// and rendering that as 0% reads as "always fails" -- the opposite of the
+// truth (see specs/stats.yaml).
+function rate(count, denominator) {
+  if (denominator > 0) {
+    return count / denominator;
+  }
+  return null;
+}
 
 /**
  * Compute aggregate stats across a set of run records.
@@ -87,6 +103,10 @@ export function computeStats(records) {
   let totalRetries = 0;
   let verifyAttempted = 0;
   let verifyPassed = 0;
+  let reviewAttempted = 0;
+  let reviewPassed = 0;
+  let reviewGrounded = 0;
+  let reviewVerdictMissing = 0;
   let totalToolTurns = 0;
   let totalDurationMs = 0;
   let durationSamples = 0;
@@ -121,6 +141,22 @@ export function computeStats(records) {
         verifyPassed++;
       }
     }
+    // A skipped review is not an attempted one. That distinction is the whole
+    // point of the metric: "half my phases silently never got reviewed" is
+    // the failure this is here to make visible, and counting skips as
+    // attempts would bury it.
+    if (record.review && !record.review.skipped) {
+      reviewAttempted++;
+      if (record.review.passed) {
+        reviewPassed++;
+      }
+      if (record.review.grounded) {
+        reviewGrounded++;
+      }
+      if (record.review.verdictFound === false) {
+        reviewVerdictMissing++;
+      }
+    }
     totalToolTurns += record.toolTurns || 0;
     if (Number.isInteger(record.durationMs)) {
       totalDurationMs += record.durationMs;
@@ -145,6 +181,10 @@ export function computeStats(records) {
     avgRetries: totalRetries / total,
     verifyAttemptedRate: verifyAttempted / total,
     verifyPassRate: verifyAttempted > 0 ? verifyPassed / verifyAttempted : null,
+    reviewAttemptedRate: reviewAttempted / total,
+    reviewPassRate: rate(reviewPassed, reviewAttempted),
+    reviewGroundedRate: rate(reviewGrounded, reviewAttempted),
+    reviewVerdictMissingRate: rate(reviewVerdictMissing, reviewAttempted),
     avgToolTurns: totalToolTurns / total,
     avgDurationMs:
       durationSamples > 0 ? totalDurationMs / durationSamples : null,
