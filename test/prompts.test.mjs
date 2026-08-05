@@ -9,6 +9,7 @@ const KNOWN_PROMPTS = [
   'system',
   'review',
   'review-nudge',
+  'review-verdict-nudge',
   'retrospective',
   'compact',
 ];

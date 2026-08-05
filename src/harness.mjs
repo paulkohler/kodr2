@@ -1125,16 +1125,29 @@ export async function runReviewPass(params) {
     });
 
     if (!reviewResult.skipped) {
-      const status = reviewResult.grounded
-        ? 'review complete'
-        : 'review complete (ungrounded -- treat with caution)';
-      reporter.notice(status);
+      reporter.notice(reviewNotice(reviewResult));
     }
     return reviewResult;
   } catch (err) {
     reporter.notice(`review failed: ${err.message}`);
     return { skipped: true, error: err.message };
   }
+}
+
+/**
+ * One line naming what the reviewer decided and how much it looked at. The
+ * verdict is the part an operator acts on, so it leads.
+ * @param {import('./review.mjs').ReviewResult} review
+ * @returns {string}
+ */
+export function reviewNotice(review) {
+  if (!review.verdictFound) {
+    return 'review: FAIL (no verdict line in the reply -- treated as a fail)';
+  }
+  if (!review.grounded) {
+    return `review: ${review.verdict.toUpperCase()} but ungrounded (no files inspected) -- treat with caution`;
+  }
+  return `review: ${review.verdict.toUpperCase()} (${review.toolTurns} tool calls)`;
 }
 
 /**

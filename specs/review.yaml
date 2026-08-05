@@ -81,7 +81,24 @@ outputs:
     description: True when there were no changed files to review
   findings:
     type: string
-    description: The review model's final text response
+    description: The review model's final text response, verdict line removed
+  verdict:
+    type: string
+    description: >
+      "pass" or "fail" -- what the reviewer said. Absent on a skipped review:
+      there was no assessment, and undefined must not be readable as one.
+  verdictFound:
+    type: boolean
+    description: >
+      False when no verdict line could be parsed at all; verdict is then
+      "fail", fail-closed. Distinct from the verdict itself because "the
+      reviewer never emits a verdict line" and "the reviewer keeps failing us"
+      are different operational problems with different fixes.
+  passed:
+    type: boolean
+    description: >
+      The harness's decision, as opposed to what the reviewer said. Diverges
+      from verdict only in that an unparseable reply reads as a fail.
   grounded:
     type: boolean
     description: >
@@ -99,6 +116,35 @@ outputs:
     description: Combined retries used by both attempts' chat calls
 
 constraints:
+  - >
+    The reviewer must end with an explicit VERDICT: PASS or VERDICT: FAIL
+    line, parsed by specs/verdict.yaml. Fail-closed: a missing, garbled,
+    contradictory, or think-block-only verdict reads as fail. A verdict is
+    permission to proceed, and a reply nobody can parse must never be that.
+  - >
+    The single nudge retry now fires for either shortfall -- under the
+    tool-call floor, or no parseable verdict -- and for both at once, joining
+    the two prompt fragments rather than choosing between them. Requiring a
+    trailing line makes the prompt load-bearing, and small local models drop
+    reply-format instructions routinely; reusing the existing retry costs
+    nothing in the common case. reviewVerdictMissingRate in specs/stats.yaml
+    is how often that is happening.
+  - >
+    Grounding is advisory, not a gate. An ungrounded PASS is recorded, named
+    in the notice, and counted in reviewGroundedRate, but it does not block.
+    The symmetric rule from specs/goal.yaml (an ungrounded MET never stops the
+    loop) was considered and rejected here: a review only runs when files
+    actually changed, so the remaining ungrounded case is a small reviewer
+    being lazy on a trivial diff, and parking good work overnight is the
+    expensive direction to fail in. Revisit if reviewGroundedRate says
+    otherwise.
+  - >
+    A skipped review returns exactly { skipped: true } (plus reason or error
+    on the paths that have one) and gains no verdict, verdictFound, or passed
+    field. undefined is not false, and no gate decision may be derived from an
+    absent field -- which is what keeps an empty changeset, an incomplete
+    build, a failed model switch, and a crashed reviewer all non-blocking by
+    construction.
   - >
     The tool registry is restricted to read_file, list_files, and search —
     never write_file, edit_file, or run_command. A review pass must not be
@@ -164,6 +210,23 @@ constraints:
 
 tests:
   unit:
+    - returns verdict "pass" for a review ending in VERDICT: PASS
+    - returns verdict "fail" for a review ending in VERDICT: FAIL
+    - strips the verdict line out of findings
+    - nudges once for a missing verdict line, then fails closed if it is still absent
+    - ignores a verdict the reviewer wrote inside its own think block
+    - reports an ungrounded pass as passed, with grounded false
+    - a skipped review carries no verdict, verdictFound, or passed field
+    - the review system prompt requires a trailing VERDICT: PASS or VERDICT: FAIL line
+    - reviewBlocks is false for an absent review, a skipped review, and one skipped for an incomplete build
+    - reviewBlocks is false for a review that crashed
+    - reviewBlocks is true for a fail verdict
+    - reviewBlocks is false for an ungrounded pass, which is advisory
+    - parseReviewVerdict reports verdict fail with verdictFound false when no verdict line exists
+    - failOnReviewEnabled resolves the option, then KODR_FAIL_ON_REVIEW, then false
+    - reviewNotice names the verdict and how much the reviewer looked at
+    - reviewNotice says when a verdict line was missing entirely
+    - reviewNotice flags an ungrounded verdict
     - returns skipped: true when filesChanged is empty, without calling the model
     - runs a read-only tool loop and returns findings from the final turn
     - system prompt states the read-only tool set, completion semantics, grounding rules, and reply format

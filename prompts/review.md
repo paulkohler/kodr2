@@ -15,4 +15,9 @@ Grounding:
 Reply format:
 - A short list of concrete findings, most severe first: file, line if known, what is wrong, and why.
 - Correctness only -- bugs, broken imports or call sites, mismatched tests. No style nits, no praise, no summary of the change.
-- If nothing stood out, reply with exactly: No findings.
+- If nothing stood out, say exactly: No findings.
+- Then end with a single verdict line, exactly one of:
+    VERDICT: PASS
+    VERDICT: FAIL
+- Use PASS only when the change is correct as written. Use FAIL when anything is wrong, broken, or unverifiable from the files, and say specifically what -- that feedback is handed to whoever fixes it.
+- Do not write the word VERDICT anywhere except that final line.

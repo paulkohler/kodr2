@@ -14,6 +14,7 @@ files:
   - prompts/system.md — build-phase base system prompt (context.mjs)
   - prompts/review.md — review pass system prompt (review.mjs)
   - prompts/review-nudge.md — grounding nudge appended on the review retry (review.mjs)
+  - prompts/review-verdict-nudge.md — verdict-line nudge appended on the review retry when the reply carried no parseable verdict (review.mjs)
   - prompts/retrospective.md — memory retrospective system prompt (memory.mjs)
   - prompts/compact.md — compaction summary system prompt (compact.mjs)
 

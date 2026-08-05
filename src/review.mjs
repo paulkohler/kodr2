@@ -10,6 +10,7 @@ import { createTerminalReporter } from './reporter.mjs';
 import { runShell } from './shell.mjs';
 import { runToolLoop } from './tool-loop.mjs';
 import { createToolRegistry } from './tools/index.mjs';
+import { parseVerdict, REVIEW_LABELS } from './verdict.mjs';
 
 const READ_ONLY_TOOLS = ['read_file', 'list_files', 'search'];
 
@@ -99,6 +100,74 @@ async function gatherDiff(cwd, filesChanged, options = {}) {
 
 const REVIEW_SYSTEM = loadPrompt('review');
 const REVIEW_NUDGE = loadPrompt('review-nudge');
+const REVIEW_VERDICT_NUDGE = loadPrompt('review-verdict-nudge');
+
+/**
+ * Whether a blocking review verdict should fail the process or block a commit.
+ * Resolved from an explicit option, then KODR_FAIL_ON_REVIEW, then false --
+ * the review pass has always been advisory and stays that way unless asked.
+ *
+ * Note this defaults to false rather than null: the resolver checks for an
+ * explicit `true` first, so the env var is still reachable. It must become
+ * null the day a --no-fail-on-review exists, since then false would have to
+ * mean "explicitly off, beat the env var".
+ * @param {boolean} [option]
+ * @returns {boolean}
+ */
+export function failOnReviewEnabled(option) {
+  if (option === true) {
+    return true;
+  }
+  const fromEnv = process.env.KODR_FAIL_ON_REVIEW;
+  return fromEnv === '1' || fromEnv === 'true';
+}
+
+/**
+ * Parse a reviewer's reply into a verdict and the findings text. The reviewer
+ * must end with an explicit `VERDICT: PASS` or `VERDICT: FAIL` line; a
+ * missing, garbled, contradictory, or think-block-only verdict parses as fail,
+ * so a reply nobody can read never waves a change through.
+ * @param {string} text
+ * @returns {{ verdict: 'pass'|'fail', verdictFound: boolean, findings: string }}
+ */
+export function parseReviewVerdict(text) {
+  const parsed = parseVerdict(text, REVIEW_LABELS);
+  if (parsed.passed) {
+    return { verdict: 'pass', verdictFound: true, findings: parsed.feedback };
+  }
+  return {
+    verdict: 'fail',
+    verdictFound: parsed.found,
+    findings: parsed.feedback,
+  };
+}
+
+/**
+ * Whether a review result should block -- fail the process, or stop a loop
+ * committing the change.
+ *
+ * A skipped review never blocks. There was no assessment, and "no assessment"
+ * must not read as a failed one: that covers an empty changeset, a build that
+ * never completed, a failed model switch, and a reviewer that crashed. A
+ * crashed reviewer parking a task is the worst possible failure mode for an
+ * unattended loop.
+ *
+ * An ungrounded pass does not block either. It is recorded and surfaced
+ * (reviewGroundedRate in kodr stats) but treated as advisory: a small local
+ * reviewer being lazy on a trivial diff should not park work that is fine,
+ * and parking good work overnight is the expensive direction to fail in.
+ * @param {ReviewResult|{ skipped: true }} [review]
+ * @returns {boolean}
+ */
+export function reviewBlocks(review) {
+  if (!review) {
+    return false;
+  }
+  if (review.skipped) {
+    return false;
+  }
+  return review.verdict === 'fail';
+}
 
 function buildReviewMessages(filesChanged, diff, nudge) {
   const fileList = filesChanged.map((file) => `- ${file}`).join('\n');
@@ -116,18 +185,40 @@ function buildReviewMessages(filesChanged, diff, nudge) {
 async function runReviewAttempt(params) {
   const { messages, maxToolTurns, ...rest } = params;
   const loop = await runToolLoop({ ...rest, messages, maxToolTurns });
+  const parsed = parseReviewVerdict(loop.finalText);
   return {
-    findings: loop.finalText,
+    findings: parsed.findings,
+    verdict: parsed.verdict,
+    verdictFound: parsed.verdictFound,
     toolTurns: loop.toolTurns,
     usage: loop.usage,
     retries: loop.retries || 0,
   };
 }
 
+// One nudge covers both ways an attempt can fall short, and an attempt can
+// fall short both ways at once -- so the fragments are joined rather than
+// chosen between. Telling a grounded reviewer to go read files would be noise.
+function nudgeFor(attempt, minToolCalls) {
+  const parts = [];
+  if (attempt.toolTurns < minToolCalls) {
+    parts.push(REVIEW_NUDGE);
+  }
+  if (!attempt.verdictFound) {
+    parts.push(REVIEW_VERDICT_NUDGE);
+  }
+  return parts.join('\n\n');
+}
+
 /**
  * @typedef {object} ReviewResult
  * @property {boolean} skipped
  * @property {string} [findings]
+ * @property {'pass'|'fail'} [verdict] - What the reviewer said. Absent when skipped
+ * @property {boolean} [verdictFound] - False when no verdict line could be
+ *   parsed; verdict is then 'fail', fail-closed
+ * @property {boolean} [passed] - The harness's decision. Diverges from verdict
+ *   only in that an unparseable reply reads as fail
  * @property {boolean} [grounded]
  * @property {number} [toolTurns]
  * @property {{ prompt: number, completion: number, cost: number }} [usage]
@@ -213,10 +304,11 @@ export async function runReview(params) {
   const totalUsage = { ...attempt.usage };
   let totalRetries = attempt.retries || 0;
 
-  if (attempt.toolTurns < minToolCalls) {
+  const nudge = nudgeFor(attempt, minToolCalls);
+  if (nudge) {
     attempt = await runReviewAttempt({
       ...loopParams,
-      messages: buildReviewMessages(filesChanged, diff, REVIEW_NUDGE),
+      messages: buildReviewMessages(filesChanged, diff, nudge),
     });
     totalUsage.prompt += attempt.usage.prompt;
     totalUsage.completion += attempt.usage.completion;
@@ -227,6 +319,13 @@ export async function runReview(params) {
   return {
     skipped: false,
     findings: attempt.findings,
+    verdict: attempt.verdict,
+    verdictFound: attempt.verdictFound,
+    // What the reviewer said vs. what the harness decided. They only diverge
+    // on an unparseable reply, but keeping both is what lets kodr stats tell
+    // "the reviewer never emits a verdict line" apart from "the reviewer keeps
+    // failing us" -- different problems, different fixes.
+    passed: attempt.verdict === 'pass',
     grounded: attempt.toolTurns >= minToolCalls,
     toolTurns: attempt.toolTurns,
     usage: totalUsage,

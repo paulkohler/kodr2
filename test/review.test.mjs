@@ -6,8 +6,12 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { createNullReporter } from '../src/reporter.mjs';
+import { reviewNotice } from '../src/harness.mjs';
 import {
+  failOnReviewEnabled,
   minReviewToolCalls,
+  parseReviewVerdict,
+  reviewBlocks,
   reviewDiffTimeoutMs,
   reviewMaxToolTurns,
   runReview,
@@ -97,7 +101,7 @@ describe('runReview', () => {
     const client = scriptedClient([
       toolCallTurn('read_file', { path: 'a.mjs' }),
       toolCallTurn('read_file', { path: 'a.mjs' }),
-      finalTurn('No findings.'),
+      finalTurn('No findings.\n\nVERDICT: PASS'),
     ]);
 
     const result = await runReview({
@@ -168,7 +172,7 @@ describe('runReview', () => {
     const client = scriptedClient([
       toolCallTurn('read_file', { path: 'a.mjs' }),
       toolCallTurn('read_file', { path: 'a.mjs' }),
-      finalTurn('No findings.'),
+      finalTurn('No findings.\n\nVERDICT: PASS'),
     ]);
 
     const result = await runReview({
@@ -232,7 +236,9 @@ describe('runReview', () => {
 
   it('does not retry when minToolCalls is 0', async () => {
     await writeFile(join(tmpDir, 'a.mjs'), 'x');
-    const client = scriptedClient([finalTurn('Zero-tool-call answer.')]);
+    const client = scriptedClient([
+      finalTurn('Zero-tool-call answer.\n\nVERDICT: PASS'),
+    ]);
 
     const result = await runReview({
       reporter: silentReporter,
@@ -436,5 +442,256 @@ describe('reviewDiffTimeoutMs', () => {
   it('falls back to the default when neither is set', () => {
     delete process.env[envKey];
     assert.equal(reviewDiffTimeoutMs(undefined), 30_000);
+  });
+});
+
+describe('the review verdict', () => {
+  it('returns verdict "pass" for a review ending in VERDICT: PASS', async () => {
+    await writeFile(join(tmpDir, 'a.mjs'), 'x');
+    const client = scriptedClient([finalTurn('No findings.\n\nVERDICT: PASS')]);
+    const result = await runReview({
+      reporter: silentReporter,
+      client,
+      modelId: 'reviewer',
+      cwd: tmpDir,
+      filesChanged: ['a.mjs'],
+      minToolCalls: 0,
+    });
+    assert.equal(result.verdict, 'pass');
+    assert.equal(result.verdictFound, true);
+    assert.equal(result.passed, true);
+  });
+
+  it('returns verdict "fail" for a review ending in VERDICT: FAIL', async () => {
+    await writeFile(join(tmpDir, 'a.mjs'), 'x');
+    const client = scriptedClient([
+      finalTurn('a.mjs imports a module that does not exist.\n\nVERDICT: FAIL'),
+    ]);
+    const result = await runReview({
+      reporter: silentReporter,
+      client,
+      modelId: 'reviewer',
+      cwd: tmpDir,
+      filesChanged: ['a.mjs'],
+      minToolCalls: 0,
+    });
+    assert.equal(result.verdict, 'fail');
+    assert.equal(result.verdictFound, true);
+    assert.equal(result.passed, false);
+  });
+
+  it('strips the verdict line out of findings', async () => {
+    await writeFile(join(tmpDir, 'a.mjs'), 'x');
+    const client = scriptedClient([
+      finalTurn('The import is broken.\n\nVERDICT: FAIL'),
+    ]);
+    const result = await runReview({
+      reporter: silentReporter,
+      client,
+      modelId: 'reviewer',
+      cwd: tmpDir,
+      filesChanged: ['a.mjs'],
+      minToolCalls: 0,
+    });
+    assert.equal(result.findings, 'The import is broken.');
+  });
+
+  it('nudges once for a missing verdict line, then fails closed if it is still absent', async () => {
+    await writeFile(join(tmpDir, 'a.mjs'), 'x');
+    const client = scriptedClient([
+      finalTurn('I looked and it seems fine.'),
+      finalTurn('Still no verdict from me.'),
+    ]);
+    const result = await runReview({
+      reporter: silentReporter,
+      client,
+      modelId: 'reviewer',
+      cwd: tmpDir,
+      filesChanged: ['a.mjs'],
+      minToolCalls: 0,
+    });
+
+    assert.equal(client.calls.length, 2);
+    const retryUser = client.calls[1].messages.find((m) => m.role === 'user');
+    assert.match(retryUser.content, /had no verdict line/);
+    // Unreadable reply must never read as permission to proceed.
+    assert.equal(result.verdictFound, false);
+    assert.equal(result.verdict, 'fail');
+    assert.equal(result.passed, false);
+    assert.equal(result.findings, 'Still no verdict from me.');
+  });
+
+  it('ignores a verdict the reviewer wrote inside its own think block', async () => {
+    await writeFile(join(tmpDir, 'a.mjs'), 'x');
+    const client = scriptedClient([
+      finalTurn(
+        '<think>\nLooks fine, so VERDICT: PASS -- wait, the import is wrong.\n' +
+          '</think>\nThe import is wrong.\n\nVERDICT: FAIL',
+      ),
+    ]);
+    const result = await runReview({
+      reporter: silentReporter,
+      client,
+      modelId: 'reviewer',
+      cwd: tmpDir,
+      filesChanged: ['a.mjs'],
+      minToolCalls: 0,
+    });
+    assert.equal(result.verdict, 'fail');
+    assert.equal(result.findings, 'The import is wrong.');
+  });
+
+  it('reports an ungrounded pass as passed, with grounded false', async () => {
+    // Grounding is advisory: only an explicit FAIL blocks. A reviewer being
+    // lazy on a trivial diff must not park work that is fine.
+    await writeFile(join(tmpDir, 'a.mjs'), 'x');
+    const client = scriptedClient([finalTurn('Fine.\n\nVERDICT: PASS')]);
+    const result = await runReview({
+      reporter: silentReporter,
+      client,
+      modelId: 'reviewer',
+      cwd: tmpDir,
+      filesChanged: ['a.mjs'],
+      minToolCalls: 2,
+    });
+    assert.equal(result.grounded, false);
+    assert.equal(result.passed, true);
+    assert.equal(reviewBlocks(result), false);
+  });
+
+  it('a skipped review carries no verdict, verdictFound, or passed field', async () => {
+    const client = scriptedClient([finalTurn('unused')]);
+    const result = await runReview({
+      reporter: silentReporter,
+      client,
+      modelId: 'reviewer',
+      cwd: tmpDir,
+      filesChanged: [],
+    });
+    // undefined is not false; nothing downstream may derive a gate decision
+    // from an absent field.
+    assert.deepEqual(result, { skipped: true });
+  });
+
+  it('the review system prompt requires a trailing VERDICT: PASS or VERDICT: FAIL line', async () => {
+    await writeFile(join(tmpDir, 'a.mjs'), 'x');
+    const client = scriptedClient([finalTurn('No findings.\n\nVERDICT: PASS')]);
+    await runReview({
+      reporter: silentReporter,
+      client,
+      modelId: 'reviewer',
+      cwd: tmpDir,
+      filesChanged: ['a.mjs'],
+      minToolCalls: 0,
+    });
+    const system = client.calls[0].messages.find(
+      (m) => m.role === 'system',
+    ).content;
+    assert.match(system, /VERDICT: PASS/);
+    assert.match(system, /VERDICT: FAIL/);
+    assert.match(system, /Do not write the word VERDICT anywhere except/);
+  });
+});
+
+describe('reviewBlocks', () => {
+  it('is false for an absent review, a skipped review, and one skipped for an incomplete build', () => {
+    assert.equal(reviewBlocks(undefined), false);
+    assert.equal(reviewBlocks(null), false);
+    assert.equal(reviewBlocks({ skipped: true }), false);
+    assert.equal(
+      reviewBlocks({ skipped: true, reason: 'build did not complete' }),
+      false,
+    );
+  });
+
+  it('is false for a review that crashed', () => {
+    // A crashed reviewer parking a task is the worst failure mode there is
+    // for an unattended loop -- no assessment must never read as a failed one.
+    assert.equal(reviewBlocks({ skipped: true, error: 'ECONNREFUSED' }), false);
+  });
+
+  it('is true for a fail verdict', () => {
+    assert.equal(
+      reviewBlocks({ skipped: false, verdict: 'fail', grounded: true }),
+      true,
+    );
+  });
+
+  it('is false for an ungrounded pass, which is advisory', () => {
+    assert.equal(
+      reviewBlocks({ skipped: false, verdict: 'pass', grounded: false }),
+      false,
+    );
+  });
+});
+
+describe('parseReviewVerdict', () => {
+  it('reports verdict fail with verdictFound false when no verdict line exists', () => {
+    const parsed = parseReviewVerdict('Looks alright to me.');
+    assert.equal(parsed.verdict, 'fail');
+    assert.equal(parsed.verdictFound, false);
+    assert.equal(parsed.findings, 'Looks alright to me.');
+  });
+
+  it('reports verdict fail with verdictFound true for an explicit FAIL', () => {
+    const parsed = parseReviewVerdict('Broken.\nVERDICT: FAIL');
+    assert.equal(parsed.verdict, 'fail');
+    assert.equal(parsed.verdictFound, true);
+  });
+});
+
+describe('failOnReviewEnabled', () => {
+  const envKey = 'KODR_FAIL_ON_REVIEW';
+  let original;
+  beforeEach(() => {
+    original = process.env[envKey];
+  });
+  afterEach(() => {
+    if (original === undefined) {
+      delete process.env[envKey];
+    } else {
+      process.env[envKey] = original;
+    }
+  });
+
+  it('resolves the option, then KODR_FAIL_ON_REVIEW, then false', () => {
+    delete process.env[envKey];
+    assert.equal(failOnReviewEnabled(undefined), false);
+    assert.equal(failOnReviewEnabled(true), true);
+
+    process.env[envKey] = '1';
+    assert.equal(failOnReviewEnabled(undefined), true);
+    process.env[envKey] = 'true';
+    assert.equal(failOnReviewEnabled(undefined), true);
+    process.env[envKey] = 'no';
+    assert.equal(failOnReviewEnabled(undefined), false);
+  });
+});
+
+describe('reviewNotice', () => {
+  it('names the verdict and how much the reviewer looked at', () => {
+    assert.equal(
+      reviewNotice({
+        verdict: 'pass',
+        verdictFound: true,
+        grounded: true,
+        toolTurns: 4,
+      }),
+      'review: PASS (4 tool calls)',
+    );
+  });
+
+  it('says when a verdict line was missing entirely', () => {
+    assert.match(
+      reviewNotice({ verdict: 'fail', verdictFound: false, grounded: true }),
+      /no verdict line/,
+    );
+  });
+
+  it('flags an ungrounded verdict', () => {
+    assert.match(
+      reviewNotice({ verdict: 'pass', verdictFound: true, grounded: false }),
+      /ungrounded/,
+    );
   });
 });
