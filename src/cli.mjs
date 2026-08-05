@@ -51,6 +51,7 @@ import {
   createNullReporter,
   createTerminalReporter,
 } from './reporter.mjs';
+import { failOnReviewEnabled, reviewBlocks } from './review.mjs';
 import { computeStats, loadRunRecords } from './stats.mjs';
 import { MAX_TOOL_TURNS } from './tool-loop.mjs';
 
@@ -90,6 +91,7 @@ import { MAX_TOOL_TURNS } from './tool-loop.mjs';
  * @property {number|null} reviewContextWindow
  * @property {number|null} reviewMinToolCalls
  * @property {number|null} reviewMaxToolTurns
+ * @property {boolean} failOnReview
  * @property {boolean} quiet
  * @property {string[]} env
  * @property {string|null} continue
@@ -443,7 +445,11 @@ export function exitCodeFor(result, args) {
   if (noFailEnabled(args)) {
     return 0;
   }
-  if (shouldFailProcess(result)) {
+  if (
+    shouldFailProcess(result, {
+      failOnReview: failOnReviewEnabled(args.failOnReview),
+    })
+  ) {
     return 1;
   }
   return 0;
@@ -526,12 +532,21 @@ export function summarizeResult(result) {
   };
 }
 
-/** @param {RunResult} result */
-export function shouldFailProcess(result) {
+/**
+ * @param {RunResult} result
+ * @param {{ failOnReview?: boolean }} [options] - failOnReview makes a blocking
+ *   review verdict fail the process too. Off by default: the review pass has
+ *   always been advisory, and a second model's static read is weaker evidence
+ *   than a test command's exit code, so promoting it to a gate is opt-in.
+ */
+export function shouldFailProcess(result, options = {}) {
   if (result.stoppedReason && result.stoppedReason !== 'complete') {
     return true;
   }
   if (result.verification && result.verification.passed === false) {
+    return true;
+  }
+  if (options.failOnReview && reviewBlocks(result.review)) {
     return true;
   }
   return false;
@@ -605,6 +620,11 @@ export function parseArgs(argv) {
     // made both env vars permanently unreachable through the CLI.
     reviewMinToolCalls: null,
     reviewMaxToolTurns: null,
+    // false, not null, is right here: failOnReviewEnabled checks for an
+    // explicit true first, so KODR_FAIL_ON_REVIEW is still reachable. This
+    // must become null the day a --no-fail-on-review exists, since false
+    // would then have to mean "explicitly off, beat the env var".
+    failOnReview: false,
     quiet: false,
     env: [],
     continue: null,
@@ -800,6 +820,11 @@ export function parseArgs(argv) {
     }
     if (arg === '--review-context-window' && argv[i + 1]) {
       args.reviewContextWindow = parseInt(argv[++i], 10);
+      i++;
+      continue;
+    }
+    if (arg === '--fail-on-review') {
+      args.failOnReview = true;
       i++;
       continue;
     }
@@ -1022,6 +1047,10 @@ Options:
   --review-min-tool-calls <n>     Tool-call floor before a review counts as grounded (or
                                   KODR_REVIEW_MIN_TOOL_CALLS; default: 2, 0 disables the floor)
   --review-max-tool-turns <n>     Tool-turn ceiling per review attempt (or KODR_REVIEW_MAX_TOOL_TURNS; default: 12)
+  --fail-on-review                Treat a review FAIL verdict as a failure: exit non-zero
+                                  (or KODR_FAIL_ON_REVIEW). Off by default -- a review is
+                                  advisory unless you ask for it to be a gate, and a second
+                                  model's static read is weaker evidence than --test.
   --env <a,b,c>                   Extra env vars to expose to commands (CSV of names)
   --continue <last|path>          Continue from a prior run
   --runs-dir <path>               Where to write run transcripts (or KODR_RUNS_DIR)

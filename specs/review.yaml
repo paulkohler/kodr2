@@ -117,6 +117,13 @@ outputs:
 
 constraints:
   - >
+    Gating is opt-in via --fail-on-review (KODR_FAIL_ON_REVIEW), off by
+    default. A review FAIL is not a test failure: the reviewer cannot run
+    anything, so the signal is "a second model's static read disagrees" --
+    legitimate, but weaker evidence than verification.passed, while carrying
+    the same power over the exit code. Leaving it advisory by default also
+    preserves every existing --review-model workflow unchanged.
+  - >
     The reviewer must end with an explicit VERDICT: PASS or VERDICT: FAIL
     line, parsed by specs/verdict.yaml. Fail-closed: a missing, garbled,
     contradictory, or think-block-only verdict reads as fail. A verdict is
@@ -210,6 +217,11 @@ constraints:
 
 tests:
   unit:
+    - shouldFailProcess ignores a blocking review by default
+    - shouldFailProcess fails the CLI process on a blocking review when failOnReview is set
+    - shouldFailProcess does not fail on a passing review when failOnReview is set
+    - shouldFailProcess does not fail on a skipped review even when failOnReview is set
+    - parseArgs parses --fail-on-review as a boolean flag, off by default
     - returns verdict "pass" for a review ending in VERDICT: PASS
     - returns verdict "fail" for a review ending in VERDICT: FAIL
     - strips the verdict line out of findings

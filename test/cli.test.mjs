@@ -95,6 +95,14 @@ describe('parseArgs', () => {
     assert.equal(args.reasoning, null);
   });
 
+  it('parses --fail-on-review as a boolean flag, off by default', () => {
+    assert.equal(parseArgs(['run', 'hi']).failOnReview, false);
+    assert.equal(
+      parseArgs(['run', 'hi', '--fail-on-review']).failOnReview,
+      true,
+    );
+  });
+
   it('parses --review-min-tool-calls and --review-max-tool-turns', () => {
     const args = parseArgs([
       'run',
@@ -494,6 +502,43 @@ describe('shouldFailProcess', () => {
 
   it('fails the CLI process when the run was cancelled', () => {
     assert.equal(shouldFailProcess({ stoppedReason: 'cancelled' }), true);
+  });
+
+  const failedReview = {
+    review: { skipped: false, verdict: 'fail', grounded: true },
+  };
+
+  it('ignores a blocking review by default', () => {
+    assert.equal(shouldFailProcess(failedReview), false);
+  });
+
+  it('fails the CLI process on a blocking review when failOnReview is set', () => {
+    assert.equal(shouldFailProcess(failedReview, { failOnReview: true }), true);
+  });
+
+  it('does not fail on a passing review when failOnReview is set', () => {
+    assert.equal(
+      shouldFailProcess(
+        { review: { skipped: false, verdict: 'pass', grounded: true } },
+        { failOnReview: true },
+      ),
+      false,
+    );
+  });
+
+  it('does not fail on a skipped review even when failOnReview is set', () => {
+    // A reviewer that never ran, or crashed, must not fail the build.
+    assert.equal(
+      shouldFailProcess({ review: { skipped: true } }, { failOnReview: true }),
+      false,
+    );
+    assert.equal(
+      shouldFailProcess(
+        { review: { skipped: true, error: 'ECONNREFUSED' } },
+        { failOnReview: true },
+      ),
+      false,
+    );
   });
 });
 
