@@ -162,9 +162,15 @@ outputs:
     type: string
     description: >
       Why the loop stopped: "backlog-empty" (every item marked), "budget"
-      (maxLoopMs/maxLoopCost/maxTasks hit between tasks), "commit-failed" (a git
-      commit failed — the workspace may be inconsistent and the loop stops rather
-      than continue on a false assumption), or "error".
+      (maxLoopMs/maxLoopCost/maxTasks hit between tasks), "parked" (a task
+      parked and stopOnPark is set — the park itself is already committed, so
+      a rerun resumes cleanly), "cancelled" (Ctrl-C mid-attempt — the
+      checklist and workspace are left exactly as the interrupted attempt
+      left them; no mark, no commit, no park), "commit-failed" (a git commit
+      failed — the workspace may be inconsistent and the loop stops rather
+      than continue on a false assumption), or "error" (a startup precondition
+      failed, or an uncaught error propagated out of runLoop — the CLI's own
+      catch, not a value runLoop returns itself).
   tasks:
     type: array
     description: >

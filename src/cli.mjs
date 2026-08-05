@@ -2,8 +2,9 @@
  * CLI argument parsing and dispatch.
  */
 
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { DEFAULT_COMMIT_TIMEOUT_MS } from './commit.mjs';
 import { runDoctorChecks } from './doctor.mjs';
 import { parseEnvNames } from './env.mjs';
@@ -13,12 +14,7 @@ import {
   formatSimpleModelsList,
   formatStats,
 } from './format.mjs';
-import {
-  DEFAULT_MAX_ATTEMPTS,
-  evaluateGoal,
-  runGoal,
-  summarizeGoalResult,
-} from './goal.mjs';
+import { evaluateGoal, runGoal, summarizeGoalResult } from './goal.mjs';
 import {
   DEFAULT_HEARTBEAT_MS,
   resolveContextWindow,
@@ -27,6 +23,27 @@ import {
   run,
 } from './harness.mjs';
 import { DEFAULT_INCIDENT_HEARTBEAT_MS } from './incident.mjs';
+import {
+  commitAll,
+  hasCommits,
+  isGitRepo,
+  isTracked,
+  park,
+  registerExcludes,
+} from './loop-git.mjs';
+import {
+  loopRecordFilename,
+  loopsDir,
+  writeLoopRecord,
+} from './loop-record.mjs';
+import {
+  loopGoalMaxAttempts,
+  loopTasksFile,
+  markFirstTask,
+  readNextTask,
+  runLoop,
+  validateLoopStart,
+} from './loop.mjs';
 import { DEFAULT_MAX_RETRIES } from './model.mjs';
 import { createProvider, resolveProviderName } from './provider.mjs';
 import {
@@ -61,6 +78,14 @@ import { MAX_TOOL_TURNS } from './tool-loop.mjs';
  * @property {number|null} maxRepeatToolErrors
  * @property {number|null} requestTimeoutMs
  * @property {number} maxAttempts
+ * @property {string|null} tasksFile
+ * @property {number|null} goalMaxAttempts
+ * @property {number|null} retryBackoffMs
+ * @property {string[]} resetPaths
+ * @property {boolean|null} stopOnPark
+ * @property {number|null} maxLoopMs
+ * @property {number|null} maxLoopCost
+ * @property {number|null} maxTasks
  * @property {number} heartbeatMs
  * @property {number} incidentHeartbeatMs
  * @property {number} modelRetries
@@ -130,6 +155,11 @@ export async function main(argv) {
 
   if (args.command === 'goal') {
     await runGoalCommand(args);
+    return;
+  }
+
+  if (args.command === 'loop') {
+    await runLoopCommand(args);
     return;
   }
 
@@ -547,7 +577,25 @@ export function parseArgs(argv) {
     // null so KODR_REQUEST_TIMEOUT_MS still reaches the resolver when the flag
     // isn't passed (same reasoning as maxRepeatToolErrors above).
     requestTimeoutMs: null,
-    maxAttempts: DEFAULT_MAX_ATTEMPTS,
+    // null so KODR_GOAL_MAX_ATTEMPTS / KODR_LOOP_MAX_ATTEMPTS still reach
+    // goalMaxAttempts()/loopMaxAttempts() when the flag isn't passed -- both
+    // resolvers already fall through option -> env -> DEFAULT_MAX_ATTEMPTS
+    // themselves; a hardcoded number here would shadow the env var the same
+    // way a numeric default would for maxRepeatToolErrors above.
+    maxAttempts: null,
+    tasksFile: null,
+    // null (not a number) so KODR_LOOP_GOAL_MAX_ATTEMPTS / _RETRY_BACKOFF_MS /
+    // _MAX_MS / _MAX_COST / _MAX_TASKS still reach loop.mjs's resolvers when
+    // the flag isn't passed -- same reasoning as maxRepeatToolErrors above.
+    goalMaxAttempts: null,
+    retryBackoffMs: null,
+    resetPaths: [],
+    // null (not a boolean) so KODR_LOOP_STOP_ON_PARK still reaches
+    // loopStopOnPark's resolver when neither flag is passed.
+    stopOnPark: null,
+    maxLoopMs: null,
+    maxLoopCost: null,
+    maxTasks: null,
     heartbeatMs: DEFAULT_HEARTBEAT_MS,
     incidentHeartbeatMs: DEFAULT_INCIDENT_HEARTBEAT_MS,
     modelRetries: DEFAULT_MAX_RETRIES,
@@ -666,6 +714,51 @@ export function parseArgs(argv) {
     }
     if (arg === '--max-attempts' && argv[i + 1]) {
       args.maxAttempts = parseInt(argv[++i], 10);
+      i++;
+      continue;
+    }
+    if (arg === '--tasks' && argv[i + 1]) {
+      args.tasksFile = argv[++i];
+      i++;
+      continue;
+    }
+    if (arg === '--goal-max-attempts' && argv[i + 1]) {
+      args.goalMaxAttempts = parseInt(argv[++i], 10);
+      i++;
+      continue;
+    }
+    if (arg === '--retry-backoff-ms' && argv[i + 1]) {
+      args.retryBackoffMs = parseInt(argv[++i], 10);
+      i++;
+      continue;
+    }
+    if (arg === '--reset-paths' && argv[i + 1]) {
+      args.resetPaths.push(argv[++i]);
+      i++;
+      continue;
+    }
+    if (arg === '--stop-on-park') {
+      args.stopOnPark = true;
+      i++;
+      continue;
+    }
+    if (arg === '--no-stop-on-park') {
+      args.stopOnPark = false;
+      i++;
+      continue;
+    }
+    if (arg === '--max-loop-ms' && argv[i + 1]) {
+      args.maxLoopMs = parseInt(argv[++i], 10);
+      i++;
+      continue;
+    }
+    if (arg === '--max-loop-cost' && argv[i + 1]) {
+      args.maxLoopCost = Number.parseFloat(argv[++i]);
+      i++;
+      continue;
+    }
+    if (arg === '--max-tasks' && argv[i + 1]) {
+      args.maxTasks = parseInt(argv[++i], 10);
       i++;
       continue;
     }
@@ -819,6 +912,9 @@ export function parseArgs(argv) {
     // `kodr goal "<goal>"` — the goal text lands in args.prompt via the second
     // positional; goal reads it as the success criterion the judge assesses,
     // not a one-shot task prompt. Don't shorthand a bare `kodr goal` into a run.
+  } else if (args.command === 'loop') {
+    // `kodr loop` — no prompt; the checklist file (--tasks, default TASKS.md)
+    // supplies the tasks. Don't shorthand a bare `kodr loop` into a run.
   } else if (args.command === 'tui') {
     // `kodr tui ["prompt"]` — launch the interactive TUI; the prompt is
     // optional (typed into the input box otherwise), so don't shorthand a
@@ -848,6 +944,8 @@ Usage:
   kodr stats                      Aggregate rates (heal, retry, compaction, verify) across saved runs
   kodr replay <last|path>         Re-run a saved run's original prompt fresh, to check reproducibility
   kodr goal "<goal>"              Iterate run() until a model judge says the goal is met (specs/goal.yaml)
+  kodr loop                       Drive a checklist (--tasks, default TASKS.md) unattended: commit on
+                                  green, retry on red, revert-and-park on giving up (specs/loop.yaml)
   kodr acp                        Serve Kodr as an ACP agent over stdio for an editor (specs/acp.yaml)
 
 Options:
@@ -888,7 +986,26 @@ Options:
                                   so a stalled backend fails one request instead of hanging
                                   (default: 600000 = 10 min, or KODR_REQUEST_TIMEOUT_MS)
   --max-attempts <n>              For 'kodr goal': cap on build+judge iterations (default: 3,
-                                  or KODR_GOAL_MAX_ATTEMPTS)
+                                  or KODR_GOAL_MAX_ATTEMPTS). For 'kodr loop': outer retries per
+                                  plain task before parking (default: 3, or KODR_LOOP_MAX_ATTEMPTS)
+  --tasks <file>                  For 'kodr loop': the checklist (default: TASKS.md, or
+                                  KODR_LOOP_TASKS_FILE)
+  --goal-max-attempts <n>         For 'kodr loop': build+judge attempts per GOAL: item before
+                                  parking (default: 4, or KODR_LOOP_GOAL_MAX_ATTEMPTS)
+  --retry-backoff-ms <n>          For 'kodr loop': wait before retrying a plain task's attempt
+                                  that ended in a transient error (default: 5000, or
+                                  KODR_LOOP_RETRY_BACKOFF_MS; 0 disables)
+  --reset-paths <path>            For 'kodr loop': a gitignored path to wipe on park, alongside
+                                  git reset --hard (repeatable, or KODR_LOOP_RESET_PATHS)
+  --stop-on-park, --no-stop-on-park
+                                  For 'kodr loop': stop the whole loop when a task parks, rather
+                                  than carrying on (default: stop, or KODR_LOOP_STOP_ON_PARK)
+  --max-loop-ms <n>               For 'kodr loop': wall-clock ceiling for the whole loop, checked
+                                  between tasks (default: 0, disabled, or KODR_LOOP_MAX_MS)
+  --max-loop-cost <n>             For 'kodr loop': cumulative cost ceiling across the loop, checked
+                                  between tasks (default: 0, disabled, or KODR_LOOP_MAX_COST)
+  --max-tasks <n>                 For 'kodr loop': stop after this many tasks -- the cheap way to
+                                  smoke-test a checklist (default: 0, disabled, or KODR_LOOP_MAX_TASKS)
   --heartbeat-ms <n>              Stop-hook "still running" notice interval (or KODR_HEARTBEAT_MS; default: 30000, 0 disables)
   --incident-heartbeat-ms <n>     On-disk heartbeat interval for detecting a run that
                                   never exited cleanly (or KODR_INCIDENT_HEARTBEAT_MS;
@@ -943,6 +1060,7 @@ Examples:
   kodr "/compact" --continue last
   kodr replay last                                    # rerun the last run's own prompt fresh
   kodr goal "the /health route is documented and has a test" --test "node --test" --max-attempts 4
+  kodr loop --tasks TASKS.md --test "node --test"     # drive a checklist unattended
 `;
   process.stdout.write(`${help.trim()}\n`);
 }
@@ -1105,7 +1223,10 @@ export async function runGoalCommand(args) {
     process.exitCode = 1;
     return;
   }
-  if (!Number.isInteger(args.maxAttempts) || args.maxAttempts < 1) {
+  if (
+    args.maxAttempts !== null &&
+    (!Number.isInteger(args.maxAttempts) || args.maxAttempts < 1)
+  ) {
     process.stderr.write('--max-attempts must be a positive integer.\n');
     process.exitCode = 1;
     return;
@@ -1230,6 +1351,216 @@ export async function runGoalCommand(args) {
     if (args.json) {
       process.stdout.write(
         `${JSON.stringify({ met: false, reason: 'error', error: err.message })}\n`,
+      );
+    } else {
+      process.stderr.write(`Error: ${err.message}\n`);
+    }
+    if (!noFailEnabled(args)) {
+      process.exitCode = 1;
+    }
+  } finally {
+    process.removeListener('SIGINT', onSigint);
+  }
+}
+
+/**
+ * Process exit code for a loop run. A clean pause -- the backlog finished or
+ * a configured budget was hit -- exits 0; a park (the operator needs to look
+ * at something) or a failed git commit exits 1, since both need attention
+ * before a rerun would make progress.
+ * @param {import('./loop.mjs').LoopResult} result
+ * @param {CliArgs} args
+ * @returns {number}
+ */
+export function loopExitCode(result, args) {
+  if (noFailEnabled(args)) {
+    return 0;
+  }
+  if (result.reason === 'backlog-empty' || result.reason === 'budget') {
+    return 0;
+  }
+  return 1;
+}
+
+/**
+ * `kodr loop` — the ratchet examples/loop.sh and examples/phased-loop.sh
+ * already implement, promoted into the harness (specs/loop.yaml). Reads the
+ * checklist (--tasks, default TASKS.md), drives each item through run() (a
+ * plain line) or runGoal() (a `GOAL: ` line), commits on green, retries in
+ * place on red, and reverts-and-parks on giving up -- one task at a time,
+ * unattended, until the backlog is empty, a park stops it (the default), or
+ * a configured budget is hit.
+ * @param {CliArgs} args
+ */
+export async function runLoopCommand(args) {
+  const providerName = resolveProviderName(args.provider);
+  if (!['lmstudio', 'openrouter', 'ollama'].includes(providerName)) {
+    process.stderr.write(
+      `Unknown provider "${providerName}" -- must be one of: lmstudio, openrouter, ollama.\n`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const cwd = resolve(args.cwd || '.');
+  const tasksFile = resolve(cwd, loopTasksFile(args.tasksFile));
+  const quiet = args.quiet || args.json;
+  const reporter = quiet ? createNullReporter() : createTerminalReporter();
+
+  const precheck = await validateLoopStart({
+    isRepo: () => isGitRepo(cwd),
+    tasksFileExists: async () => existsSync(tasksFile),
+    hasCommits: () => hasCommits(cwd),
+    tasksFileTracked: () => isTracked(cwd, tasksFile),
+  });
+  if (!precheck.ok) {
+    process.stderr.write(`kodr loop: ${precheck.message}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  // .kodr/ is where run() and this loop's own record land, written *during*
+  // each attempt -- unignored, a green task would sweep a run transcript
+  // into its commit as history noise, and a parked task's would be deleted
+  // outright by the park's `git clean -fd` (specs/loop-scripts.yaml, bug 6).
+  const excludeResult = await registerExcludes(cwd, ['.kodr/']);
+  if (!excludeResult.ok) {
+    reporter.notice(
+      `kodr loop: failed to exclude .kodr/ from git (${excludeResult.error}) -- ` +
+        'a green commit may sweep in run transcripts, and a park may delete them',
+    );
+  }
+
+  const runOptions = {
+    cwd,
+    provider: args.provider,
+    baseUrl: args.baseUrl,
+    model: args.model,
+    reasoning: args.reasoning,
+    vision: visionEnabled(args),
+    noZdr: args.openrouterNoZdr,
+    allowDataCollection: args.openrouterAllowDataCollection,
+    providerOrder: args.openrouterProviderOnly,
+    testCommand: args.test,
+    maxHealTurns: args.healTurns,
+    maxRunMs: args.maxRunMs,
+    maxToolTurns: args.maxToolTurns,
+    maxRepeatToolErrors: args.maxRepeatToolErrors,
+    requestTimeoutMs: args.requestTimeoutMs,
+    heartbeatMs: args.heartbeatMs,
+    incidentHeartbeatMs: args.incidentHeartbeatMs,
+    maxRetries: args.modelRetries,
+    envPassthrough: args.env,
+    runsDir: args.runsDir,
+    noSave: args.noSave,
+    memory: args.memory,
+    memoryAutoApply: args.memoryAutoApply,
+    debug: args.debug,
+    quiet,
+  };
+  if (args.contextWindow !== null) {
+    runOptions.contextWindow = args.contextWindow;
+  }
+
+  // A dedicated read-only judge client for GOAL: items, same as `kodr goal`
+  // (specs/goal.yaml) -- one client amortized across every GOAL: item in the
+  // checklist rather than rebuilt per item.
+  let client;
+  let judgeModelId;
+  let judgeContextWindow;
+  try {
+    client = createProvider({
+      provider: args.provider,
+      baseUrl: args.baseUrl,
+      model: args.model,
+      timeout: resolveRequestTimeoutMs(args.requestTimeoutMs),
+      maxRetries: args.modelRetries,
+      reasoning: args.reasoning,
+      noZdr: args.openrouterNoZdr,
+      allowDataCollection: args.openrouterAllowDataCollection,
+      providerOrder: args.openrouterProviderOnly,
+    });
+    judgeModelId = await client.resolveModel();
+    judgeContextWindow = await resolveContextWindow({
+      option: args.contextWindow,
+      client,
+      modelId: judgeModelId,
+    });
+  } catch (err) {
+    process.stderr.write(`Error: ${err.message}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const recordPath = join(loopsDir(cwd), loopRecordFilename(new Date()));
+
+  const buildTask = (prompt, continuation) =>
+    run(prompt, {
+      ...runOptions,
+      priorMessages: continuation?.priorMessages,
+      priorFilesChanged: continuation?.priorFilesChanged,
+    });
+
+  const buildGoal = (goalText) =>
+    runGoal({
+      goal: goalText,
+      maxAttempts: loopGoalMaxAttempts(args.goalMaxAttempts),
+      reporter,
+      runTask: buildTask,
+      evaluate: (result) =>
+        evaluateGoal({
+          client,
+          modelId: judgeModelId,
+          cwd,
+          goal: goalText,
+          filesChanged: result.filesChanged || [],
+          maxRunMs: args.maxRunMs,
+          contextWindow: judgeContextWindow,
+          heartbeatMs: args.heartbeatMs,
+          envPassthrough: args.env,
+          reporter,
+        }),
+    });
+
+  const controller = new AbortController();
+  runOptions.signal = controller.signal;
+  const onSigint = createSigintCanceller(controller);
+  process.on('SIGINT', onSigint);
+  try {
+    const result = await runLoop({
+      checklist: {
+        nextTask: () => readNextTask(tasksFile),
+        markTask: (mark) => markFirstTask(tasksFile, mark),
+      },
+      buildTask,
+      buildGoal,
+      git: {
+        commitGreen: (message) => commitAll(cwd, message),
+        park: (resetPaths) => park(cwd, resetPaths),
+      },
+      resetPaths: args.resetPaths,
+      maxAttempts: args.maxAttempts,
+      retryBackoffMs: args.retryBackoffMs,
+      stopOnPark: args.stopOnPark,
+      maxLoopMs: args.maxLoopMs,
+      maxLoopCost: args.maxLoopCost,
+      maxTasks: args.maxTasks,
+      reporter,
+      recordPath,
+      onRecord: (record) => writeLoopRecord(recordPath, record),
+    });
+    if (args.json) {
+      process.stdout.write(`${JSON.stringify(result)}\n`);
+    } else {
+      process.stderr.write(
+        `kodr loop: ${result.reason} (green ${result.green}, parked ${result.parked})\n`,
+      );
+    }
+    process.exitCode = loopExitCode(result, args);
+  } catch (err) {
+    if (args.json) {
+      process.stdout.write(
+        `${JSON.stringify({ reason: 'error', error: err.message })}\n`,
       );
     } else {
       process.stderr.write(`Error: ${err.message}\n`);
