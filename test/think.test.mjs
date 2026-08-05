@@ -73,7 +73,8 @@ describe('splitThinking', () => {
   });
 
   it('returns empty visible and thinking for a non-string or empty input', () => {
-    for (const input of [undefined, null, 42, {}, '']) {
+    // Deliberately wrong types: the contract is that none of them throw.
+    for (const input of /** @type {any[]} */ ([undefined, null, 42, {}, ''])) {
       const split = splitThinking(input);
       assert.deepEqual(split, { visible: '', thinking: '' });
     }

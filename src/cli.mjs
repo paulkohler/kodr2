@@ -558,7 +558,7 @@ export function summarizeResult(result) {
  * @param {CliArgs} args
  * @param {string} cwd
  * @param {boolean} quiet
- * @returns {object}
+ * @returns {import('./harness.mjs').RunOptions}
  */
 export function buildRunOptions(args, cwd, quiet) {
   const runOptions = {
@@ -588,9 +588,6 @@ export function buildRunOptions(args, cwd, quiet) {
     reviewModel: args.reviewModel,
     reviewMinToolCalls: args.reviewMinToolCalls,
     reviewMaxToolTurns: args.reviewMaxToolTurns,
-    reviewProvider: args.reviewProvider,
-    reviewBaseUrl: args.reviewBaseUrl,
-    reviewSwap: args.reviewSwap,
     reviewProvider: args.reviewProvider,
     reviewBaseUrl: args.reviewBaseUrl,
     reviewSwap: args.reviewSwap,

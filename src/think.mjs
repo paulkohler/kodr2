@@ -175,7 +175,7 @@ export function splitThinking(text, options = {}) {
  * Split thinking out of a whole assistant message: the DeepSeek/vLLM
  * reasoning_content field, OpenRouter's reasoning field, and any inline think
  * block left in content.
- * @param {object} message
+ * @param {{ content?: string, reasoning?: string, reasoning_content?: string }} message
  * @param {{ thinkTags?: string[] }} [options]
  * @returns {SplitMessage}
  */

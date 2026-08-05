@@ -162,6 +162,14 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  *   (defaults to the build model's own contextWindow)
  * @param {number} [options.reviewMinToolCalls] - Tool-call floor before a review counts
  *   as grounded (default 2 — KODR_REVIEW_MIN_TOOL_CALLS; 0 disables the floor and its retry)
+ * @param {string} [options.reviewProvider] - Run the review model on a different
+ *   provider than the build (KODR_REVIEW_PROVIDER). Brings its own default base
+ *   URL -- the build's is not inherited.
+ * @param {string} [options.reviewBaseUrl] - Run the review model against a
+ *   different endpoint, e.g. a second LM Studio instance (KODR_REVIEW_BASE_URL)
+ * @param {boolean} [options.reviewSwap] - Load/unload models around the review
+ *   pass (default true, KODR_REVIEW_SWAP=0). Turn off alongside a review
+ *   endpoint so both models stay resident; see specs/review.yaml.
  * @param {number} [options.reviewMaxToolTurns] - Tool-turn ceiling per review attempt
  *   (default 12 — KODR_REVIEW_MAX_TOOL_TURNS)
  * @param {boolean} [options.rawThenFixCommits] - Commit the build phase's raw output as
@@ -1081,6 +1089,14 @@ export function reviewSkippedForIncompleteBuild(stoppedReason) {
  * @param {number} [params.minToolCalls]
  * @param {number} [params.maxToolTurns]
  * @param {import('./reporter.mjs').Reporter} [params.reporter]
+ * @param {string} [params.reviewProvider]
+ * @param {string} [params.reviewBaseUrl]
+ * @param {boolean} [params.reviewSwap]
+ * @param {string} [params.buildProvider]
+ * @param {string} [params.buildBaseUrl]
+ * @param {number} [params.timeout]
+ * @param {number} [params.maxRetries]
+ * @param {function} [params.createProviderFn]
  * @param {function} [params.ensureModelLoadedFn]
  * @param {function} [params.runReviewFn]
  */
@@ -1093,7 +1109,16 @@ export function reviewSkippedForIncompleteBuild(stoppedReason) {
  * Returns { error } rather than throwing, so a misconfigured endpoint skips
  * the review instead of failing a build that already succeeded.
  * @param {object} params
- * @returns {{ client?: object, error?: string }}
+ * @param {import('./provider.mjs').Provider} params.client
+ * @param {string} [params.reviewProvider]
+ * @param {string} [params.reviewBaseUrl]
+ * @param {string} [params.buildProvider]
+ * @param {string} [params.buildBaseUrl]
+ * @param {string} [params.reviewModel]
+ * @param {number} [params.timeout]
+ * @param {number} [params.maxRetries]
+ * @param {function} [params.createProviderFn]
+ * @returns {{ client?: import('./provider.mjs').Provider, error?: string }}
  */
 function resolveReviewClient(params) {
   const { client } = params;
@@ -1205,7 +1230,8 @@ export async function runReviewPass(params) {
 /**
  * One line naming what the reviewer decided and how much it looked at. The
  * verdict is the part an operator acts on, so it leads.
- * @param {import('./review.mjs').ReviewResult} review
+ * @param {{ verdict?: string, verdictFound?: boolean, grounded?: boolean,
+ *   toolTurns?: number }} review
  * @returns {string}
  */
 export function reviewNotice(review) {

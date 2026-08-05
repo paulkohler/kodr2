@@ -350,6 +350,7 @@ function addUsage(total, usage) {
  * @param {{ now: () => number, wait: (ms: number) => Promise<void> }} ctx.clock
  * @param {import('./reporter.mjs').Reporter} ctx.reporter
  * @param {(result: import('./harness.mjs').RunResult) => void} ctx.onAttempt
+ * @param {boolean} [ctx.failOnReview]
  * @returns {Promise<{ isGreen: boolean, attempts: number, result: import('./harness.mjs').RunResult|null, usage: { prompt: number, completion: number, cost: number } }>}
  */
 async function attemptTask(text, ctx) {
@@ -474,6 +475,8 @@ function goalWasCancelled(goalResult) {
  * @param {number} [params.maxAttempts]
  * @param {number} [params.retryBackoffMs]
  * @param {boolean} [params.stopOnPark]
+ * @param {boolean} [params.failOnReview] - A blocking review verdict stops a
+ *   task going green; the retry is prompted with the reviewer's findings
  * @param {number} [params.maxLoopMs]
  * @param {number} [params.maxLoopCost]
  * @param {number} [params.maxTasks]

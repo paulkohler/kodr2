@@ -240,7 +240,7 @@ export function parseReviewVerdict(text) {
  * (reviewGroundedRate in kodr stats) but treated as advisory: a small local
  * reviewer being lazy on a trivial diff should not park work that is fine,
  * and parking good work overnight is the expensive direction to fail in.
- * @param {ReviewResult|{ skipped: true }} [review]
+ * @param {ReviewResult} [review]
  * @returns {boolean}
  */
 export function reviewBlocks(review) {
@@ -308,6 +308,8 @@ function nudgeFor(attempt, minToolCalls) {
  * @property {{ prompt: number, completion: number, cost: number }} [usage]
  * @property {number} [retries]
  * @property {string} [error]
+ * @property {string} [reason] - Why a skipped review was skipped, on the paths
+ *   that know (e.g. the build never completed)
  */
 
 /**

@@ -559,26 +559,28 @@ describe('summarizeGoalResult', () => {
   });
 
   it("reports each verdict's source, defaulting an unlabelled one to the judge", () => {
-    const s = summarizeGoalResult({
-      verdicts: [
-        verdict({ met: false }),
-        verdict({ met: false, source: 'review' }),
-      ],
-    });
+    const s = summarizeGoalResult(
+      /** @type {any} */ ({
+        verdicts: [
+          verdict({ met: false }),
+          verdict({ met: false, source: 'review' }),
+        ],
+      }),
+    );
     assert.equal(s.verdicts[0].source, 'judge');
     assert.equal(s.verdicts[1].source, 'review');
   });
 });
 
 describe('withReviewGate', () => {
-  const blocked = {
+  const blocked = /** @type {any} */ ({
     review: {
       skipped: false,
       verdict: 'fail',
       grounded: true,
       findings: 'a.mjs imports a module that does not exist.',
     },
-  };
+  });
 
   it("short-circuits the judge with a not-met verdict when the build's review blocked", async () => {
     let judgeCalled = false;
@@ -610,7 +612,9 @@ describe('withReviewGate', () => {
   it('says so plainly when a blocked review produced no usable findings', async () => {
     const gated = withReviewGate(async () => verdict({ met: true }), true);
     const v = await gated(
-      { review: { skipped: false, verdict: 'fail', findings: '' } },
+      /** @type {any} */ ({
+        review: { skipped: false, verdict: 'fail', findings: '' },
+      }),
       1,
     );
     assert.match(v.feedback, /no usable findings/);
@@ -628,10 +632,11 @@ describe('withReviewGate', () => {
       return verdict({ met: true });
     }, true);
 
-    await gated({ review: { skipped: false, verdict: 'pass' } }, 1);
-    await gated({ review: { skipped: true } }, 1);
-    await gated({ review: { skipped: true, error: 'ECONNREFUSED' } }, 1);
-    await gated({}, 1);
+    const r = (review) => /** @type {any} */ ({ review });
+    await gated(r({ skipped: false, verdict: 'pass' }), 1);
+    await gated(r({ skipped: true }), 1);
+    await gated(r({ skipped: true, error: 'ECONNREFUSED' }), 1);
+    await gated(/** @type {any} */ ({}), 1);
     assert.equal(calls, 4);
   });
 });

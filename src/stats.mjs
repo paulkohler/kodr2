@@ -63,7 +63,7 @@ export async function loadRunRecords(runsDir) {
  * @property {number} [retries]
  * @property {boolean} [verified]
  * @property {{ skipped: boolean, passed?: boolean, grounded?: boolean,
- *   verdictFound?: boolean }|null} [review]
+ *   verdictFound?: boolean, reason?: string }|null} [review]
  * @property {number} [toolTurns]
  * @property {number} [durationMs]
  * @property {string[]} [filesChanged]

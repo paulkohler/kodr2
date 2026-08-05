@@ -505,9 +505,9 @@ describe('shouldFailProcess', () => {
     assert.equal(shouldFailProcess({ stoppedReason: 'cancelled' }), true);
   });
 
-  const failedReview = {
+  const failedReview = /** @type {import('../src/harness.mjs').RunResult} */ ({
     review: { skipped: false, verdict: 'fail', grounded: true },
-  };
+  });
 
   it('ignores a blocking review by default', () => {
     assert.equal(shouldFailProcess(failedReview), false);
@@ -520,7 +520,9 @@ describe('shouldFailProcess', () => {
   it('does not fail on a passing review when failOnReview is set', () => {
     assert.equal(
       shouldFailProcess(
-        { review: { skipped: false, verdict: 'pass', grounded: true } },
+        /** @type {any} */ ({
+          review: { skipped: false, verdict: 'pass', grounded: true },
+        }),
         { failOnReview: true },
       ),
       false,
@@ -530,12 +532,16 @@ describe('shouldFailProcess', () => {
   it('does not fail on a skipped review even when failOnReview is set', () => {
     // A reviewer that never ran, or crashed, must not fail the build.
     assert.equal(
-      shouldFailProcess({ review: { skipped: true } }, { failOnReview: true }),
+      shouldFailProcess(/** @type {any} */ ({ review: { skipped: true } }), {
+        failOnReview: true,
+      }),
       false,
     );
     assert.equal(
       shouldFailProcess(
-        { review: { skipped: true, error: 'ECONNREFUSED' } },
+        /** @type {any} */ ({
+          review: { skipped: true, error: 'ECONNREFUSED' },
+        }),
         { failOnReview: true },
       ),
       false,

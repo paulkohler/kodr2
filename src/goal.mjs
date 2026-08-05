@@ -460,9 +460,23 @@ function truncate(text, maxChars = 200) {
 }
 
 /**
+ * @typedef {object} GoalSummary
+ * @property {boolean} met
+ * @property {string} reason
+ * @property {number} attempts
+ * @property {{ prompt: number, completion: number, cost: number }} usage
+ * @property {number} retries
+ * @property {Array<{ met: boolean, grounded: boolean, source: string }>} verdicts
+ * @property {string|null} stoppedReason
+ * @property {boolean|null} verified
+ * @property {string[]} filesChanged
+ * @property {string} response
+ */
+
+/**
  * A compact, machine-readable summary of a goal loop for --json mode.
  * @param {GoalResult} result
- * @returns {object}
+ * @returns {GoalSummary}
  */
 export function summarizeGoalResult(result) {
   return {
