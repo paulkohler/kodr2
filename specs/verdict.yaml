@@ -1,0 +1,117 @@
+name: verdict
+status: proposed
+description: >
+  Parse a model's final reply into a pass/fail verdict. Two features need this
+  and they use different words for the same thing: the goal judge ends with
+  "VERDICT: MET" or "VERDICT: NOT MET" (specs/goal.yaml), the review pass with
+  "VERDICT: PASS" or "VERDICT: FAIL" (specs/review.yaml). One parser
+  parameterised by a label set, rather than a regex in each, because the parts
+  that matter -- ignore the chain-of-thought, prefer an anchored line, fail
+  closed -- are exactly what a second copy gets subtly wrong.
+
+  This replaces the regex that lived in goal.mjs, and fixes two live bugs in it
+  at the same time. It matched the first "VERDICT:" anywhere in the reply, so a
+  reasoning model that talked itself through both answers inside its <think>
+  block ("so the verdict: MET unless the tests are stubbed -- let me check")
+  scored a MET before it had finished reasoning. And a sentence describing the
+  format ("I will end with VERDICT: MET or VERDICT: NOT MET") scored whichever
+  the model happened to name first.
+
+approach: >
+  Everything runs on the visible reply only -- specs/think.yaml splits the
+  scratchpad off first. Then two tiers: an anchored pass looking for a verdict
+  on its own line, and, only when that finds nothing, the old unanchored
+  first-match-anywhere as a fallback. The fallback is deliberate back-compat:
+  a judge that writes "Verdict: MET." mid-paragraph parses today, and silently
+  turning those into not-met would raise the not-met rate and burn attempts on
+  a change that was supposed to be a bug fix.
+
+inputs:
+  text:
+    type: string
+    required: true
+    description: The model's final reply, chain-of-thought included
+  labels:
+    type: object
+    required: true
+    description: >
+      { pass, fail } wording for this caller -- GOAL_LABELS is
+      { pass "MET", fail "NOT MET" }, REVIEW_LABELS is { pass "PASS",
+      fail "FAIL" }
+  thinkTags:
+    type: array
+    required: false
+    description: Forwarded to splitThinking (KODR_THINK_TAGS)
+
+outputs:
+  passed:
+    type: boolean
+    description: True only for an unambiguous positive verdict
+  found:
+    type: boolean
+    description: >
+      Whether any verdict marker was parsed at all. Distinct from passed:
+      "the model never emitted a verdict line" and "the model said fail" are
+      different operational problems, and a caller that requires the line
+      needs to tell them apart to decide whether to re-ask.
+  ambiguous:
+    type: boolean
+    description: Two anchored verdict lines disagreed
+  feedback:
+    type: string
+    description: >
+      The visible reply with every verdict line removed, trimmed. Falls back
+      to the whole visible reply when stripping leaves nothing, so a caller
+      quoting this into a retry prompt always has something to quote.
+  thinking:
+    type: string
+    description: The chain-of-thought that was split off before parsing
+
+constraints:
+  - >
+      Fail-closed in every direction. A missing, garbled, truncated, or
+      self-contradicting marker parses as not passed. A verdict is permission
+      to commit or to stop a loop; a reply the parser cannot read must never
+      be that permission.
+  - >
+      The chain-of-thought is removed before anything is matched. This is the
+      whole reason the module exists as something other than a one-line regex.
+  - >
+      An anchored verdict line -- one on a line of its own -- beats a
+      mid-sentence mention. Tolerates a list bullet, a blockquote marker, bold
+      markers, and a trailing period, because models decorate.
+  - >
+      When there is no anchored line at all, an unanchored first match is
+      accepted. Back-compat with every reply today's goal judge parses.
+  - >
+      The label alternation puts the longer label first, so "NOT MET" wins
+      over the bare "MET" it contains, and allows flexible whitespace between
+      words so a wrapped reply still parses.
+  - Zero runtime dependencies. No ternaries in branch logic.
+
+tests:
+  unit:
+    - parseVerdict reads an anchored verdict line as passed
+    - parseVerdict reads an anchored negative verdict line as not passed
+    - parseVerdict reads the goal labels, MET and NOT MET
+    - parseVerdict prefers NOT MET over the bare MET when both could match
+    - parseVerdict ignores a verdict written inside a think block
+    - parseVerdict reports not found when the only verdict is inside an unterminated think block
+    - parseVerdict prefers an anchored verdict line over a mid-sentence mention
+    - parseVerdict falls back to an unanchored match when no anchored line exists
+    - parseVerdict returns found false and passed false when there is no verdict at all
+    - parseVerdict returns passed false for a garbled or truncated verdict marker
+    - parseVerdict returns passed false and ambiguous true when two anchored lines disagree
+    - parseVerdict tolerates a bullet, bold markers, or a trailing period around the verdict line
+    - parseVerdict strips every verdict line out of the feedback
+    - parseVerdict returns the whole visible reply as feedback when stripping leaves nothing
+    - parseVerdict returns the think-block contents as thinking, never as feedback
+    - parseVerdict treats a non-string input as an absent verdict
+
+deliverables:
+  - specs/verdict.yaml (this file)
+  - src/verdict.mjs -- parseVerdict, GOAL_LABELS, REVIEW_LABELS
+  - test/verdict.test.mjs
+  - >
+      goal.mjs's exported parseVerdict(text) refactored onto it, keeping its
+      { met, feedback } signature so its callers and tests are untouched

@@ -145,6 +145,7 @@ constraints:
 
 tests:
   unit:
+    - parseVerdict ignores a VERDICT the judge wrote inside a think block
     - parseVerdict reads "VERDICT: MET" as met
     - parseVerdict reads "VERDICT: NOT MET" as not met
     - parseVerdict treats a missing or garbled verdict as not met, never a false success

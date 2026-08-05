@@ -15,6 +15,10 @@ import { loadPrompt } from './prompts.mjs';
 import { createNullReporter } from './reporter.mjs';
 import { runToolLoop } from './tool-loop.mjs';
 import { createToolRegistry } from './tools/index.mjs';
+import {
+  GOAL_LABELS,
+  parseVerdict as parseLabelledVerdict,
+} from './verdict.mjs';
 
 const READ_ONLY_TOOLS = ['read_file', 'list_files', 'search'];
 
@@ -87,25 +91,15 @@ export function judgeMaxToolTurns(option) {
  * explicit `VERDICT: MET` or `VERDICT: NOT MET` line; a missing, garbled, or
  * truncated marker parses as not met, so a broken reply is never read as
  * success. Feedback is the reply text with the verdict line removed.
+ *
+ * The parsing itself lives in verdict.mjs, shared with the review pass -- this
+ * keeps the { met, feedback } shape the judge's callers expect.
  * @param {string} text
  * @returns {{ met: boolean, feedback: string }}
  */
 export function parseVerdict(text) {
-  const source = typeof text === 'string' ? text : '';
-  // "NOT MET" first in the alternation so it wins over the bare "MET".
-  const marker = /VERDICT:\s*(NOT\s+MET|MET)\b/i;
-  const match = source.match(marker);
-  let met = false;
-  if (match) {
-    met = /^MET$/i.test(match[1].trim());
-  }
-  const feedback = source
-    .replace(/VERDICT:\s*(NOT\s+MET|MET)\b.*$/im, '')
-    .trim();
-  if (feedback) {
-    return { met, feedback };
-  }
-  return { met, feedback: source.trim() };
+  const parsed = parseLabelledVerdict(text, GOAL_LABELS);
+  return { met: parsed.passed, feedback: parsed.feedback };
 }
 
 /**

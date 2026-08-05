@@ -284,6 +284,17 @@ describe('parseVerdict', () => {
     const v = parseVerdict('The route lacks a test.\nVERDICT: NOT MET');
     assert.equal(v.feedback, 'The route lacks a test.');
   });
+
+  it('ignores a VERDICT the judge wrote inside a think block', () => {
+    // A reasoning judge reaches for one answer mid-thought and lands on the
+    // other. Before verdict.mjs, the first marker anywhere in the text won.
+    const v = parseVerdict(
+      '<think>\nSo VERDICT: MET, unless the deals endpoint is missing.\n' +
+        'It is missing.\n</think>\nDeals are absent.\nVERDICT: NOT MET',
+    );
+    assert.equal(v.met, false);
+    assert.equal(v.feedback, 'Deals are absent.');
+  });
 });
 
 describe('goalMaxAttempts', () => {
