@@ -533,6 +533,65 @@ export function summarizeResult(result) {
 }
 
 /**
+ * The per-run options `kodr goal` and `kodr loop` hand to each run() they
+ * drive. Both had a byte-identical copy of this object, which is how the
+ * review pass came to be wired into `kodr run` alone: --review-model existed,
+ * was documented, and was silently inert on the two commands that stand to
+ * gain most from it. One definition, so the next option added reaches all of
+ * them.
+ *
+ * `kodr run`'s own options block stays separate -- it carries five fields
+ * these two have no use for (approveCommands, reporter, rawThenFixCommits,
+ * commitTimeoutMs, memoryAttended) -- but it is a strict superset, so anything
+ * added here belongs there too.
+ * @param {CliArgs} args
+ * @param {string} cwd
+ * @param {boolean} quiet
+ * @returns {object}
+ */
+export function buildRunOptions(args, cwd, quiet) {
+  const runOptions = {
+    cwd,
+    provider: args.provider,
+    baseUrl: args.baseUrl,
+    model: args.model,
+    reasoning: args.reasoning,
+    vision: visionEnabled(args),
+    noZdr: args.openrouterNoZdr,
+    allowDataCollection: args.openrouterAllowDataCollection,
+    providerOrder: args.openrouterProviderOnly,
+    testCommand: args.test,
+    maxHealTurns: args.healTurns,
+    maxRunMs: args.maxRunMs,
+    maxToolTurns: args.maxToolTurns,
+    maxRepeatToolErrors: args.maxRepeatToolErrors,
+    requestTimeoutMs: args.requestTimeoutMs,
+    heartbeatMs: args.heartbeatMs,
+    incidentHeartbeatMs: args.incidentHeartbeatMs,
+    maxRetries: args.modelRetries,
+    envPassthrough: args.env,
+    runsDir: args.runsDir,
+    noSave: args.noSave,
+    memory: args.memory,
+    memoryAutoApply: args.memoryAutoApply,
+    reviewModel: args.reviewModel,
+    reviewMinToolCalls: args.reviewMinToolCalls,
+    reviewMaxToolTurns: args.reviewMaxToolTurns,
+    debug: args.debug,
+    quiet,
+  };
+  // Omitted rather than passed as null, so an explicit 0 is distinguishable
+  // from "not set" downstream (see resolveContextWindow).
+  if (args.contextWindow !== null) {
+    runOptions.contextWindow = args.contextWindow;
+  }
+  if (args.reviewContextWindow !== null) {
+    runOptions.reviewContextWindow = args.reviewContextWindow;
+  }
+  return runOptions;
+}
+
+/**
  * @param {RunResult} result
  * @param {{ failOnReview?: boolean }} [options] - failOnReview makes a blocking
  *   review verdict fail the process too. Off by default: the review pass has
@@ -1272,36 +1331,7 @@ export async function runGoalCommand(args) {
 
   const cwd = resolve(args.cwd || '.');
   const quiet = args.quiet || args.json;
-  const runOptions = {
-    cwd,
-    provider: args.provider,
-    baseUrl: args.baseUrl,
-    model: args.model,
-    reasoning: args.reasoning,
-    vision: visionEnabled(args),
-    noZdr: args.openrouterNoZdr,
-    allowDataCollection: args.openrouterAllowDataCollection,
-    providerOrder: args.openrouterProviderOnly,
-    testCommand: args.test,
-    maxHealTurns: args.healTurns,
-    maxRunMs: args.maxRunMs,
-    maxToolTurns: args.maxToolTurns,
-    maxRepeatToolErrors: args.maxRepeatToolErrors,
-    requestTimeoutMs: args.requestTimeoutMs,
-    heartbeatMs: args.heartbeatMs,
-    incidentHeartbeatMs: args.incidentHeartbeatMs,
-    maxRetries: args.modelRetries,
-    envPassthrough: args.env,
-    runsDir: args.runsDir,
-    noSave: args.noSave,
-    memory: args.memory,
-    memoryAutoApply: args.memoryAutoApply,
-    debug: args.debug,
-    quiet,
-  };
-  if (args.contextWindow !== null) {
-    runOptions.contextWindow = args.contextWindow;
-  }
+  const runOptions = buildRunOptions(args, cwd, quiet);
 
   // A dedicated read-only client for the judge; the build's own client lives
   // inside run(). Same provider/model as the build in P0 -- cross-model judging
@@ -1461,36 +1491,7 @@ export async function runLoopCommand(args) {
     );
   }
 
-  const runOptions = {
-    cwd,
-    provider: args.provider,
-    baseUrl: args.baseUrl,
-    model: args.model,
-    reasoning: args.reasoning,
-    vision: visionEnabled(args),
-    noZdr: args.openrouterNoZdr,
-    allowDataCollection: args.openrouterAllowDataCollection,
-    providerOrder: args.openrouterProviderOnly,
-    testCommand: args.test,
-    maxHealTurns: args.healTurns,
-    maxRunMs: args.maxRunMs,
-    maxToolTurns: args.maxToolTurns,
-    maxRepeatToolErrors: args.maxRepeatToolErrors,
-    requestTimeoutMs: args.requestTimeoutMs,
-    heartbeatMs: args.heartbeatMs,
-    incidentHeartbeatMs: args.incidentHeartbeatMs,
-    maxRetries: args.modelRetries,
-    envPassthrough: args.env,
-    runsDir: args.runsDir,
-    noSave: args.noSave,
-    memory: args.memory,
-    memoryAutoApply: args.memoryAutoApply,
-    debug: args.debug,
-    quiet,
-  };
-  if (args.contextWindow !== null) {
-    runOptions.contextWindow = args.contextWindow;
-  }
+  const runOptions = buildRunOptions(args, cwd, quiet);
 
   // A dedicated read-only judge client for GOAL: items, same as `kodr goal`
   // (specs/goal.yaml) -- one client amortized across every GOAL: item in the

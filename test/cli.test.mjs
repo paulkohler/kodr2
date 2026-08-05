@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  buildRunOptions,
   createSigintCanceller,
   exitCodeFor,
   main,
@@ -600,5 +601,46 @@ describe('kodr models', () => {
     } finally {
       process.exitCode = originalExitCode;
     }
+  });
+});
+
+describe('buildRunOptions', () => {
+  // kodr goal and kodr loop each carried a byte-identical copy of this
+  // object, and both omitted every review option -- so --review-model was
+  // documented, accepted, and silently inert on both commands. These lock the
+  // shared builder's contract so a third copy can't quietly reappear.
+  it('passes the review options through to every run it drives', () => {
+    const args = parseArgs([
+      'loop',
+      '--review-model',
+      'microsoft/phi-4-reasoning-plus',
+      '--review-min-tool-calls',
+      '3',
+      '--review-max-tool-turns',
+      '9',
+      '--review-context-window',
+      '32768',
+    ]);
+    const options = buildRunOptions(args, '/tmp/ws', false);
+
+    assert.equal(options.reviewModel, 'microsoft/phi-4-reasoning-plus');
+    assert.equal(options.reviewMinToolCalls, 3);
+    assert.equal(options.reviewMaxToolTurns, 9);
+    assert.equal(options.reviewContextWindow, 32768);
+  });
+
+  it('omits contextWindow and reviewContextWindow when unset, rather than passing null', () => {
+    const options = buildRunOptions(parseArgs(['goal', 'x']), '/tmp/ws', false);
+    assert.equal('contextWindow' in options, false);
+    assert.equal('reviewContextWindow' in options, false);
+    // Still present, just carrying the null-sentinel through to the resolver.
+    assert.equal(options.reviewModel, null);
+    assert.equal(options.reviewMinToolCalls, null);
+  });
+
+  it('carries cwd and quiet through', () => {
+    const options = buildRunOptions(parseArgs(['goal', 'x']), '/tmp/ws', true);
+    assert.equal(options.cwd, '/tmp/ws');
+    assert.equal(options.quiet, true);
   });
 });

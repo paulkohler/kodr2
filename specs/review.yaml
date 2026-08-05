@@ -117,6 +117,13 @@ outputs:
 
 constraints:
   - >
+    The review pass runs on every command that drives run() -- kodr run, kodr
+    goal, and each task of a kodr loop -- not just kodr run. goal and loop
+    each carried their own byte-identical copy of the per-run options and
+    both omitted every review field, so --review-model was documented,
+    accepted, and silently inert on them. buildRunOptions in cli.mjs is now
+    the single definition those two share.
+  - >
     Gating is opt-in via --fail-on-review (KODR_FAIL_ON_REVIEW), off by
     default. A review FAIL is not a test failure: the reviewer cannot run
     anything, so the signal is "a second model's static read disagrees" --
@@ -217,6 +224,9 @@ constraints:
 
 tests:
   unit:
+    - buildRunOptions passes the review options through to every run it drives
+    - buildRunOptions omits contextWindow and reviewContextWindow when unset, rather than passing null
+    - buildRunOptions carries cwd and quiet through
     - shouldFailProcess ignores a blocking review by default
     - shouldFailProcess fails the CLI process on a blocking review when failOnReview is set
     - shouldFailProcess does not fail on a passing review when failOnReview is set
