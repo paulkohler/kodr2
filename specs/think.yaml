@@ -1,0 +1,135 @@
+name: think
+status: proposed
+description: >
+  Split a reasoning model's chain-of-thought out of its visible reply. Local
+  reasoning models (deepseek-r1, phi-4-reasoning-plus, qwen3 in thinking mode)
+  emit their scratchpad inline in the content field wrapped in <think> tags,
+  because LM Studio's OpenAI-compatible endpoint has no reasoning field to put
+  it in (see specs/provider.yaml). Hosted providers use a field instead:
+  OpenRouter streams delta.reasoning, while DeepSeek, vLLM, and LM Studio's own
+  reasoning parser use reasoning_content. Nothing in the harness handled any of
+  the three, so a thinking model's scratchpad flowed unfiltered into every
+  downstream consumer.
+
+  That is a correctness problem, not a cosmetic one. The verdict parsers in
+  specs/verdict.yaml scan a reply for a VERDICT marker; a judge that muses
+  "so the verdict: MET unless the tests are stubbed -- let me check" inside its
+  think block scores a MET before it has finished reasoning. The text-form tool
+  call recovery in specs/tool-recovery.mjs has the same shape of bug: a tool
+  call the model only contemplated reads as one it asked for.
+
+  This module is the single place that knows what a think block looks like.
+  It is pure string and object handling -- no I/O, no model, no config beyond
+  the tag list -- so every consumer can share one definition rather than each
+  growing its own regex.
+
+approach: >
+  Two functions, one for raw text and one for a whole assistant message, both
+  returning the visible part and the thinking part rather than discarding
+  either. Callers that only want the visible text ignore the second field;
+  callers that want to persist or display the reasoning have it. Nothing is
+  thrown away silently, which matters because a truncated reply's only content
+  may be an unterminated think block.
+
+inputs:
+  text:
+    type: string
+    required: true
+    description: A model reply, or any string that may contain think blocks
+  message:
+    type: object
+    required: true
+    description: >
+      An assistant message, possibly carrying reasoning_content (DeepSeek,
+      vLLM, LM Studio) or reasoning (OpenRouter) alongside content
+  thinkTags:
+    type: array
+    required: false
+    description: >
+      Tag names treated as chain-of-thought wrappers (default ["think",
+      "thinking"] -- KODR_THINK_TAGS, comma-separated). An operator meeting a
+      model with a novel wrapper adds it without a code change.
+
+outputs:
+  visible:
+    type: string
+    description: The reply with every think block removed, trimmed
+  thinking:
+    type: string
+    description: >
+      The removed chain-of-thought, blocks joined by a blank line. Empty
+      string when there was none -- never null, so callers can concatenate.
+  content:
+    type: string
+    description: splitMessageThinking's name for the visible part of a message
+constraints:
+  - >
+      Four input shapes, all handled: a balanced <think>...</think> block
+      (possibly repeated); an unterminated <think> with no closer, which is a
+      truncated reply and yields everything after the opener as thinking; a
+      stray closer with no opener, which is the common LM Studio case because
+      R1 and phi-4 chat templates pre-fill the opening tag into the prompt so
+      the model only ever emits </think>; and text with no tags at all, which
+      passes through unchanged.
+  - >
+      Tags match case-insensitively and tolerate whitespace inside the
+      brackets. Anchoring differs by position, and the asymmetry is deliberate.
+      The opener must start a line: this repo carries the literal strings
+      <think> and </think> in its own source, tests, and specs, and
+      prompts/review.md asks a reviewer to quote what it found, so a
+      mid-sentence mention must not open a block and swallow the rest of the
+      reply. Real models are unaffected, since a chat template emits the
+      opening tag at the very start of the turn. Once an opener has been found
+      the closer may sit anywhere, because the block is already bounded on the
+      left and the worst a stray mention can do is end it early. A stray closer
+      with no opener at all must end a line, since with nothing bounding it on
+      the left a mid-sentence mention would discard the entire reply before it.
+  - >
+      A tag quoted alone on its own line still splits. That is the residual
+      limitation of line anchoring and it is accepted rather than solved:
+      skipping fenced code blocks would mean parsing Markdown, and the failure
+      is visible (the reply loses text) rather than silent (a verdict flips).
+  - >
+      Never throws. A non-string input returns empty visible and empty
+      thinking rather than an error -- there is no failure mode worth a
+      returned { error }, and every caller is on a path where a throw would
+      lose a model reply that cost real time to produce.
+  - Zero runtime dependencies. No ternaries in branch logic.
+
+tests:
+  unit:
+    - splitThinking returns the text unchanged as visible when there is no think block
+    - splitThinking removes a balanced think block and returns its contents as thinking
+    - splitThinking handles several think blocks in one reply
+    - splitThinking treats an unterminated think tag as thinking to the end, leaving what preceded it visible
+    - splitThinking treats a stray closing tag with no opener as the end of a block the chat template opened
+    - splitThinking matches the tag case-insensitively and tolerates whitespace inside the brackets
+    - splitThinking leaves a mid-line think tag alone, so a reply quoting one does not corrupt its own split
+    - splitThinking recognises the thinking tag as well as think
+    - splitThinking returns empty visible and thinking for a non-string or empty input
+    - thinkTagNames resolves the option, then KODR_THINK_TAGS, then the default
+    - thinkTagNames ignores an empty option array and blank entries in the env var
+    - splitMessageThinking moves reasoning_content onto thinking and leaves content visible
+    - splitMessageThinking moves OpenRouter's reasoning field onto thinking
+    - splitMessageThinking combines a reasoning field and an inline block, the field first
+    - splitMessageThinking leaves a message with no thinking untouched
+    - splitMessageThinking tolerates a message with no content
+
+deliverables:
+  - specs/think.yaml (this file)
+  - src/think.mjs -- splitThinking, splitMessageThinking, thinkTagNames
+  - test/think.test.mjs
+
+future:
+  - >
+      Harmony-style framing (gpt-oss emits <|channel|>analysis<|message|>...)
+      is not handled -- those are not XML tags, so KODR_THINK_TAGS cannot reach
+      them. splitThinking is the right seam to add a second strategy behind if
+      that model matters later.
+  - >
+      Dropping reasoning from the outbound message array before it is replayed
+      to the provider (KODR_REPLAY_REASONING=0). Splitting the text out of
+      content does not shrink the request -- the same bytes go back on every
+      turn, just under a different field -- and for a long reasoning run that
+      prefill is real money. Deferred because it changes wire behaviour for
+      OpenRouter reasoning users too, not just local thinking models.
