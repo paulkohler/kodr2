@@ -274,9 +274,29 @@ async function runReviewAttempt(params) {
     findings: parsed.findings,
     verdict: parsed.verdict,
     verdictFound: parsed.verdictFound,
+    stoppedReason: loop.stoppedReason,
     toolTurns: loop.toolTurns,
     usage: loop.usage,
     retries: loop.retries || 0,
+  };
+}
+
+// A review that ran out of road produced no assessment, and "no assessment"
+// must never read as a failed one -- the same rule that keeps a crashed
+// reviewer from parking a task. Without this, a reviewer cut off by the run's
+// budget hands back empty text, which parses fail-closed into VERDICT: FAIL
+// and, under --fail-on-review, blocks a commit whose code was fine and whose
+// tests passed. Caught live: a reasoning model spent the run's whole remaining
+// budget thinking, and the build it had nothing to say about was failed.
+//
+// Usage is carried through even though nothing was decided -- those tokens
+// were really spent, and dropping them would understate the run's cost.
+function reviewCutOff(stoppedReason, usage, retries) {
+  return {
+    skipped: true,
+    reason: `review did not complete (stoppedReason: ${stoppedReason})`,
+    usage,
+    retries,
   };
 }
 
@@ -348,11 +368,16 @@ export async function runReview(params) {
     onHeartbeat,
     onDebug,
     envPassthrough = [],
-    // The review pass has always streamed its inner tool loop straight to the
-    // terminal, even under --quiet (runReview never forwarded quiet). Preserve
-    // that exactly: default to a terminal reporter so the streaming is
-    // unchanged, while runReviewPass's own notices honor the harness reporter.
-    reporter = createTerminalReporter(),
+    // The review pass has always streamed its inner tool loop to the terminal
+    // even under --quiet (runReview never forwarded quiet), and that stays
+    // true -- but it streams to stderr, not stdout. A terminal reporter sends
+    // model text to stdout, which under --json is the data channel: the review
+    // stream landed in front of the JSON document and made it unparseable.
+    // Caught live, dogfooding --review-model with --json.
+    reporter = createTerminalReporter({
+      stdout: process.stderr,
+      stderr: process.stderr,
+    }),
   } = params;
 
   if (filesChanged.length === 0) {
@@ -390,6 +415,12 @@ export async function runReview(params) {
   const totalUsage = { ...attempt.usage };
   let totalRetries = attempt.retries || 0;
 
+  if (attempt.stoppedReason !== 'complete') {
+    // No nudge retry here: whatever ran the first attempt out of budget or
+    // tool turns will do the same to a second, only slower.
+    return reviewCutOff(attempt.stoppedReason, totalUsage, totalRetries);
+  }
+
   const nudge = nudgeFor(attempt, minToolCalls);
   if (nudge) {
     attempt = await runReviewAttempt({
@@ -400,6 +431,9 @@ export async function runReview(params) {
     totalUsage.completion += attempt.usage.completion;
     totalUsage.cost += attempt.usage.cost || 0;
     totalRetries += attempt.retries || 0;
+    if (attempt.stoppedReason !== 'complete') {
+      return reviewCutOff(attempt.stoppedReason, totalUsage, totalRetries);
+    }
   }
 
   return {

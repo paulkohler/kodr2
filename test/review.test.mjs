@@ -595,6 +595,77 @@ describe('the review verdict', () => {
   });
 });
 
+describe('a review that was cut off', () => {
+  // Caught live: a reasoning model spent the run's whole remaining budget
+  // thinking, the tool loop stopped with budget-exceeded and empty text, and
+  // the fail-closed parse turned that into VERDICT: FAIL -- failing a build
+  // whose tests had passed. "No assessment" must never read as a failed one.
+  it('is skipped, not failed, when the tool loop runs out of budget', async () => {
+    await writeFile(join(tmpDir, 'a.mjs'), 'x');
+    // The scripted client repeats its last response forever, so the reviewer
+    // never stops calling tools and the loop ends on its ceiling rather than
+    // on an answer -- leaving finalText empty, exactly as a budget-exceeded
+    // review does.
+    const client = scriptedClient([
+      toolCallTurn('read_file', { path: 'a.mjs' }),
+    ]);
+    const result = await runReview({
+      reporter: silentReporter,
+      client,
+      modelId: 'reviewer',
+      cwd: tmpDir,
+      filesChanged: ['a.mjs'],
+      minToolCalls: 0,
+      maxToolTurns: 1,
+    });
+
+    assert.equal(result.skipped, true);
+    assert.match(result.reason, /did not complete/);
+    // The fields a gate reads must be absent, not false.
+    assert.equal(result.verdict, undefined);
+    assert.equal(result.passed, undefined);
+    assert.equal(result.verdictFound, undefined);
+    assert.equal(reviewBlocks(result), false);
+  });
+
+  it('still reports the tokens a cut-off review really spent', async () => {
+    await writeFile(join(tmpDir, 'a.mjs'), 'x');
+    const client = scriptedClient([
+      toolCallTurn('read_file', { path: 'a.mjs' }),
+    ]);
+    const result = await runReview({
+      reporter: silentReporter,
+      client,
+      modelId: 'reviewer',
+      cwd: tmpDir,
+      filesChanged: ['a.mjs'],
+      minToolCalls: 0,
+      maxToolTurns: 1,
+    });
+    assert.equal(result.skipped, true);
+    assert.ok(result.usage.prompt > 0, 'usage must survive a cut-off review');
+  });
+
+  it('does not spend a nudge retry on an attempt that was cut off', async () => {
+    await writeFile(join(tmpDir, 'a.mjs'), 'x');
+    const client = scriptedClient([
+      toolCallTurn('read_file', { path: 'a.mjs' }),
+    ]);
+    await runReview({
+      reporter: silentReporter,
+      client,
+      modelId: 'reviewer',
+      cwd: tmpDir,
+      filesChanged: ['a.mjs'],
+      minToolCalls: 5,
+      maxToolTurns: 1,
+    });
+    // Exactly one attempt's worth of calls: whatever exhausted the first
+    // attempt would exhaust a second, only slower.
+    assert.equal(client.calls.length, 1);
+  });
+});
+
 describe('reviewBlocks', () => {
   it('is false for an absent review, a skipped review, and one skipped for an incomplete build', () => {
     assert.equal(reviewBlocks(undefined), false);

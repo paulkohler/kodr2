@@ -174,6 +174,21 @@ constraints:
     expensive direction to fail in. Revisit if reviewGroundedRate says
     otherwise.
   - >
+    A review whose tool loop did not reach stoppedReason "complete" -- budget
+    exceeded, tool-turn ceiling, cancelled -- is skipped, not failed, and no
+    nudge retry is spent on it (whatever exhausted the first attempt will
+    exhaust a second, only slower). Its usage is still reported, since those
+    tokens were really spent. Found live: a reasoning model spent the run's
+    entire remaining budget thinking, the loop returned empty text, and the
+    fail-closed parse turned that into VERDICT: FAIL -- failing a build whose
+    tests had passed. Fail-closed is right for a reply that was produced and
+    cannot be parsed; it is wrong for a reply that was never produced.
+  - >
+    runReview's default reporter streams to stderr, not stdout. It streams
+    even under --quiet, which is deliberate and unchanged, but stdout is the
+    data channel under --json and the review stream landed in front of the
+    JSON document and made it unparseable.
+  - >
     A skipped review returns exactly { skipped: true } (plus reason or error
     on the paths that have one) and gains no verdict, verdictFound, or passed
     field. undefined is not false, and no gate decision may be derived from an
@@ -271,6 +286,9 @@ tests:
     - the review system prompt requires a trailing VERDICT: PASS or VERDICT: FAIL line
     - reviewBlocks is false for an absent review, a skipped review, and one skipped for an incomplete build
     - reviewBlocks is false for a review that crashed
+    - a cut-off review is skipped, not failed, when the tool loop runs out of budget
+    - a cut-off review still reports the tokens it really spent
+    - no nudge retry is spent on an attempt that was cut off
     - reviewBlocks is true for a fail verdict
     - reviewBlocks is false for an ungrounded pass, which is advisory
     - parseReviewVerdict reports verdict fail with verdictFound false when no verdict line exists
