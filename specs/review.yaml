@@ -124,6 +124,27 @@ constraints:
     accepted, and silently inert on them. buildRunOptions in cli.mjs is now
     the single definition those two share.
   - >
+    The reviewer can live on its own endpoint -- --review-base-url for a
+    second instance of the same provider, --review-provider for a different
+    one entirely -- in which case it gets its own client instead of borrowing
+    the build's. A review provider brings its own default base URL; carrying
+    the build's over would point, say, Ollama at LM Studio's port.
+  - >
+    Model swapping is a boolean, on by default (--no-review-swap,
+    KODR_REVIEW_SWAP=0). On one LM Studio serving both roles the swap is
+    required -- the reviewer cannot run until it is loaded, and Kodr owning
+    that sequencing is the point of specs/lms.yaml. It is also expensive:
+    ensureModelLoaded unloads everything first and run() reloads the build
+    model on the next attempt, so a review costs two full model loads per
+    attempt, which over a checklist at several attempts each dominates the
+    run. Turning it off alongside a review endpoint keeps both models
+    resident and removes that cost entirely. When off, the build-model reload
+    at the top of run() is skipped too -- the model never left.
+  - >
+    A review client that cannot be constructed skips the review with an error
+    rather than failing a build that already succeeded, same as every other
+    review failure path.
+  - >
     Gating is opt-in via --fail-on-review (KODR_FAIL_ON_REVIEW), off by
     default. A review FAIL is not a test failure: the reviewer cannot run
     anything, so the signal is "a second model's static read disagrees" --
@@ -224,6 +245,14 @@ constraints:
 
 tests:
   unit:
+    - reviewSwapEnabled is on by default, honours an explicit false over the env var, and is off when KODR_REVIEW_SWAP is 0
+    - reviewEndpoint reuses the build provider and base URL when neither is overridden
+    - reviewEndpoint moves the build provider to a different endpoint when only a base URL is given
+    - reviewEndpoint does not carry the build base URL onto a different provider
+    - runReviewPass skips the model-load step when the swap is turned off
+    - runReviewPass gives the reviewer its own client when a review base URL is configured
+    - runReviewPass reuses the build client when no review endpoint is configured
+    - runReviewPass skips the review rather than failing the build when the review client cannot be built
     - buildRunOptions passes the review options through to every run it drives
     - buildRunOptions omits contextWindow and reviewContextWindow when unset, rather than passing null
     - buildRunOptions carries cwd and quiet through

@@ -92,6 +92,9 @@ import { MAX_TOOL_TURNS } from './tool-loop.mjs';
  * @property {number|null} reviewMinToolCalls
  * @property {number|null} reviewMaxToolTurns
  * @property {boolean} failOnReview
+ * @property {string|null} reviewProvider
+ * @property {string|null} reviewBaseUrl
+ * @property {boolean} reviewSwap
  * @property {boolean} quiet
  * @property {string[]} env
  * @property {string|null} continue
@@ -312,6 +315,9 @@ export async function main(argv) {
     reviewModel: args.reviewModel,
     reviewMinToolCalls: args.reviewMinToolCalls,
     reviewMaxToolTurns: args.reviewMaxToolTurns,
+    reviewProvider: args.reviewProvider,
+    reviewBaseUrl: args.reviewBaseUrl,
+    reviewSwap: args.reviewSwap,
     quiet: args.quiet || args.json,
     // --events streams the run as NDJSON on stdout (specs/reporter.yaml); left
     // undefined otherwise so the harness picks the terminal/null reporter.
@@ -577,6 +583,12 @@ export function buildRunOptions(args, cwd, quiet) {
     reviewModel: args.reviewModel,
     reviewMinToolCalls: args.reviewMinToolCalls,
     reviewMaxToolTurns: args.reviewMaxToolTurns,
+    reviewProvider: args.reviewProvider,
+    reviewBaseUrl: args.reviewBaseUrl,
+    reviewSwap: args.reviewSwap,
+    reviewProvider: args.reviewProvider,
+    reviewBaseUrl: args.reviewBaseUrl,
+    reviewSwap: args.reviewSwap,
     debug: args.debug,
     quiet,
   };
@@ -684,6 +696,12 @@ export function parseArgs(argv) {
     // must become null the day a --no-fail-on-review exists, since false
     // would then have to mean "explicitly off, beat the env var".
     failOnReview: false,
+    reviewProvider: null,
+    reviewBaseUrl: null,
+    // true, matching reviewSwapEnabled's default. --no-review-swap sets it
+    // false explicitly, and the resolver treats an explicit false as beating
+    // KODR_REVIEW_SWAP, which is what a paired-negation flag has to mean.
+    reviewSwap: true,
     quiet: false,
     env: [],
     continue: null,
@@ -884,6 +902,26 @@ export function parseArgs(argv) {
     }
     if (arg === '--fail-on-review') {
       args.failOnReview = true;
+      i++;
+      continue;
+    }
+    if (arg === '--review-provider' && argv[i + 1]) {
+      args.reviewProvider = argv[++i];
+      i++;
+      continue;
+    }
+    if (arg === '--review-base-url' && argv[i + 1]) {
+      args.reviewBaseUrl = argv[++i];
+      i++;
+      continue;
+    }
+    if (arg === '--review-swap') {
+      args.reviewSwap = true;
+      i++;
+      continue;
+    }
+    if (arg === '--no-review-swap') {
+      args.reviewSwap = false;
       i++;
       continue;
     }
@@ -1106,6 +1144,14 @@ Options:
   --review-min-tool-calls <n>     Tool-call floor before a review counts as grounded (or
                                   KODR_REVIEW_MIN_TOOL_CALLS; default: 2, 0 disables the floor)
   --review-max-tool-turns <n>     Tool-turn ceiling per review attempt (or KODR_REVIEW_MAX_TOOL_TURNS; default: 12)
+  --review-provider <name>        Run the review model on a different provider than the build
+                                  (or KODR_REVIEW_PROVIDER). Implies its own base URL.
+  --review-base-url <url>         Run the review model against a different endpoint, e.g. a
+                                  second LM Studio instance (or KODR_REVIEW_BASE_URL).
+  --no-review-swap                Don't load/unload models around the review pass (or
+                                  KODR_REVIEW_SWAP=0). Use with --review-base-url or
+                                  --review-provider so both models stay resident: the swap
+                                  otherwise costs two full model loads per attempt.
   --fail-on-review                Treat a review FAIL verdict as a failure: exit non-zero
                                   (or KODR_FAIL_ON_REVIEW). Off by default -- a review is
                                   advisory unless you ask for it to be a gate, and a second

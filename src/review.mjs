@@ -123,6 +123,70 @@ export function failOnReviewEnabled(option) {
 }
 
 /**
+ * Whether Kodr should swap models on the local backend around the review
+ * pass. On by default: with one LM Studio serving both roles, the reviewer
+ * cannot run until it is loaded, and Kodr owning that sequencing is the whole
+ * point of specs/lms.yaml.
+ *
+ * Turn it off when the reviewer lives somewhere the build model isn't
+ * competing with it -- a second LM Studio port, Ollama, OpenRouter. The swap
+ * costs two full model loads per attempt (ensureModelLoaded unloads
+ * everything first, and run() reloads the build model on the next attempt),
+ * which over a checklist of tasks at several attempts each is the dominant
+ * cost of the run.
+ * @param {boolean} [option]
+ * @returns {boolean}
+ */
+export function reviewSwapEnabled(option) {
+  if (option === true) {
+    return true;
+  }
+  if (option === false) {
+    return false;
+  }
+  const fromEnv = process.env.KODR_REVIEW_SWAP;
+  if (fromEnv === '0' || fromEnv === 'false') {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Provider name for the review pass, or null to reuse the build's.
+ * @param {string} [option]
+ * @returns {string|null}
+ */
+export function reviewProviderName(option) {
+  return option || process.env.KODR_REVIEW_PROVIDER || null;
+}
+
+/**
+ * Base URL for the review pass, or null to reuse the build's.
+ * @param {string} [option]
+ * @returns {string|null}
+ */
+export function reviewBaseUrlFor(option) {
+  return option || process.env.KODR_REVIEW_BASE_URL || null;
+}
+
+/**
+ * Where the review pass should send its requests. A review provider brings
+ * its own default base URL -- carrying the build's over would point, say,
+ * Ollama at LM Studio's port -- while a review base URL alone just moves the
+ * build's provider to a different endpoint.
+ * @param {{ reviewProvider?: string, reviewBaseUrl?: string,
+ *   buildProvider?: string, buildBaseUrl?: string }} params
+ * @returns {{ provider: string|undefined, baseUrl: string|undefined }}
+ */
+export function reviewEndpoint(params) {
+  const { reviewProvider, reviewBaseUrl, buildProvider, buildBaseUrl } = params;
+  if (reviewProvider) {
+    return { provider: reviewProvider, baseUrl: reviewBaseUrl };
+  }
+  return { provider: buildProvider, baseUrl: reviewBaseUrl || buildBaseUrl };
+}
+
+/**
  * Parse a reviewer's reply into a verdict and the findings text. The reviewer
  * must end with an explicit `VERDICT: PASS` or `VERDICT: FAIL` line; a
  * missing, garbled, contradictory, or think-block-only verdict parses as fail,

@@ -13,7 +13,9 @@ import {
   parseReviewVerdict,
   reviewBlocks,
   reviewDiffTimeoutMs,
+  reviewEndpoint,
   reviewMaxToolTurns,
+  reviewSwapEnabled,
   runReview,
 } from '../src/review.mjs';
 
@@ -692,6 +694,86 @@ describe('reviewNotice', () => {
     assert.match(
       reviewNotice({ verdict: 'pass', verdictFound: true, grounded: false }),
       /ungrounded/,
+    );
+  });
+});
+
+describe('reviewSwapEnabled', () => {
+  const envKey = 'KODR_REVIEW_SWAP';
+  let original;
+  beforeEach(() => {
+    original = process.env[envKey];
+  });
+  afterEach(() => {
+    if (original === undefined) {
+      delete process.env[envKey];
+    } else {
+      process.env[envKey] = original;
+    }
+  });
+
+  it('is on by default', () => {
+    delete process.env[envKey];
+    assert.equal(reviewSwapEnabled(undefined), true);
+  });
+
+  it('honours an explicit false over KODR_REVIEW_SWAP', () => {
+    process.env[envKey] = '1';
+    assert.equal(reviewSwapEnabled(false), false);
+  });
+
+  it('is off when KODR_REVIEW_SWAP is 0 or false', () => {
+    process.env[envKey] = '0';
+    assert.equal(reviewSwapEnabled(undefined), false);
+    process.env[envKey] = 'false';
+    assert.equal(reviewSwapEnabled(undefined), false);
+  });
+});
+
+describe('reviewEndpoint', () => {
+  it('reuses the build provider and base URL when neither is overridden', () => {
+    assert.deepEqual(
+      reviewEndpoint({
+        buildProvider: 'lmstudio',
+        buildBaseUrl: 'http://localhost:1234/v1',
+      }),
+      { provider: 'lmstudio', baseUrl: 'http://localhost:1234/v1' },
+    );
+  });
+
+  it('moves the build provider to a different endpoint when only a base URL is given', () => {
+    assert.deepEqual(
+      reviewEndpoint({
+        reviewBaseUrl: 'http://localhost:1235/v1',
+        buildProvider: 'lmstudio',
+        buildBaseUrl: 'http://localhost:1234/v1',
+      }),
+      { provider: 'lmstudio', baseUrl: 'http://localhost:1235/v1' },
+    );
+  });
+
+  it('does not carry the build base URL onto a different provider', () => {
+    // Carrying it would point ollama at LM Studio's port. Undefined lets
+    // createProvider apply the new provider's own default.
+    assert.deepEqual(
+      reviewEndpoint({
+        reviewProvider: 'ollama',
+        buildProvider: 'lmstudio',
+        buildBaseUrl: 'http://localhost:1234/v1',
+      }),
+      { provider: 'ollama', baseUrl: undefined },
+    );
+  });
+
+  it('uses both when both are given', () => {
+    assert.deepEqual(
+      reviewEndpoint({
+        reviewProvider: 'ollama',
+        reviewBaseUrl: 'https://ollama.com/v1',
+        buildProvider: 'lmstudio',
+        buildBaseUrl: 'http://localhost:1234/v1',
+      }),
+      { provider: 'ollama', baseUrl: 'https://ollama.com/v1' },
     );
   });
 });

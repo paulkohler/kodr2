@@ -47,7 +47,11 @@ import { DEFAULT_OLLAMA_BASE_URL } from './provider-ollama.mjs';
 import { DEFAULT_OPENROUTER_BASE_URL } from './provider-openrouter.mjs';
 import {
   minReviewToolCalls,
+  reviewBaseUrlFor,
+  reviewEndpoint,
+  reviewProviderName,
   reviewMaxToolTurns,
+  reviewSwapEnabled,
   runReview,
 } from './review.mjs';
 import {
@@ -276,7 +280,14 @@ export async function run(prompt, options) {
     // unchanged. A provider with no model-lifecycle concept (e.g.
     // OpenRouter, where the model is just a per-request field) skips this
     // too -- there's nothing to load.
-    if (options.reviewModel && client.capabilities.modelLifecycle) {
+    // Skipped when the swap is off: with the reviewer on its own endpoint the
+    // build model never left, and reloading it every run is exactly the cost
+    // --no-review-swap exists to remove.
+    if (
+      options.reviewModel &&
+      reviewSwapEnabled(options.reviewSwap) &&
+      client.capabilities.modelLifecycle
+    ) {
       const loadResult = await client.loadModel({
         model: modelId,
         contextWindow,
@@ -635,6 +646,13 @@ export async function run(prompt, options) {
         client,
         reviewModel: options.reviewModel,
         reviewContextWindow: options.reviewContextWindow,
+        reviewProvider: options.reviewProvider,
+        reviewBaseUrl: options.reviewBaseUrl,
+        reviewSwap: options.reviewSwap,
+        buildProvider: options.provider,
+        buildBaseUrl: options.baseUrl,
+        timeout: resolveRequestTimeoutMs(options.requestTimeoutMs),
+        maxRetries: options.maxRetries,
         buildContextWindow: contextWindow,
         filesChanged: tools.filesChanged(),
         startedAt,
@@ -1066,6 +1084,46 @@ export function reviewSkippedForIncompleteBuild(stoppedReason) {
  * @param {function} [params.ensureModelLoadedFn]
  * @param {function} [params.runReviewFn]
  */
+/**
+ * The client the review pass talks to. Reuses the build's unless a review
+ * provider or base URL was configured, in which case the reviewer gets its
+ * own -- which is what lets both models stay resident instead of trading
+ * places on one backend twice per attempt.
+ *
+ * Returns { error } rather than throwing, so a misconfigured endpoint skips
+ * the review instead of failing a build that already succeeded.
+ * @param {object} params
+ * @returns {{ client?: object, error?: string }}
+ */
+function resolveReviewClient(params) {
+  const { client } = params;
+  const reviewProvider = reviewProviderName(params.reviewProvider);
+  const reviewBaseUrl = reviewBaseUrlFor(params.reviewBaseUrl);
+  if (!reviewProvider && !reviewBaseUrl) {
+    return { client };
+  }
+  const endpoint = reviewEndpoint({
+    reviewProvider,
+    reviewBaseUrl,
+    buildProvider: params.buildProvider,
+    buildBaseUrl: params.buildBaseUrl,
+  });
+  try {
+    const createProviderFn = params.createProviderFn || createProvider;
+    return {
+      client: createProviderFn({
+        provider: endpoint.provider,
+        baseUrl: endpoint.baseUrl,
+        model: params.reviewModel,
+        timeout: params.timeout,
+        maxRetries: params.maxRetries,
+      }),
+    };
+  } catch (err) {
+    return { error: `review client: ${err.message}` };
+  }
+}
+
 export async function runReviewPass(params) {
   const {
     cwd,
@@ -1086,6 +1144,7 @@ export async function runReviewPass(params) {
     ensureModelLoadedFn = ensureModelLoaded,
     runReviewFn = runReview,
   } = params;
+  const swap = reviewSwapEnabled(params.reviewSwap);
   // reviewContextWindow is explicitly "unset" only when it's null/undefined
   // -- 0 is a legitimate value (this repo's own "0 disables" convention),
   // and `|| buildContextWindow` would otherwise silently override it.
@@ -1094,10 +1153,19 @@ export async function runReviewPass(params) {
     : buildContextWindow;
 
   try {
-    // A provider with no model-lifecycle concept (e.g. OpenRouter) needs no
-    // load step -- the review model is just a different value in the chat
-    // request's `model` field, not something that has to be loaded first.
-    if (client.capabilities.modelLifecycle) {
+    const resolved = resolveReviewClient(params);
+    if (resolved.error) {
+      reporter.notice(`review skipped: ${resolved.error}`);
+      return { skipped: true, error: resolved.error };
+    }
+    const reviewClient = resolved.client;
+
+    // Three ways this load is unnecessary. The provider may have no
+    // model-lifecycle concept at all (OpenRouter: the model is just a
+    // per-request field). The reviewer may live on its own endpoint, where
+    // both models stay resident and swapping would unload the wrong backend's
+    // model. Or the operator may have said not to (--no-review-swap).
+    if (swap && reviewClient.capabilities.modelLifecycle) {
       const loadResult = await ensureModelLoadedFn({
         model: reviewModel,
         contextWindow,
@@ -1109,7 +1177,7 @@ export async function runReviewPass(params) {
     }
 
     const reviewResult = await runReviewFn({
-      client,
+      client: reviewClient,
       modelId: reviewModel,
       cwd,
       filesChanged,

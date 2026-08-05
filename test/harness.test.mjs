@@ -993,6 +993,110 @@ describe('review pass wiring', () => {
       capabilities: { modelLifecycle: true },
     });
 
+  it('skips the model-load step when the swap is turned off', async () => {
+    // The point of --no-review-swap: with the reviewer on its own endpoint,
+    // both models stay resident and swapping would unload the wrong one.
+    let loadCalled = false;
+    const result = await runReviewPass({
+      cwd: '/tmp',
+      client: modelLifecycleClient,
+      reviewModel: 'reviewer',
+      reviewSwap: false,
+      buildContextWindow: 8192,
+      startedAt: new Date(),
+      maxRunMs: 60000,
+      filesChanged: ['a.mjs'],
+      ensureModelLoadedFn: async () => {
+        loadCalled = true;
+        return { model: { identifier: 'reviewer' } };
+      },
+      runReviewFn: async () => ({ grounded: true }),
+    });
+
+    assert.equal(loadCalled, false);
+    assert.deepEqual(result, { grounded: true });
+  });
+
+  it('gives the reviewer its own client when a review base URL is configured', async () => {
+    let createdWith;
+    let reviewClient;
+    const secondEndpoint = /** @type {any} */ ({
+      capabilities: { modelLifecycle: false },
+    });
+    await runReviewPass({
+      cwd: '/tmp',
+      client: modelLifecycleClient,
+      reviewModel: 'reviewer',
+      reviewBaseUrl: 'http://localhost:1235/v1',
+      buildProvider: 'lmstudio',
+      buildBaseUrl: 'http://localhost:1234/v1',
+      buildContextWindow: 8192,
+      startedAt: new Date(),
+      maxRunMs: 60000,
+      filesChanged: ['a.mjs'],
+      createProviderFn: (opts) => {
+        createdWith = opts;
+        return secondEndpoint;
+      },
+      ensureModelLoadedFn: async () => ({ model: {} }),
+      runReviewFn: async (params) => {
+        reviewClient = params.client;
+        return { grounded: true };
+      },
+    });
+
+    assert.equal(createdWith.baseUrl, 'http://localhost:1235/v1');
+    assert.equal(createdWith.provider, 'lmstudio');
+    assert.equal(createdWith.model, 'reviewer');
+    // The review runs against the second endpoint, not the build's client.
+    assert.equal(reviewClient, secondEndpoint);
+  });
+
+  it('reuses the build client when no review endpoint is configured', async () => {
+    let reviewClient;
+    await runReviewPass({
+      cwd: '/tmp',
+      client: modelLifecycleClient,
+      reviewModel: 'reviewer',
+      buildContextWindow: 8192,
+      startedAt: new Date(),
+      maxRunMs: 60000,
+      filesChanged: ['a.mjs'],
+      createProviderFn: () => {
+        throw new Error('should not build a second client');
+      },
+      ensureModelLoadedFn: async () => ({ model: {} }),
+      runReviewFn: async (params) => {
+        reviewClient = params.client;
+        return { grounded: true };
+      },
+    });
+    assert.equal(reviewClient, modelLifecycleClient);
+  });
+
+  it('skips the review rather than failing the build when the review client cannot be built', async () => {
+    const result = await runReviewPass({
+      cwd: '/tmp',
+      client: modelLifecycleClient,
+      reviewModel: 'reviewer',
+      reviewProvider: 'nonsense',
+      buildContextWindow: 8192,
+      startedAt: new Date(),
+      maxRunMs: 60000,
+      filesChanged: ['a.mjs'],
+      createProviderFn: () => {
+        throw new Error('Unknown provider "nonsense"');
+      },
+      ensureModelLoadedFn: async () => ({ model: {} }),
+      runReviewFn: async () => {
+        throw new Error('should not be called -- no client');
+      },
+    });
+
+    assert.equal(result.skipped, true);
+    assert.match(result.error, /Unknown provider/);
+  });
+
   it('returns { skipped: true, error } rather than throwing when the model switch fails', async () => {
     const result = await runReviewPass({
       cwd: '/tmp',
