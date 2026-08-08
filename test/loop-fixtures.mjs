@@ -113,6 +113,19 @@ export async function createLoopRepo(options) {
 
   git(repo, ['init', '-q', '-b', 'main']);
 
+  // Identity written into the repo's own config, not just supplied via GIT_ENV
+  // below. GIT_ENV only reaches this helper and the bash scripts we spawn --
+  // loop-git.mjs's commitAll runs in-process through the harness's curated
+  // env (src/env.mjs allowlists HOME but nothing git-specific), so it reads
+  // whatever ~/.gitconfig the machine happens to have. That passes on any
+  // developer box and fails on a clean CI runner with "Author identity
+  // unknown", which is exactly how it was found. gpgsign for the same reason:
+  // a developer with commit.gpgsign=true globally would otherwise have
+  // in-process commits fail here for a third reason.
+  git(repo, ['config', 'user.name', 'Loop Test']);
+  git(repo, ['config', 'user.email', 'loop@test.invalid']);
+  git(repo, ['config', 'commit.gpgsign', 'false']);
+
   const tasks = options.tasks.map((task) => `- [ ] ${task}`).join('\n');
   writeFileSync(join(repo, 'TASKS.md'), `# Tasks\n\n${tasks}\n`);
   writeFileSync(join(repo, 'README.md'), '# fixture\n');

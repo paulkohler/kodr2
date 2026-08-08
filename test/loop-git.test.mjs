@@ -112,19 +112,20 @@ describe('wipeResetPaths', () => {
 
   it('refuses every spelling that resolves to .git, not just the literal string', async () => {
     const { repo } = await repoFixture();
-    const result = await wipeResetPaths(repo, [
-      '.git/',
-      './.git',
-      'data/../.git',
-      '.GIT',
-    ]);
+    // ".GIT" only resolves to the git dir on a case-insensitive filesystem
+    // (APFS, HFS+). On a case-sensitive one -- Linux, and so CI -- it is a
+    // different path that happens not to exist, which wipeResetPaths leaves
+    // neither wiped nor refused, same as any other missing path. Probe the
+    // filesystem rather than assume the developer's.
+    const casePreserving = repoFileExists(repo, '.GIT');
+    const spellings = ['.git/', './.git', 'data/../.git'];
+    if (casePreserving) {
+      spellings.push('.GIT');
+    }
+
+    const result = await wipeResetPaths(repo, spellings);
     assert.deepEqual(result.wiped, []);
-    assert.deepEqual(result.refused, [
-      '.git/',
-      './.git',
-      'data/../.git',
-      '.GIT',
-    ]);
+    assert.deepEqual(result.refused, spellings);
     // The repo must still be intact -- this is the actual regression case,
     // not just a check on the returned lists.
     assert.equal(await hasCommits(repo), true);
