@@ -328,7 +328,9 @@ describe('the --json consumption contract', () => {
   });
 
   it('catches a renamed field the ratchet reads', () => {
-    const { completed, ...renamed } = runGreen().json;
+    // Deliberately malformed: the point is that a renamed field is caught.
+    const { completed, ...rest } = runGreen().json;
+    const renamed = /** @type {any} */ (rest);
     renamed.complete = completed;
     assert.deepEqual(checkRunContract(renamed), ['missing field: completed']);
   });

@@ -35,7 +35,16 @@ import { run } from './harness.mjs';
  * @param {{ priorMessages: Array, priorFilesChanged: string[] }} [params.continueSeed] -
  *   A `kodr acp --continue` seed: the first session created resumes this prior
  *   run's conversation, then it's consumed (later sessions start fresh).
- * @returns {{ sessions: Map<string, object> }}
+ *
+ * @typedef {object} Session
+ * @property {string} id
+ * @property {string} cwd
+ * @property {Array|null} priorMessages
+ * @property {string[]} priorFilesChanged
+ * @property {boolean} cancelled
+ * @property {AbortController|null} controller
+ *
+ * @returns {{ sessions: Map<string, Session> }}
  */
 export function createAcpAgent(params) {
   const { connection, options } = params;

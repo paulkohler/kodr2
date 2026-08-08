@@ -22,5 +22,17 @@ jobs:
       - run: npm install
       - run: npm run format:check
       - run: npm run check
+      # TypeScript and @types/node are developer tools, not dependencies (see
+      # AGENTS.md's zero-dependency guard), so CI installs them the same way a
+      # developer does: tsc globally, @types/node with --no-save so it lands in
+      # the gitignored node_modules and never reaches package.json. The
+      # zero-dep guard on `npm test` below still runs after this and would
+      # catch it if it ever did.
+      # Pinned to a major: an unpinned global install tracks latest, so a new
+      # TypeScript release would fail CI on an unrelated push. Bump
+      # deliberately, with the errors it finds fixed in the same commit.
+      - run: npm install -g typescript@7
+      - run: npm install --no-save @types/node
+      - run: npm run check:types
       - run: npm test
       - run: npm pack --dry-run

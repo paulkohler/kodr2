@@ -55,7 +55,7 @@ export function createAcpReporter(send, turnState = { toolCallId: null }) {
     });
   };
 
-  reporter.toolResult = ({ result }) => {
+  reporter.toolResult = (/** @type {{ result: any }} */ { result }) => {
     if (!turnState.toolCallId) {
       return;
     }

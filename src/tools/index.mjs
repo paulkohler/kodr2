@@ -61,6 +61,27 @@ const VISION_TOOLS = [viewImage];
  *   reads/writes/commands to the editor when it advertises fs/* and terminal/*.
  * @returns {ToolRegistry}
  */
+
+/**
+ * What every tool's execute() receives as its second argument: the workspace
+ * root, the resolved limits, the backend to do I/O through, and the trackers
+ * the registry uses to build filesChanged/packageCommands. Exported as a type
+ * so each tool can name it instead of re-inferring it (or, as they did
+ * before, typing it `object` and losing every field).
+ * @typedef {object} ToolContext
+ * @property {string} cwd
+ * @property {string[]} envPassthrough
+ * @property {number} [commandTimeoutMs]
+ * @property {number} [snapshotCap]
+ * @property {Date} [startedAt]
+ * @property {number} maxRunMs
+ * @property {number} [maxImageBytes]
+ * @property {import('./backend.mjs').ToolBackend} backend
+ * @property {(path: string) => void} trackWrite
+ * @property {() => void} trackCommand
+ * @property {(command: string) => void} trackPackageCommand
+ */
+
 export function createToolRegistry(cwd, options = {}) {
   const filesChanged = [...new Set(options.initialFilesChanged ?? [])];
   const packageCommands = [];

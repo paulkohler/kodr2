@@ -31,6 +31,12 @@ export default {
     },
   },
 
+  /**
+   * @param {{ path?: string, old_string?: string, new_string?: string }} args -
+   *   Model-supplied, so every field is validated below rather than assumed
+   *   present
+   * @param {import('./index.mjs').ToolContext} context
+   */
   async execute({ path, old_string, new_string }, context) {
     if (!path) {
       return {

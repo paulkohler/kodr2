@@ -27,6 +27,11 @@ import {
 
 export const MAX_TOOL_TURNS = 20;
 
+/**
+ * State for the repeated-failing-call breaker (createRepeatTracker).
+ * @typedef {{ limit: number, key: string|null, count: number, stuck: boolean }} RepeatTracker
+ */
+
 // How many times the same (tool, error) may repeat in a row before the loop
 // gives up. The system prompt tells the model "never repeat a failing call
 // unchanged", but a small model can ignore it and burn the whole budget
@@ -385,6 +390,7 @@ export function remainingRunBudgetMs(startedAt, maxRunMs) {
  * @param {import('./reporter.mjs').Reporter} reporter
  * @param {object} [hookCtx]
  * @param {object} [gate]
+ * @param {RepeatTracker} [repeatTracker]
  * @returns {Promise<number>} Number of executed calls
  */
 export async function executeNativeToolCalls(
@@ -466,6 +472,7 @@ function appendToolResult(messages, toolCallId, result) {
  * @param {import('./reporter.mjs').Reporter} reporter
  * @param {object} [hookCtx]
  * @param {object} [gate]
+ * @param {RepeatTracker} [repeatTracker]
  * @returns {Promise<object>} The tool result (or a repair error)
  */
 async function executeOneNativeCall(
@@ -509,6 +516,7 @@ async function executeOneNativeCall(
  * @param {import('./reporter.mjs').Reporter} reporter
  * @param {object} [hookCtx]
  * @param {object} [gate]
+ * @param {RepeatTracker} [repeatTracker]
  * @returns {Promise<boolean>}
  */
 export async function executeRecoveredTextToolCall(
@@ -620,7 +628,7 @@ function resultErrorText(result) {
  * is flagged stuck so the loop can stop. Returns the (possibly augmented) result.
  * @param {string} name - Tool name
  * @param {object} result - Tool result (after post-tool hooks)
- * @param {{ limit: number, key: string|null, count: number, stuck: boolean }} [tracker]
+ * @param {RepeatTracker} [tracker]
  * @returns {object}
  */
 function trackRepeat(name, result, tracker) {

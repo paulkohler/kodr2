@@ -103,6 +103,8 @@ function git(cwd, args) {
  * @param {Record<string,string>} [options.untracked] Files left untracked/ignored
  * @param {string} [options.failCommitMatching] A commit-msg hook rejects messages
  *   matching this grep pattern, to exercise the fail-loud commit paths
+ * @param {boolean} [options.noInitialCommit] Leave a bare `git init` with
+ *   nothing tracked, to exercise the refuse-to-start guard
  */
 export async function createLoopRepo(options) {
   const root = await mkdtemp(join(tmpdir(), 'kodr-loop-'));
@@ -348,7 +350,11 @@ export function goalIsGreen(parsed) {
 // --- Scripted response builders -------------------------------------------
 // Built from the same field set the checks above pin.
 
-/** A `kodr run` result the ratchet reads as green. */
+/**
+ * A `kodr run` result the ratchet reads as green.
+ * @param {Record<string,string>} [files] Paths the stub writes, and the
+ *   filesChanged it reports
+ */
 export function runGreen(
   files = { 'src/feature.mjs': 'export const feature = true;\n' },
 ) {
@@ -380,7 +386,11 @@ export function runRed(over = {}) {
   };
 }
 
-/** A `kodr goal` result phased-loop reads as green. */
+/**
+ * A `kodr goal` result phased-loop reads as green.
+ * @param {Record<string,string>} [files] Paths the stub writes, and the
+ *   filesChanged it reports
+ */
 export function goalMet(
   files = { 'src/audited.mjs': 'export const audited = true;\n' },
 ) {

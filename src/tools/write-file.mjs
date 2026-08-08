@@ -27,6 +27,11 @@ export default {
     },
   },
 
+  /**
+   * @param {{ path?: string, content?: string }} args - Model-supplied, so
+   *   every field is validated below rather than assumed present
+   * @param {import('./index.mjs').ToolContext} context
+   */
   async execute({ path, content }, context) {
     if (!path) {
       return {

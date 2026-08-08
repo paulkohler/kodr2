@@ -47,7 +47,8 @@ export function stopReasonFor(stoppedReason, cancelled) {
  * The agentCapabilities Kodr advertises at initialize. Deliberately honest
  * about what this version implements rather than aspirational: no cross-process
  * session resume, text prompts only.
- * @returns {object}
+ * @returns {{ loadSession: boolean, promptCapabilities: { image: boolean,
+ *   audio: boolean, embeddedContext: boolean } }}
  */
 export function agentCapabilities() {
   return {
@@ -64,7 +65,8 @@ export function agentCapabilities() {
  * The full initialize result: the negotiated protocol version, capabilities,
  * and an empty auth-method list (Kodr needs no ACP-level auth; provider keys
  * come from the environment).
- * @returns {object}
+ * @returns {{ protocolVersion: number, authMethods: Array,
+ *   agentCapabilities: ReturnType<typeof agentCapabilities> }}
  */
 export function initializeResult() {
   return {
@@ -77,7 +79,10 @@ export function initializeResult() {
 /**
  * Concatenate the text from an ACP prompt's content blocks. Only `text` blocks
  * contribute in this version; other block types (image, resource) are ignored.
- * @param {Array<{ type: string, text?: string }>} [contentBlocks]
+ * Accepts anything the peer sent: a missing value, a non-array, or blocks of
+ * any type. Narrowing this to well-formed text blocks would describe only the
+ * case that needs no handling.
+ * @param {unknown} [contentBlocks]
  * @returns {string}
  */
 export function extractPromptText(contentBlocks) {
