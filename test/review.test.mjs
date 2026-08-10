@@ -120,6 +120,28 @@ describe('runReview', () => {
     assert.equal(result.toolTurns, 2);
   });
 
+  it('names the reviewer that produced the verdict', async () => {
+    // metadata.model is the build model, so without this the run record cannot
+    // answer "which model failed this change?" -- and reviewer choice is the
+    // variable the docs tell operators to tune.
+    await writeFile(join(tmpDir, 'a.mjs'), 'export const x = 1;\n');
+    const client = scriptedClient([
+      toolCallTurn('read_file', { path: 'a.mjs' }),
+      toolCallTurn('read_file', { path: 'a.mjs' }),
+      finalTurn('No findings.\n\nVERDICT: PASS'),
+    ]);
+
+    const result = await runReview({
+      reporter: silentReporter,
+      client,
+      modelId: 'openai/gpt-oss-20b',
+      cwd: tmpDir,
+      filesChanged: ['a.mjs'],
+    });
+
+    assert.equal(result.model, 'openai/gpt-oss-20b');
+  });
+
   it('forwards the cancellation signal to every attempt', async () => {
     // A review pass is a whole tool loop on a second model -- one dogfooded
     // reviewer spent 1,234 seconds on a single pass. Without the signal it is
@@ -671,6 +693,26 @@ describe('a review that was cut off', () => {
     assert.equal(result.passed, undefined);
     assert.equal(result.verdictFound, undefined);
     assert.equal(reviewBlocks(result), false);
+  });
+
+  it('still names the reviewer that ran out of road', async () => {
+    // A reviewer that keeps being cut off is a reviewer to swap out, which is
+    // unanswerable from a record that doesn't say which one it was.
+    await writeFile(join(tmpDir, 'a.mjs'), 'x');
+    const client = scriptedClient([
+      toolCallTurn('read_file', { path: 'a.mjs' }),
+    ]);
+    const result = await runReview({
+      reporter: silentReporter,
+      client,
+      modelId: 'reviewer',
+      cwd: tmpDir,
+      filesChanged: ['a.mjs'],
+      minToolCalls: 0,
+      maxToolTurns: 1,
+    });
+    assert.equal(result.skipped, true);
+    assert.equal(result.model, 'reviewer');
   });
 
   it('still reports the tokens a cut-off review really spent', async () => {

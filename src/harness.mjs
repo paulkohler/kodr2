@@ -81,6 +81,9 @@ export { isRunBudgetExceeded, remainingRunBudgetMs, runCancelled };
  * @property {string} provider
  * @property {string} baseUrl
  * @property {string} model
+ * @property {string|null} reviewModel
+ * @property {string|null} reviewProvider
+ * @property {string|null} reviewBaseUrl
  * @property {string|null} testCommand
  * @property {number} maxHealTurns
  * @property {number} maxRunMs
@@ -327,6 +330,7 @@ export async function run(prompt, options) {
       options.baseUrl ||
       defaultBaseUrlFor(resolveProviderName(options.provider)),
     model: modelId,
+    ...reviewMetadata(options),
     testCommand: testCommand || null,
     maxHealTurns,
     maxRunMs,
@@ -1407,6 +1411,31 @@ function defaultBaseUrlFor(providerName) {
     return DEFAULT_OLLAMA_BASE_URL;
   }
   return DEFAULT_BASE_URL;
+}
+
+/**
+ * The reviewer's identity, for the run record's metadata. metadata.model is
+ * the build model, and until this landed nothing on disk said which model
+ * produced a verdict -- so a workspace that tried two reviewers (which
+ * docs/usage.md tells operators to do) could not tell their verdicts apart
+ * afterwards.
+ *
+ * All null when no review model is configured: that run reviewed nothing, and
+ * naming an endpoint from KODR_REVIEW_* would record a reviewer that never
+ * ran. Recorded per run rather than derived from the review result, so a run
+ * whose review was skipped still says who was meant to do it.
+ * @param {{ reviewModel?: string, reviewProvider?: string, reviewBaseUrl?: string }} options
+ * @returns {{ reviewModel: string|null, reviewProvider: string|null, reviewBaseUrl: string|null }}
+ */
+export function reviewMetadata(options) {
+  if (!options.reviewModel) {
+    return { reviewModel: null, reviewProvider: null, reviewBaseUrl: null };
+  }
+  return {
+    reviewModel: options.reviewModel,
+    reviewProvider: reviewProviderName(options.reviewProvider),
+    reviewBaseUrl: reviewBaseUrlFor(options.reviewBaseUrl),
+  };
 }
 
 /**

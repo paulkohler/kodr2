@@ -290,10 +290,15 @@ async function runReviewAttempt(params) {
 // budget thinking, and the build it had nothing to say about was failed.
 //
 // Usage is carried through even though nothing was decided -- those tokens
-// were really spent, and dropping them would understate the run's cost.
-function reviewCutOff(stoppedReason, usage, retries) {
+// were really spent, and dropping them would understate the run's cost. The
+// model is named for the same reason: a reviewer that keeps running out of
+// road is a reviewer to swap out, and that is unanswerable from a record that
+// doesn't say which one it was.
+function reviewCutOff(params) {
+  const { model, stoppedReason, usage, retries } = params;
   return {
     skipped: true,
+    model,
     reason: `review did not complete (stoppedReason: ${stoppedReason})`,
     usage,
     retries,
@@ -317,6 +322,8 @@ function nudgeFor(attempt, minToolCalls) {
 /**
  * @typedef {object} ReviewResult
  * @property {boolean} skipped
+ * @property {string} [model] - The reviewer that produced this verdict. Absent
+ *   only when no reviewer ran at all (an empty changeset)
  * @property {string} [findings]
  * @property {'pass'|'fail'} [verdict] - What the reviewer said. Absent when skipped
  * @property {boolean} [verdictFound] - False when no verdict line could be
@@ -426,7 +433,12 @@ export async function runReview(params) {
   if (attempt.stoppedReason !== 'complete') {
     // No nudge retry here: whatever ran the first attempt out of budget or
     // tool turns will do the same to a second, only slower.
-    return reviewCutOff(attempt.stoppedReason, totalUsage, totalRetries);
+    return reviewCutOff({
+      model: modelId,
+      stoppedReason: attempt.stoppedReason,
+      usage: totalUsage,
+      retries: totalRetries,
+    });
   }
 
   const nudge = nudgeFor(attempt, minToolCalls);
@@ -440,12 +452,23 @@ export async function runReview(params) {
     totalUsage.cost += attempt.usage.cost || 0;
     totalRetries += attempt.retries || 0;
     if (attempt.stoppedReason !== 'complete') {
-      return reviewCutOff(attempt.stoppedReason, totalUsage, totalRetries);
+      return reviewCutOff({
+        model: modelId,
+        stoppedReason: attempt.stoppedReason,
+        usage: totalUsage,
+        retries: totalRetries,
+      });
     }
   }
 
   return {
     skipped: false,
+    // Which reviewer said this. Reviewer choice is load-bearing (see
+    // specs/review.yaml -- the same diff gets opposite verdicts from two
+    // models), the docs tell operators to pick one by its observed grounded
+    // rate, and a record that doesn't name the model makes that unanswerable:
+    // a workspace that tried two reviewers gets one blended number.
+    model: modelId,
     findings: attempt.findings,
     verdict: attempt.verdict,
     verdictFound: attempt.verdictFound,

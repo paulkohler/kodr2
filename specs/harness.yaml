@@ -87,7 +87,12 @@ outputs:
       retrospective (see specs/model-client.yaml, specs/provider.yaml)
   metadata:
     type: object
-    description: "{ cwd, prompt, baseUrl, model, testCommand, maxHealTurns, envPassthrough, startedAt }"
+    description: >
+      { cwd, prompt, provider, baseUrl, model, reviewModel, reviewProvider,
+      reviewBaseUrl, testCommand, maxHealTurns, maxRunMs, maxToolTurns,
+      envPassthrough, contextWindow, startedAt }. model is the build model;
+      the review fields name the reviewer and are all null when no
+      --review-model was configured (see specs/review.yaml).
   packageCommands:
     type: array
     description: Package-manager commands observed during the run

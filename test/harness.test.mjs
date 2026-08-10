@@ -17,6 +17,7 @@ import {
   modelMaxRetries,
   remainingRunBudgetMs,
   resolveRequestTimeoutMs,
+  reviewMetadata,
   reviewSkippedForCancel,
   reviewSkippedForIncompleteBuild,
   run,
@@ -1144,6 +1145,36 @@ describe('review pass wiring', () => {
     }
   });
 
+  it('names the reviewer in the saved run record, even when the review never ran', async () => {
+    // The metadata is what makes an old run record self-describing: this build
+    // failed, so no review happened at all, and the record still has to say
+    // which reviewer was configured. --no-review-swap keeps the run off the
+    // real `lms` binary that a truthy reviewModel otherwise reaches for.
+    const cwd = await mkdtemp(join(tmpdir(), 'kodr-reviewmeta-'));
+    const model = await startFailingModel();
+    try {
+      await run('do work', {
+        cwd,
+        baseUrl: model.baseUrl,
+        model: 'test',
+        reviewModel: 'openai/gpt-oss-20b',
+        reviewSwap: false,
+        quiet: true,
+      });
+
+      const runDir = join(cwd, '.kodr', 'runs');
+      const files = await readdir(runDir);
+      const record = JSON.parse(await readFile(join(runDir, files[0]), 'utf8'));
+      assert.equal(record.metadata.model, 'test');
+      assert.equal(record.metadata.reviewModel, 'openai/gpt-oss-20b');
+      assert.equal(record.metadata.reviewProvider, null);
+      assert.equal(record.metadata.reviewBaseUrl, null);
+    } finally {
+      await model.close();
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
   it('skips the model-load step entirely for a provider with no model-lifecycle concept (e.g. OpenRouter)', async () => {
     let loadCalled = false;
     let reviewCalledWithModel;
@@ -1423,6 +1454,51 @@ describe('reviewSkippedForIncompleteBuild', () => {
       reviewSkippedForIncompleteBuild('budget-exceeded').reason,
       /budget-exceeded/,
     );
+  });
+});
+
+describe('reviewMetadata', () => {
+  it('names the reviewer and the endpoint it ran on', () => {
+    assert.deepEqual(
+      reviewMetadata({
+        reviewModel: 'openai/gpt-oss-20b',
+        reviewProvider: 'ollama',
+        reviewBaseUrl: 'http://localhost:11434/v1',
+      }),
+      {
+        reviewModel: 'openai/gpt-oss-20b',
+        reviewProvider: 'ollama',
+        reviewBaseUrl: 'http://localhost:11434/v1',
+      },
+    );
+  });
+
+  it('records no reviewer at all when none is configured', () => {
+    // Even with KODR_REVIEW_* in the environment: that run reviewed nothing,
+    // and naming an endpoint would record a reviewer that never ran.
+    const previous = process.env.KODR_REVIEW_PROVIDER;
+    process.env.KODR_REVIEW_PROVIDER = 'openrouter';
+    try {
+      assert.deepEqual(reviewMetadata({}), {
+        reviewModel: null,
+        reviewProvider: null,
+        reviewBaseUrl: null,
+      });
+    } finally {
+      if (previous === undefined) {
+        delete process.env.KODR_REVIEW_PROVIDER;
+      } else {
+        process.env.KODR_REVIEW_PROVIDER = previous;
+      }
+    }
+  });
+
+  it('leaves the endpoint null when only a review model is configured', () => {
+    assert.deepEqual(reviewMetadata({ reviewModel: 'reviewer' }), {
+      reviewModel: 'reviewer',
+      reviewProvider: null,
+      reviewBaseUrl: null,
+    });
   });
 });
 

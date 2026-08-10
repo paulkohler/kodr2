@@ -87,6 +87,15 @@ outputs:
   skipped:
     type: boolean
     description: True when there were no changed files to review
+  model:
+    type: string
+    description: >
+      The reviewer that produced this verdict. Absent only when no reviewer ran
+      at all (an empty changeset). metadata.model in the run record is the
+      *build* model, so without this nothing on disk says which model failed a
+      change -- and reviewer choice is the variable operators are told to tune
+      (see the phi-4 vs gpt-oss comparison below). A workspace that tried two
+      reviewers otherwise gets one blended rate out of kodr stats.
   findings:
     type: string
     description: The review model's final text response, verdict line removed
@@ -186,6 +195,18 @@ constraints:
     is the pre-flight check: at 0% the verdicts are worthless whichever way
     they fall, and --fail-on-review should not be enabled.
   - >
+    Because that choice is load-bearing, the reviewer is named on disk: the
+    ReviewResult carries the model that produced the verdict (and the one that
+    was cut off before producing one), and the run record's metadata carries
+    reviewModel plus the review provider/base URL when a reviewer was
+    configured at all -- null on a run with no --review-model, even if
+    KODR_REVIEW_* is set in the environment, since naming an endpoint for a
+    reviewer that never ran is worse than saying nothing. Recorded per run
+    rather than derived from the review result, so a run whose review was
+    skipped still says who was meant to do it. specs/stats.yaml then segments
+    the review rates per reviewer, which is what makes the comparison above
+    reproducible from a workspace's own history instead of by hand.
+  - >
     Grounding is advisory, not a gate. An ungrounded PASS is recorded, named
     in the notice, and counted in reviewGroundedRate, but it does not block.
     The symmetric rule from specs/goal.yaml (an ungrounded MET never stops the
@@ -215,12 +236,14 @@ constraints:
     data channel under --json and the review stream landed in front of the
     JSON document and made it unparseable.
   - >
-    A skipped review returns exactly { skipped: true } (plus reason or error
-    on the paths that have one) and gains no verdict, verdictFound, or passed
-    field. undefined is not false, and no gate decision may be derived from an
-    absent field -- which is what keeps an empty changeset, an incomplete
-    build, a failed model switch, and a crashed reviewer all non-blocking by
-    construction.
+    A skipped review gains no verdict, verdictFound, or passed field.
+    undefined is not false, and no gate decision may be derived from an absent
+    field -- which is what keeps an empty changeset, an incomplete build, a
+    failed model switch, and a crashed reviewer all non-blocking by
+    construction. The empty-changeset skip is exactly { skipped: true }: no
+    reviewer ran, so there is nothing else to say. The paths that did spend
+    something carry what they spent (reason, error, model, usage, retries) --
+    facts about a review that happened, never a verdict.
   - >
     The tool registry is restricted to read_file, list_files, and search —
     never write_file, edit_file, or run_command. A review pass must not be
@@ -316,6 +339,12 @@ tests:
     - reviewBlocks is false for a review that crashed
     - a cut-off review is skipped, not failed, when the tool loop runs out of budget
     - a cut-off review still reports the tokens it really spent
+    - a cut-off review still names the reviewer that ran out of road
+    - names the reviewer that produced the verdict
+    - names the reviewer in the saved run record, even when the review never ran
+    - reviewMetadata names the reviewer and the endpoint it ran on
+    - reviewMetadata records no reviewer at all when none is configured
+    - reviewMetadata leaves the endpoint null when only a review model is configured
     - no nudge retry is spent on an attempt that was cut off
     - reviewBlocks is true for a fail verdict
     - reviewBlocks is false for an ungrounded pass, which is advisory
