@@ -203,6 +203,25 @@ read → edit → test cycle eats that quickly. If a task keeps stopping with
 `tool-limit`, raise the ceiling; the serialization itself is prompt-imposed,
 not a harness limit — the loop executes every native call in a message.
 
+On a hosted provider there's a third budget worth setting, in dollars:
+
+```bash
+kodr "…" --provider openrouter --max-cost-usd 0.50   # or KODR_MAX_COST_USD
+```
+
+It's off by default. When set, the run stops between turns as soon as its
+accumulated cost reaches the ceiling (`stoppedReason: cost-exceeded`), and it
+covers the whole run — the build loop, heal, the review pass, the memory
+retrospective, and a `kodr goal` judge all count against the same number
+rather than each getting a fresh allowance. A review or retrospective skipped
+this way is recorded as a *skip*, never a failed review.
+
+Two caveats. It's only as good as the cost the provider reports: LM Studio and
+Ollama report none, so the flag is inert there. And it can only stop the run
+*between* turns — the request already in flight still finishes and still gets
+billed. Treat it as a bound on one runaway run, not as your only cap; set a
+spending limit on the provider account too.
+
 ## 7. Command sandbox & approvals — `--env`, `--approve-commands`
 
 `run_command` and the `--test` command run with a **minimal, curated

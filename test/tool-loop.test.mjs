@@ -10,7 +10,9 @@ import { createCaptureReporter } from './capture-reporter.mjs';
 import {
   executeNativeToolCalls,
   executeRecoveredTextToolCall,
+  isCostBudgetExceeded,
   MAX_TOOL_TURNS,
+  maxCostUsd,
   maxRepeatToolErrors,
   recoverTextToolCall,
   runToolLoop,
@@ -924,5 +926,136 @@ describe('repeated-failing-call breaker', () => {
     });
     assert.equal(loop.stoppedReason, 'stuck');
     assert.equal(loop.toolTurns, 5);
+  });
+});
+
+describe('maxCostUsd', () => {
+  const envKey = 'KODR_MAX_COST_USD';
+  let original;
+  beforeEach(() => {
+    original = process.env[envKey];
+  });
+  afterEach(() => {
+    if (original === undefined) {
+      delete process.env[envKey];
+    } else {
+      process.env[envKey] = original;
+    }
+  });
+
+  it('resolves the option, then KODR_MAX_COST_USD, then disabled', () => {
+    process.env[envKey] = '2.50';
+    assert.equal(maxCostUsd(0.25), 0.25);
+    assert.equal(maxCostUsd(undefined), 2.5);
+    delete process.env[envKey];
+    assert.equal(maxCostUsd(undefined), 0);
+  });
+
+  it('takes a fraction of a dollar, not just whole units', () => {
+    // The interesting ceilings are cents; an integer-only resolver would
+    // round every one of them to "disabled".
+    delete process.env[envKey];
+    assert.equal(maxCostUsd(0.05), 0.05);
+    process.env[envKey] = '0.05';
+    assert.equal(maxCostUsd(undefined), 0.05);
+  });
+
+  it('ignores a garbled env var rather than reading it as a ceiling', () => {
+    process.env[envKey] = 'free';
+    assert.equal(maxCostUsd(undefined), 0);
+  });
+});
+
+describe('isCostBudgetExceeded', () => {
+  it('is false when no ceiling is set, whatever was spent', () => {
+    assert.equal(isCostBudgetExceeded(99, 0), false);
+    assert.equal(isCostBudgetExceeded(99, undefined), false);
+  });
+
+  it('is true at the ceiling, not only past it', () => {
+    assert.equal(isCostBudgetExceeded(0.5, 1), false);
+    assert.equal(isCostBudgetExceeded(1, 1), true);
+    assert.equal(isCostBudgetExceeded(1.5, 1), true);
+  });
+});
+
+describe('the run cost budget', () => {
+  // A turn that reports 40 cents. Four of them cross a $1 ceiling.
+  function costlyToolTurn() {
+    return {
+      message: {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          {
+            id: 'call_1',
+            type: 'function',
+            function: { name: 'noop', arguments: '{}' },
+          },
+        ],
+      },
+      usage: { prompt: 1, completion: 1, cost: 0.4 },
+    };
+  }
+
+  it('stops the loop once the run has spent its ceiling', async () => {
+    const client = scriptedClient([costlyToolTurn()]);
+    const loop = await runToolLoop({
+      client,
+      modelId: 'm',
+      messages: [{ role: 'user', content: 'go' }],
+      tools: stubTools,
+      maxCostUsd: 1,
+    });
+
+    assert.equal(loop.stoppedReason, 'cost-exceeded');
+    // Three turns at $0.40 crosses $1.00; the fourth request is never sent.
+    assert.equal(client.calls.length, 3);
+    assert.ok(loop.usage.cost >= 1);
+  });
+
+  it('counts what earlier phases already spent, not just this loop', async () => {
+    // Heal and the review pass each get their own loop but share the run's
+    // ceiling -- without spentUsd each would start again from zero.
+    const client = scriptedClient([costlyToolTurn()]);
+    const loop = await runToolLoop({
+      client,
+      modelId: 'm',
+      messages: [{ role: 'user', content: 'go' }],
+      tools: stubTools,
+      maxCostUsd: 1,
+      spentUsd: 0.9,
+    });
+
+    assert.equal(loop.stoppedReason, 'cost-exceeded');
+    assert.equal(client.calls.length, 1);
+  });
+
+  it('never sends a request when the budget is already spent', async () => {
+    const client = scriptedClient([costlyToolTurn()]);
+    const loop = await runToolLoop({
+      client,
+      modelId: 'm',
+      messages: [{ role: 'user', content: 'go' }],
+      tools: stubTools,
+      maxCostUsd: 1,
+      spentUsd: 1,
+    });
+
+    assert.equal(loop.stoppedReason, 'cost-exceeded');
+    assert.equal(client.calls.length, 0);
+  });
+
+  it('runs to completion untouched when no ceiling is set', async () => {
+    const client = scriptedClient([costlyToolTurn(), finalTurn('done')]);
+    const loop = await runToolLoop({
+      client,
+      modelId: 'm',
+      messages: [{ role: 'user', content: 'go' }],
+      tools: stubTools,
+    });
+
+    assert.equal(loop.stoppedReason, 'complete');
+    assert.equal(loop.finalText, 'done');
   });
 });

@@ -61,8 +61,10 @@ import {
   runReview,
 } from './review.mjs';
 import {
+  isCostBudgetExceeded,
   isRunBudgetExceeded,
   MAX_TOOL_TURNS,
+  maxCostUsd,
   remainingRunBudgetMs,
   runCancelled,
   runToolLoop,
@@ -70,7 +72,13 @@ import {
 import { createToolRegistry } from './tools/index.mjs';
 
 // Re-exported for callers (and tests) that imported them from the harness.
-export { isRunBudgetExceeded, remainingRunBudgetMs, runCancelled };
+export {
+  isCostBudgetExceeded,
+  isRunBudgetExceeded,
+  maxCostUsd,
+  remainingRunBudgetMs,
+  runCancelled,
+};
 
 /** @typedef {Parameters<typeof run>[1]} RunOptions */
 
@@ -87,6 +95,7 @@ export { isRunBudgetExceeded, remainingRunBudgetMs, runCancelled };
  * @property {string|null} testCommand
  * @property {number} maxHealTurns
  * @property {number} maxRunMs
+ * @property {number} maxCostUsd
  * @property {number} maxToolTurns
  * @property {string[]} envPassthrough
  * @property {number} contextWindow
@@ -155,6 +164,11 @@ export { isRunBudgetExceeded, remainingRunBudgetMs, runCancelled };
  *   session's own tool calls touch.
  * @param {string[]} [options.envPassthrough] - Extra env var names for commands
  * @param {number} [options.contextWindow] - Max context window in tokens (0 disables compaction)
+ * @param {number} [options.maxCostUsd] - Spend ceiling for the whole run in USD,
+ *   covering the build loop, heal, the review pass and the memory retrospective
+ *   (0 disables — the default — also KODR_MAX_COST_USD). Only as good as the
+ *   provider's reported cost: LM Studio and Ollama report none, so it is inert
+ *   there. Belt-and-braces beside an account-level cap, not a replacement.
  * @param {number} [options.healReserve] - Fraction of the run budget held back for heal (0..0.9; default KODR_HEAL_RESERVE or 0.25)
  * @param {number} [options.heartbeatMs] - Interval for Stop-hook "still running" notices (0 disables; default KODR_HEARTBEAT_MS or 30000)
  * @param {number} [options.maxRetries] - Retries for a 5xx chat response (0 disables; default KODR_MODEL_RETRIES or 1)
@@ -233,6 +247,9 @@ export async function run(prompt, options) {
     priorFilesChanged = [],
     envPassthrough = [],
   } = options;
+  // Resolved once and threaded into every phase that can spend money, so the
+  // ceiling bounds the run rather than each phase separately.
+  const costCeilingUsd = maxCostUsd(options.maxCostUsd);
   const runsDir = resolveRunsDir(cwd, options.runsDir);
   const rawThenFixCommits = rawThenFixCommitsEnabled(options.rawThenFixCommits);
   const noSave = isSaveDisabled(options.noSave);
@@ -334,6 +351,7 @@ export async function run(prompt, options) {
     testCommand: testCommand || null,
     maxHealTurns,
     maxRunMs,
+    maxCostUsd: costCeilingUsd,
     maxToolTurns,
     envPassthrough,
     contextWindow,
@@ -488,6 +506,7 @@ export async function run(prompt, options) {
       approveCommands: options.approveCommands,
       confirm: options.confirm,
       signal: options.signal,
+      maxCostUsd: costCeilingUsd,
     });
     const totalUsage = loop.usage;
     const { completed, stoppedReason, toolTurns } = loop;
@@ -599,6 +618,7 @@ export async function run(prompt, options) {
         hookResult.results.length > 0 &&
         !hookResult.passed &&
         !isRunBudgetExceeded(startedAt, maxRunMs) &&
+        !isCostBudgetExceeded(totalUsage.cost, costCeilingUsd) &&
         !runCancelled(options.signal, stoppedReason)
       ) {
         reporter.phase('heal');
@@ -625,6 +645,8 @@ export async function run(prompt, options) {
           approveCommands: options.approveCommands,
           confirm: options.confirm,
           signal: options.signal,
+          maxCostUsd: costCeilingUsd,
+          spentUsd: totalUsage.cost,
         });
 
         result.healed = healResult.healed;
@@ -688,6 +710,10 @@ export async function run(prompt, options) {
     // between them (during the review pass, say), and each phase below opens
     // model calls of its own.
     const cancelled = () => runCancelled(options.signal, result.stoppedReason);
+    // Re-read at each gate for the same reason: the phases below add to
+    // result.usage as they go, so the run can cross its ceiling between them.
+    const outOfMoney = () =>
+      isCostBudgetExceeded(result.usage?.cost || 0, costCeilingUsd);
 
     // Review pass: a fresh tool-loop conversation over what the build phase
     // changed, on the review model if one's configured. Never lets a review
@@ -701,6 +727,12 @@ export async function run(prompt, options) {
         // tool loop -- one dogfooded reviewer spent 1,234 seconds on a single
         // pass). Starting that after Ctrl-C is the opposite of cancelling.
         result.review = reviewSkippedForCancel();
+      } else if (outOfMoney()) {
+        // Checked before the model swap, not left to the review's own tool
+        // loop: the swap unloads and reloads models through `lms` before a
+        // single token is spent, so a review that could only stop on its first
+        // turn would still pay for the swap first.
+        result.review = reviewSkippedForCostBudget(costCeilingUsd);
       } else if (result.stoppedReason === 'complete') {
         reporter.phase('review');
         result.review = await runReviewPass({
@@ -726,6 +758,8 @@ export async function run(prompt, options) {
           minToolCalls: options.reviewMinToolCalls,
           maxToolTurns: options.reviewMaxToolTurns,
           signal: options.signal,
+          maxCostUsd: costCeilingUsd,
+          spentUsd: result.usage?.cost || 0,
           reporter,
         });
         if (result.review.usage) {
@@ -763,6 +797,11 @@ export async function run(prompt, options) {
       // Recorded rather than left undefined, so --json can tell "memory off"
       // apart from "memory on, but the run was cancelled first".
       result.memory = memorySkippedForCancel();
+    } else if (isMemoryEnabled(options.memory) && outOfMoney()) {
+      // The retrospective is the last thing a run does and the easiest to go
+      // without: a run that has spent its budget should not buy one more
+      // model call to reflect on how it went.
+      result.memory = memorySkippedForCostBudget(costCeilingUsd);
     } else if (isMemoryEnabled(options.memory)) {
       reporter.phase('memory');
       try {
@@ -1153,6 +1192,33 @@ export function memorySkippedForCancel() {
 }
 
 /**
+ * The result.review value for a run that spent its cost ceiling before the
+ * review pass. A skip, never a verdict -- running out of money says nothing
+ * about the change, and a gate must not read it as a fail.
+ * @param {number} ceilingUsd
+ * @returns {{ skipped: true, reason: string }}
+ */
+export function reviewSkippedForCostBudget(ceilingUsd) {
+  return {
+    skipped: true,
+    reason: `run cost budget spent (maxCostUsd: ${ceilingUsd})`,
+  };
+}
+
+/**
+ * The result.memory value for a run that spent its cost ceiling before the
+ * retrospective.
+ * @param {number} ceilingUsd
+ * @returns {{ proposed: false, reason: string }}
+ */
+export function memorySkippedForCostBudget(ceilingUsd) {
+  return {
+    proposed: false,
+    reason: `run cost budget spent (maxCostUsd: ${ceilingUsd})`,
+  };
+}
+
+/**
  * Orchestrates the review pass: switch to the review model, run the
  * review, and never let a failure in either step escape as a thrown
  * error -- a review is an added opinion, not part of the outcome the run
@@ -1176,6 +1242,9 @@ export function memorySkippedForCancel() {
  * @param {number} [params.maxToolTurns]
  * @param {AbortSignal} [params.signal] - Cancellation signal, forwarded to the
  *   review's own tool loop (see specs/cancel.yaml)
+ * @param {number} [params.maxCostUsd] - Run spend ceiling in USD (0 disables),
+ *   forwarded to the review's own tool loop
+ * @param {number} [params.spentUsd] - What the run cost before the review
  * @param {import('./reporter.mjs').Reporter} [params.reporter]
  * @param {string} [params.reviewProvider]
  * @param {string} [params.reviewBaseUrl]
@@ -1254,6 +1323,8 @@ export async function runReviewPass(params) {
     minToolCalls,
     maxToolTurns,
     signal,
+    maxCostUsd: costCeilingUsd,
+    spentUsd,
     reporter = createNullReporter(),
     ensureModelLoadedFn = ensureModelLoaded,
     runReviewFn = runReview,
@@ -1316,6 +1387,13 @@ export async function runReviewPass(params) {
       minToolCalls: minReviewToolCalls(minToolCalls),
       maxToolTurns: reviewMaxToolTurns(maxToolTurns),
       signal,
+      // The entry gate above only catches a ceiling already crossed *before*
+      // the review. Without these the review's own tool loop runs unbounded,
+      // which is the phase most able to spend: a whole second tool loop, and
+      // one dogfooded reviewer burned 44,725 completion tokens on a single
+      // pass.
+      maxCostUsd: costCeilingUsd,
+      spentUsd,
     });
 
     if (!reviewResult.skipped) {
@@ -1390,6 +1468,9 @@ function formatStopReason(stoppedReason, maxToolTurns) {
   }
   if (stoppedReason === 'budget-exceeded') {
     return 'stopped after run budget';
+  }
+  if (stoppedReason === 'cost-exceeded') {
+    return 'stopped: the run spent its cost budget';
   }
   if (stoppedReason === 'stuck') {
     return 'stopped: the same tool call failed repeatedly';

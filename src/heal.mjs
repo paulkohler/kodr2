@@ -5,7 +5,7 @@
  */
 
 import { createNullReporter } from './reporter.mjs';
-import { runToolLoop } from './tool-loop.mjs';
+import { isCostBudgetExceeded, maxCostUsd, runToolLoop } from './tool-loop.mjs';
 
 const DEFAULT_MAX_TURNS = 3;
 
@@ -38,6 +38,9 @@ const DEFAULT_MAX_TURNS = 3;
  * @param {function} [params.confirm] - (call) => Promise<{ approved }>; used when approveCommands is on
  * @param {AbortSignal} [params.signal] - Cancellation signal (see specs/cancel.yaml); forwarded to
  *   the tool loop, and a cancelled loop stops the repair early
+ * @param {number} [params.maxCostUsd] - Run spend ceiling in USD (0 disables); a
+ *   heal turn that crosses it stops the repair
+ * @param {number} [params.spentUsd] - What the run cost before repair started
  * @returns {Promise<{ healed: boolean, turns: number, verification: { passed: boolean, output: string }, compactions: number, usage: { prompt: number, completion: number, cost: number }, retries: number }>}
  */
 export async function heal(params) {
@@ -65,7 +68,9 @@ export async function heal(params) {
     approveCommands,
     confirm,
     signal,
+    spentUsd = 0,
   } = params;
+  const costCeilingUsd = maxCostUsd(params.maxCostUsd);
 
   let lastOutput = failure.output;
   let lastResult = null;
@@ -112,6 +117,10 @@ ${lastOutput}
       approveCommands,
       confirm,
       signal,
+      maxCostUsd: costCeilingUsd,
+      // What the build cost, plus what repair has cost so far: the ceiling
+      // bounds the run, so heal's own turns have to count against it too.
+      spentUsd: spentUsd + totalUsage.cost,
     });
     totalUsage.prompt += loop.usage.prompt;
     totalUsage.completion += loop.usage.completion;
@@ -147,8 +156,15 @@ ${lastOutput}
       };
     }
 
-    // Stop early if the run budget was spent mid-repair.
-    if (loop.stoppedReason === 'budget-exceeded') {
+    // Stop early if the run budget -- wall-clock or spend -- went mid-repair.
+    // The spend is re-checked here rather than left to the loop's own stop
+    // reason: a turn that answers in one request never re-checks anything, so
+    // the turn that crosses the ceiling usually comes back "complete".
+    if (
+      loop.stoppedReason === 'budget-exceeded' ||
+      loop.stoppedReason === 'cost-exceeded' ||
+      isCostBudgetExceeded(spentUsd + totalUsage.cost, costCeilingUsd)
+    ) {
       return {
         healed: false,
         turns: turn,

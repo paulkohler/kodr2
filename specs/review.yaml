@@ -74,6 +74,21 @@ inputs:
     description: >
       Timeout for the git diff call that gathers review context (default
       30,000 — KODR_REVIEW_DIFF_TIMEOUT_MS)
+  maxCostUsd:
+    type: number
+    required: false
+    description: >
+      The run's spend ceiling in USD (0 disables — see specs/harness.yaml),
+      forwarded to every attempt's tool loop. A review stopped on it is cut
+      off, which is a skip and never a FAIL: the same rule that keeps a
+      cancelled or budget-exceeded review from blocking a commit.
+  spentUsd:
+    type: number
+    required: false
+    description: >
+      What the run had already spent before the review, so the reviewer draws
+      on the run's remaining budget rather than a fresh allowance. The nudge
+      retry is charged against the first attempt's spend for the same reason.
   signal:
     type: AbortSignal
     required: false
@@ -315,6 +330,7 @@ tests:
     - reviewEndpoint reuses the build provider and base URL when neither is overridden
     - reviewEndpoint moves the build provider to a different endpoint when only a base URL is given
     - reviewEndpoint does not carry the build base URL onto a different provider
+    - runReviewPass forwards the run cost ceiling and what the run already spent
     - runReviewPass skips the model-load step when the swap is turned off
     - runReviewPass gives the reviewer its own client when a review base URL is configured
     - runReviewPass reuses the build client when no review endpoint is configured

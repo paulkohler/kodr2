@@ -69,8 +69,10 @@ constraints:
     run's messages so multi-turn prompts continue the conversation (the same
     continuation the CLI's --continue uses). The response is a StopReason.
   - StopReason mapping from RunResult.stoppedReason: complete -> end_turn,
-    budget-exceeded -> max_turn_requests, tool-limit -> max_turn_requests,
-    error -> refusal, and a session that was cancelled -> cancelled. A run() that
+    budget-exceeded -> max_turn_requests, cost-exceeded -> max_turn_requests,
+    tool-limit -> max_turn_requests, error -> refusal, and a session that was
+    cancelled -> cancelled. Every "ran out of allowance" stop maps alike,
+    whether the allowance was wall-clock, turns, or dollars. A run() that
     throws yields a JSON-RPC error response for that prompt rather than a
     StopReason.
   - session/cancel aborts the run's AbortController (see specs/cancel.yaml) and
@@ -146,6 +148,7 @@ constraints:
 tests:
   unit:
     - stopReasonFor maps complete/budget-exceeded/tool-limit/error and a cancelled flag
+    - stopReasonFor maps a run that spent its cost budget to max_turn_requests
     - agentCapabilities reports loadSession false and no prompt capabilities
     - extractPromptText concatenates text blocks and ignores non-text blocks
     - toolKindFor maps each tool name to its ACP kind and unknown names to other

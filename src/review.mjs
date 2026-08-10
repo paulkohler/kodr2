@@ -359,6 +359,9 @@ function nudgeFor(attempt, minToolCalls) {
  * @param {number} [params.minToolCalls] - Tool-call floor before a review counts as grounded
  * @param {number} [params.maxToolTurns] - Tool-turn ceiling per attempt
  * @param {number} [params.diffTimeoutMs] - Timeout for the git diff call (default 30 seconds — KODR_REVIEW_DIFF_TIMEOUT_MS)
+ * @param {number} [params.maxCostUsd] - Run spend ceiling in USD (0 disables).
+ *   A review that crosses it is cut off, which is a skip -- never a FAIL
+ * @param {number} [params.spentUsd] - What the run cost before the review
  * @param {AbortSignal} [params.signal] - Cancellation signal (see specs/cancel.yaml),
  *   forwarded to every attempt's tool loop. Without it a review pass is
  *   unstoppable: a reasoning model has spent 20 minutes on a single pass.
@@ -378,6 +381,8 @@ export async function runReview(params) {
     onHeartbeat,
     onDebug,
     envPassthrough = [],
+    maxCostUsd,
+    spentUsd = 0,
     signal,
     // The review pass has always streamed its inner tool loop to the terminal
     // even under --quiet (runReview never forwarded quiet), and that stays
@@ -419,8 +424,11 @@ export async function runReview(params) {
     maxToolTurns,
     // A cancelled attempt comes back stoppedReason "cancelled", which
     // reviewCutOff below turns into a skip -- never a FAIL verdict. Aborting
-    // a review must not be able to block a commit.
+    // a review must not be able to block a commit. A review stopped on the
+    // run's spend ceiling takes the same path, for the same reason.
     signal,
+    maxCostUsd,
+    spentUsd,
   };
 
   let attempt = await runReviewAttempt({
@@ -445,6 +453,9 @@ export async function runReview(params) {
   if (nudge) {
     attempt = await runReviewAttempt({
       ...loopParams,
+      // The first attempt's tokens count against the ceiling too, so a retry
+      // cannot buy a second full allowance.
+      spentUsd: spentUsd + totalUsage.cost,
       messages: buildReviewMessages(filesChanged, diff, nudge),
     });
     totalUsage.prompt += attempt.usage.prompt;

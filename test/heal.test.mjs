@@ -134,6 +134,47 @@ describe('healing', () => {
     assert.equal(result.verification.output, 'initial failure');
   });
 
+  it('stops repairing once the run has spent its cost budget', async () => {
+    // Repair is not exempt from the ceiling: the build's spend comes in as
+    // spentUsd, so a heal turn that crosses it ends the repair instead of
+    // starting another one.
+    let modelCalls = 0;
+    const client = /** @type {import('../src/provider.mjs').Provider} */ (
+      /** @type {any} */ ({
+        async chat() {
+          modelCalls++;
+          return {
+            message: { role: 'assistant', content: 'tried' },
+            usage: { prompt: 1, completion: 1, cost: 0.3 },
+          };
+        },
+      })
+    );
+    const tools = /** @type {import('../src/tools/index.mjs').ToolRegistry} */ (
+      /** @type {any} */ ({ definitions: () => [] })
+    );
+    let verifyCalls = 0;
+    const result = await heal({
+      client,
+      modelId: 'unused',
+      messages: [],
+      tools,
+      verifyFn: async () => {
+        verifyCalls++;
+        return { passed: false, output: `still failing (${verifyCalls})` };
+      },
+      failure: { passed: false, output: 'initial failure' },
+      maxTurns: 3,
+      maxCostUsd: 1,
+      spentUsd: 0.9,
+    });
+
+    // One turn's $0.30 on top of the build's $0.90 crosses the ceiling.
+    assert.equal(modelCalls, 1);
+    assert.equal(result.healed, false);
+    assert.equal(result.turns, 1);
+  });
+
   it('forwards heartbeatMs and onHeartbeat to the model client', async () => {
     const calls = [];
     const client = /** @type {import('../src/provider.mjs').Provider} */ (

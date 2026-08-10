@@ -14,11 +14,13 @@ import {
   heartbeatIntervalMs,
   isRunBudgetExceeded,
   memorySkippedForCancel,
+  memorySkippedForCostBudget,
   modelMaxRetries,
   remainingRunBudgetMs,
   resolveRequestTimeoutMs,
   reviewMetadata,
   reviewSkippedForCancel,
+  reviewSkippedForCostBudget,
   reviewSkippedForIncompleteBuild,
   run,
   runCancelled,
@@ -1175,6 +1177,34 @@ describe('review pass wiring', () => {
     }
   });
 
+  it('forwards the run cost ceiling and what the run already spent', async () => {
+    // The harness's entry gate only catches a ceiling crossed *before* the
+    // review. Without these two the reviewer's own tool loop runs unbounded --
+    // and it is the phase most able to spend, being a second whole tool loop.
+    let seen;
+    const client = /** @type {import('../src/provider.mjs').Provider} */ ({
+      capabilities: { modelLifecycle: false },
+    });
+    await runReviewPass({
+      cwd: '/tmp',
+      client,
+      reviewModel: 'reviewer',
+      buildContextWindow: 8192,
+      startedAt: new Date(),
+      maxRunMs: 60000,
+      filesChanged: ['a.mjs'],
+      maxCostUsd: 2,
+      spentUsd: 1.5,
+      runReviewFn: async (params) => {
+        seen = params;
+        return { skipped: true };
+      },
+    });
+
+    assert.equal(seen.maxCostUsd, 2);
+    assert.equal(seen.spentUsd, 1.5);
+  });
+
   it('skips the model-load step entirely for a provider with no model-lifecycle concept (e.g. OpenRouter)', async () => {
     let loadCalled = false;
     let reviewCalledWithModel;
@@ -1454,6 +1484,25 @@ describe('reviewSkippedForIncompleteBuild', () => {
       reviewSkippedForIncompleteBuild('budget-exceeded').reason,
       /budget-exceeded/,
     );
+  });
+});
+
+describe('cost-budget skip records', () => {
+  it('records a review skipped for the cost ceiling as a skip, not a verdict', () => {
+    // Running out of money says nothing about the change: reviewBlocks must
+    // stay false, or --fail-on-review would park work on an empty wallet.
+    const result = reviewSkippedForCostBudget(2.5);
+    assert.equal(result.skipped, true);
+    assert.match(result.reason, /cost budget/);
+    assert.match(result.reason, /2\.5/);
+    assert.equal('verdict' in result, false);
+    assert.equal('passed' in result, false);
+  });
+
+  it('records a retrospective skipped for the cost ceiling', () => {
+    const result = memorySkippedForCostBudget(0.5);
+    assert.equal(result.proposed, false);
+    assert.match(result.reason, /cost budget/);
   });
 });
 

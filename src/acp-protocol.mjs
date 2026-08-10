@@ -34,7 +34,15 @@ export function stopReasonFor(stoppedReason, cancelled) {
   if (stoppedReason === 'complete') {
     return 'end_turn';
   }
-  if (stoppedReason === 'budget-exceeded' || stoppedReason === 'tool-limit') {
+  // Every "ran out of allowance" stop maps the same way, whether the
+  // allowance was wall-clock, turns, or dollars. A cost-exceeded run left out
+  // of this list falls through to end_turn -- indistinguishable, to the
+  // editor, from a run that answered the question.
+  if (
+    stoppedReason === 'budget-exceeded' ||
+    stoppedReason === 'cost-exceeded' ||
+    stoppedReason === 'tool-limit'
+  ) {
     return 'max_turn_requests';
   }
   if (stoppedReason === 'error') {

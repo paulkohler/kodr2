@@ -197,6 +197,9 @@ function buildJudgeMessages(goal, filesChanged) {
  * @param {AbortSignal} [params.signal] - Cancellation signal (see specs/cancel.yaml),
  *   forwarded to the judge's tool loop. The judge is a full read-only tool loop
  *   plus a verdict call, so without it a Ctrl-C cannot stop the judge phase.
+ * @param {number} [params.maxCostUsd] - Spend ceiling in USD for this attempt
+ *   (0 disables); the judge is bounded by the same one as the build it judges
+ * @param {number} [params.spentUsd] - What the attempt's build already cost
  * @param {import('./reporter.mjs').Reporter} [params.reporter]
  * @returns {Promise<Verdict>}
  */
@@ -219,6 +222,8 @@ export async function evaluateGoal(params) {
     onDebug,
     envPassthrough = [],
     signal,
+    maxCostUsd,
+    spentUsd = 0,
     reporter = createNullReporter(),
   } = params;
 
@@ -245,6 +250,8 @@ export async function evaluateGoal(params) {
     onDebug,
     maxToolTurns,
     signal,
+    maxCostUsd,
+    spentUsd,
   });
 
   const parsed = parseVerdict(loop.finalText);

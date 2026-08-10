@@ -29,6 +29,12 @@ inputs:
   maxRunMs:
     type: number
     description: Stop between model/tool turns after this many milliseconds (default 0, disabled)
+  maxCostUsd:
+    type: number
+    description: >
+      Spend ceiling for the whole run in USD, checked between turns (default 0,
+      disabled; KODR_MAX_COST_USD / CLI --max-cost-usd). A float, unlike every
+      other limit here -- the interesting ceilings are cents.
   maxToolTurns:
     type: number
     description: Tool-turn ceiling for the loop, applied to both the main run and each heal turn (default 20, CLI --max-tool-turns)
@@ -51,7 +57,7 @@ outputs:
     description: Number of tool-call round trips
   stoppedReason:
     type: string
-    description: '"complete" when the model produced a final response, "tool-limit" when it hit the turn ceiling, "budget-exceeded" when maxRunMs elapsed, "stuck" when the same tool call failed identically maxRepeatToolErrors times in a row, "cancelled" on abort'
+    description: '"complete" when the model produced a final response, "tool-limit" when it hit the turn ceiling, "budget-exceeded" when maxRunMs elapsed, "cost-exceeded" when the run spent maxCostUsd, "stuck" when the same tool call failed identically maxRepeatToolErrors times in a row, "cancelled" on abort'
   verification:
     type: object
     description: "{ passed, command, output, exitCode }"
@@ -110,6 +116,35 @@ constraints:
   - The main run and the heal pass share one tool loop, limited to maxToolTurns (default 20, --max-tool-turns) to prevent runaway
   - Optional maxRunMs stops between turns, caps tool and verification command timeouts, before healing, and during healing when the budget is exceeded
   - Each model request is capped to the run's *remaining* budget (not a fresh maxRunMs-length timeout every turn), so a request started near the deadline cannot itself outlive it
+  - >
+    An optional spend ceiling (maxCostUsd, --max-cost-usd /
+    KODR_MAX_COST_USD, default 0 = disabled) bounds the whole run in dollars
+    the way maxRunMs bounds it in wall-clock. Until it existed the only bounds
+    were time and turns, while usage.cost was diligently accumulated and gated
+    nothing -- so on a hosted provider a retry-heavy run's dollar bound was
+    whatever the clock allowed.
+  - >
+    The ceiling is a *run* budget, not a per-phase allowance: every phase that
+    can spend receives what the run has already spent (spentUsd) alongside the
+    ceiling, so heal, the review pass and the goal judge cannot each start
+    again from zero. The tool loop checks before each request as well as after
+    it, so a phase entered with the budget already gone does not get one more
+    turn on the house, and stops with stoppedReason "cost-exceeded".
+  - >
+    The post-build phases are gated on the ceiling by the harness rather than
+    on the loop's stop reason, because a phase that answers in a single
+    request never re-checks anything and comes back "complete" having crossed
+    it. A review skipped this way is a skip and never a verdict
+    (reviewSkippedForCostBudget) -- running out of money says nothing about
+    the change, and --fail-on-review must not park work on an empty wallet --
+    and the memory retrospective, the easiest thing to go without, is skipped
+    outright (memorySkippedForCostBudget). The review gate sits before the
+    model swap, which spends two full model loads before a single token.
+  - >
+    Cost gating is only as good as what the provider reports: LM Studio and
+    Ollama report no cost at all, so the ceiling is inert there and this is
+    documented rather than papered over. It is a backstop for one runaway run
+    on a hosted provider, not a substitute for an account-level cap.
   - >
     A hard per-request timeout ceiling (requestTimeoutMs, default 600,000ms =
     10 minutes, --request-timeout-ms / KODR_REQUEST_TIMEOUT_MS, positive only)
@@ -250,6 +285,20 @@ tests:
     - maxRepeatToolErrors of 0 disables the breaker
     - maxRepeatToolErrors resolves option, then KODR_MAX_REPEAT_TOOL_ERRORS, then the default
     - a timeout at the run deadline is reported as budget-exceeded, not an error
+    - maxCostUsd resolves the option, then KODR_MAX_COST_USD, then disabled
+    - maxCostUsd takes a fraction of a dollar, not just whole units
+    - maxCostUsd ignores a garbled env var rather than reading it as a ceiling
+    - isCostBudgetExceeded is false when no ceiling is set, whatever was spent
+    - isCostBudgetExceeded is true at the ceiling, not only past it
+    - the run cost budget stops the loop once the run has spent its ceiling
+    - the run cost budget counts what earlier phases already spent, not just this loop
+    - the run cost budget never sends a request when the budget is already spent
+    - the run cost budget runs to completion untouched when no ceiling is set
+    - healing stops repairing once the run has spent its cost budget
+    - cost-budget skip records a review skipped for the cost ceiling as a skip, not a verdict
+    - cost-budget skip records a retrospective skipped for the cost ceiling
+    - parseArgs parses --max-cost-usd as a float, defaulting to null so the env var still applies
+    - buildRunOptions passes the cost ceiling through to every run it drives
     - a timeout with no run budget is still surfaced as an error
     - dispatches multi-call and repeated native tool calls, one result each
     - tolerates malformed argument JSON and model-invented tool names

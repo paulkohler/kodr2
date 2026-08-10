@@ -57,6 +57,46 @@ export function maxRepeatToolErrors(option) {
 }
 
 /**
+ * Spend ceiling for a run, in USD. Resolved from an explicit option, then
+ * KODR_MAX_COST_USD, then 0 -- disabled, so the default run is byte-identical
+ * to one with no ceiling at all.
+ *
+ * A float, not an integer: the interesting ceilings are cents. Mirrors
+ * loopMaxLoopCost in loop.mjs, which is the same idea one level up (a ceiling
+ * across a whole checklist rather than within one run).
+ *
+ * Only as good as what the provider reports: LM Studio and Ollama report no
+ * cost at all, so a ceiling is inert there. It is for hosted providers, and
+ * for a single runaway run -- an account-level cap is the real backstop.
+ * @param {number} [option]
+ * @returns {number}
+ */
+export function maxCostUsd(option) {
+  if (typeof option === 'number' && option >= 0) {
+    return option;
+  }
+  const fromEnv = Number.parseFloat(process.env.KODR_MAX_COST_USD);
+  if (Number.isFinite(fromEnv) && fromEnv >= 0) {
+    return fromEnv;
+  }
+  return 0;
+}
+
+/**
+ * Whether a run has spent its cost budget. A ceiling of 0 (or any falsy
+ * value) disables the budget.
+ * @param {number} spentUsd - Cost accumulated so far, across every phase
+ * @param {number} ceilingUsd
+ * @returns {boolean}
+ */
+export function isCostBudgetExceeded(spentUsd, ceilingUsd) {
+  if (!ceilingUsd) {
+    return false;
+  }
+  return spentUsd >= ceilingUsd;
+}
+
+/**
  * A chat message, as sent to/received from the model. `tool_calls` is
  * present on an assistant message that invoked tools; `content` carries
  * plain text (or, for a vision result, an array of OpenAI content parts).
@@ -103,9 +143,16 @@ export function maxRepeatToolErrors(option) {
  * @param {AbortSignal} [params.signal] - Cancellation signal (see specs/cancel.yaml).
  *   Checked between turns and passed to each chat request: an abort mid-request
  *   destroys the socket and the loop stops with stoppedReason "cancelled".
+ * @param {number} [params.maxCostUsd] - Spend ceiling in USD for the whole run,
+ *   checked between turns (0 disables, also KODR_MAX_COST_USD)
+ * @param {number} [params.spentUsd] - Cost already spent by earlier phases of
+ *   this run, so the ceiling bounds the run rather than each loop separately.
+ *   A heal or review pass starting near the ceiling stops immediately instead
+ *   of getting a fresh allowance.
  * @returns {Promise<{ finalText: string, completed: boolean, stoppedReason: string, toolTurns: number, compactions: number, usage: { prompt: number, completion: number, cost: number }, retries: number }>}
- *   stoppedReason is "complete", "tool-limit", "budget-exceeded", "cancelled",
- *   or "stuck" (the same tool call failed identically maxRepeatToolErrors times)
+ *   stoppedReason is "complete", "tool-limit", "budget-exceeded",
+ *   "cost-exceeded", "cancelled", or "stuck" (the same tool call failed
+ *   identically maxRepeatToolErrors times)
  */
 export async function runToolLoop(params) {
   const { client, modelId, messages, tools } = params;
@@ -113,6 +160,11 @@ export async function runToolLoop(params) {
   const { startedAt, maxRunMs = 0, maxToolTurns = MAX_TOOL_TURNS } = params;
   const { contextWindow = 0, compactThreshold = COMPACTION_THRESHOLD } = params;
   const { heartbeatMs = 0, onHeartbeat, onDebug, signal } = params;
+  // Resolved (not destructured) so KODR_MAX_COST_USD still reaches callers
+  // that pass nothing. spentBefore is what earlier phases of this run already
+  // cost: the ceiling is a run budget, not a per-loop allowance.
+  const costCeilingUsd = maxCostUsd(params.maxCostUsd);
+  const spentBeforeUsd = params.spentUsd || 0;
   const hookCtx = buildHookCtx(params);
   // Enforces "never repeat a failing call unchanged": tracks consecutive
   // identical (tool, error) failures across turns, escalates the error the
@@ -178,6 +230,10 @@ export async function runToolLoop(params) {
     retries,
   };
 
+  function costBudgetSpent() {
+    return isCostBudgetExceeded(spentBeforeUsd + usage.cost, costCeilingUsd);
+  }
+
   async function compactIfNeeded(lastPromptTokens) {
     const compacted = await maybeCompact({
       client,
@@ -219,6 +275,13 @@ export async function runToolLoop(params) {
       }
       if (isRunBudgetExceeded(startedAt, maxRunMs)) {
         stoppedReason = 'budget-exceeded';
+        break;
+      }
+      // Before the request, not only after it: a phase entered with the
+      // budget already spent (heal or review following an expensive build)
+      // must not get one more turn on the house.
+      if (costBudgetSpent()) {
+        stoppedReason = 'cost-exceeded';
         break;
       }
 
@@ -287,6 +350,10 @@ export async function runToolLoop(params) {
       }
       if (isRunBudgetExceeded(startedAt, maxRunMs)) {
         stoppedReason = 'budget-exceeded';
+        break;
+      }
+      if (costBudgetSpent()) {
+        stoppedReason = 'cost-exceeded';
         break;
       }
 

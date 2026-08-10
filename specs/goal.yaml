@@ -53,6 +53,16 @@ inputs:
     description: >
       Tool-turn ceiling per judge assessment (default 12 —
       KODR_GOAL_JUDGE_MAX_TOOL_TURNS)
+  maxCostUsd:
+    type: number
+    required: false
+    description: >
+      Spend ceiling in USD for one attempt (0 disables — see
+      specs/harness.yaml), passed to evaluateGoal alongside the build's own
+      cost as spentUsd. The judge is a full read-only tool loop, so bounding
+      the build but not the judge would leave half of each attempt unbounded;
+      like maxRunMs, the ceiling applies per attempt, and --max-loop-cost is
+      the cumulative one a level up (specs/loop.yaml).
 
 outputs:
   met:

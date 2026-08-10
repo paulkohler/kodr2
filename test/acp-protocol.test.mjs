@@ -23,6 +23,12 @@ describe('stopReasonFor', () => {
     // Cancellation wins over the run's own reason.
     assert.equal(stopReasonFor('complete', true), 'cancelled');
   });
+
+  it('maps a run that spent its cost budget to max_turn_requests', () => {
+    // Not end_turn: to the editor that is indistinguishable from a run that
+    // answered the question.
+    assert.equal(stopReasonFor('cost-exceeded'), 'max_turn_requests');
+  });
 });
 
 describe('agentCapabilities', () => {

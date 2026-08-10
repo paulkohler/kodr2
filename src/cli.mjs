@@ -77,6 +77,7 @@ import { MAX_TOOL_TURNS } from './tool-loop.mjs';
  * @property {string|null} test
  * @property {number} healTurns
  * @property {number} maxRunMs
+ * @property {number|null} maxCostUsd
  * @property {number} maxToolTurns
  * @property {number|null} maxRepeatToolErrors
  * @property {number|null} requestTimeoutMs
@@ -205,6 +206,17 @@ export async function main(argv) {
     process.exitCode = 1;
     return;
   }
+  // A float, unlike every other limit here: the interesting ceilings are
+  // cents. NaN (from `--max-cost-usd abc`) must be an error rather than
+  // silently falling through the resolver as "no ceiling at all".
+  if (
+    args.maxCostUsd !== null &&
+    (!Number.isFinite(args.maxCostUsd) || args.maxCostUsd < 0)
+  ) {
+    process.stderr.write('--max-cost-usd must be a non-negative number.\n');
+    process.exitCode = 1;
+    return;
+  }
   if (!Number.isInteger(args.maxToolTurns) || args.maxToolTurns < 1) {
     process.stderr.write('--max-tool-turns must be a positive integer.\n');
     process.exitCode = 1;
@@ -318,6 +330,7 @@ export async function main(argv) {
     testCommand: args.test,
     maxHealTurns: args.healTurns,
     maxRunMs: args.maxRunMs,
+    maxCostUsd: args.maxCostUsd,
     maxToolTurns: args.maxToolTurns,
     maxRepeatToolErrors: args.maxRepeatToolErrors,
     requestTimeoutMs: args.requestTimeoutMs,
@@ -581,6 +594,7 @@ export function buildRunOptions(args, cwd, quiet) {
     testCommand: args.test,
     maxHealTurns: args.healTurns,
     maxRunMs: args.maxRunMs,
+    maxCostUsd: args.maxCostUsd,
     maxToolTurns: args.maxToolTurns,
     maxRepeatToolErrors: args.maxRepeatToolErrors,
     requestTimeoutMs: args.requestTimeoutMs,
@@ -660,6 +674,9 @@ export function parseArgs(argv) {
     test: null,
     healTurns: 3,
     maxRunMs: 0,
+    // null (not 0) so KODR_MAX_COST_USD still reaches maxCostUsd()'s resolver
+    // when the flag isn't passed -- same reasoning as maxRepeatToolErrors.
+    maxCostUsd: null,
     maxToolTurns: MAX_TOOL_TURNS,
     // null (not a number) so the KODR_MAX_REPEAT_TOOL_ERRORS env var still
     // reaches the resolver when the flag isn't passed -- a numeric default here
@@ -812,6 +829,11 @@ export function parseArgs(argv) {
     }
     if (arg === '--max-run-ms' && argv[i + 1]) {
       args.maxRunMs = parseInt(argv[++i], 10);
+      i++;
+      continue;
+    }
+    if (arg === '--max-cost-usd' && argv[i + 1]) {
+      args.maxCostUsd = Number.parseFloat(argv[++i]);
       i++;
       continue;
     }
@@ -1124,6 +1146,11 @@ Options:
   --test <command>                First Stop hook (e.g. "npm test"); see .kodr/hooks.json
   --heal-turns <n>                Max repair turns (default: 3)
   --max-run-ms <n>                Stop between turns after this many ms (default: 0, disabled)
+  --max-cost-usd <n>              Stop between turns once the run has spent this much, across
+                                  build, heal, review and memory (default: 0, disabled, or
+                                  KODR_MAX_COST_USD). Hosted providers only -- LM Studio and
+                                  Ollama report no cost, so it is inert there. A backstop for
+                                  one runaway run; set an account-level cap as well.
   --max-tool-turns <n>            Tool-turn ceiling per loop (default: 20)
   --max-repeat-tool-errors <n>    Stop after the same tool call fails this many times in a
                                   row (default: 3, or KODR_MAX_REPEAT_TOOL_ERRORS; 0 disables)
@@ -1576,6 +1603,12 @@ export async function runGoalCommand(args) {
             goal,
             filesChanged: result.filesChanged || [],
             maxRunMs: args.maxRunMs,
+            // The judge is bounded by the same per-attempt ceiling as the
+            // build it is judging, and counts the build's spend against it --
+            // otherwise a run stopped for cost is immediately followed by a
+            // judge with a full fresh allowance.
+            maxCostUsd: args.maxCostUsd,
+            spentUsd: result.usage?.cost || 0,
             contextWindow: judgeContextWindow,
             heartbeatMs: args.heartbeatMs,
             envPassthrough: args.env,
@@ -1739,6 +1772,12 @@ export async function runLoopCommand(args) {
             goal: goalText,
             filesChanged: result.filesChanged || [],
             maxRunMs: args.maxRunMs,
+            // The judge is bounded by the same per-attempt ceiling as the
+            // build it is judging, and counts the build's spend against it --
+            // otherwise a run stopped for cost is immediately followed by a
+            // judge with a full fresh allowance.
+            maxCostUsd: args.maxCostUsd,
+            spentUsd: result.usage?.cost || 0,
             contextWindow: judgeContextWindow,
             heartbeatMs: args.heartbeatMs,
             envPassthrough: args.env,
@@ -1839,6 +1878,7 @@ export async function runAcpCommand(args) {
     testCommand: args.test,
     maxHealTurns: args.healTurns,
     maxRunMs: args.maxRunMs,
+    maxCostUsd: args.maxCostUsd,
     maxToolTurns: args.maxToolTurns,
     maxRepeatToolErrors: args.maxRepeatToolErrors,
     requestTimeoutMs: args.requestTimeoutMs,

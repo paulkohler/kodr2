@@ -185,6 +185,16 @@ describe('parseArgs', () => {
     assert.equal(args.maxRunMs, 1000);
   });
 
+  it('parses --max-cost-usd as a float, defaulting to null so the env var still applies', () => {
+    // Cents are the interesting ceilings, so parseInt would be wrong here --
+    // "0.25" would become 0, which the resolver reads as "no ceiling".
+    assert.equal(
+      parseArgs(['run', 'hi', '--max-cost-usd', '0.25']).maxCostUsd,
+      0.25,
+    );
+    assert.equal(parseArgs(['run', 'hi']).maxCostUsd, null);
+  });
+
   it('parses --max-tool-turns flag', () => {
     const args = parseArgs(['run', 'hi', '--max-tool-turns', '60']);
     assert.equal(args.maxToolTurns, 60);
@@ -648,5 +658,13 @@ describe('buildRunOptions', () => {
     const options = buildRunOptions(parseArgs(['goal', 'x']), '/tmp/ws', true);
     assert.equal(options.cwd, '/tmp/ws');
     assert.equal(options.quiet, true);
+  });
+
+  it('passes the cost ceiling through to every run it drives', () => {
+    // kodr goal and kodr loop drive run() through this builder, so a ceiling
+    // that only reached kodr run would leave the two long-running commands --
+    // the expensive ones -- unbounded.
+    const args = parseArgs(['loop', '--max-cost-usd', '1.5']);
+    assert.equal(buildRunOptions(args, '/tmp/ws', false).maxCostUsd, 1.5);
   });
 });
