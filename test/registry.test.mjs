@@ -46,6 +46,22 @@ describe('createToolRegistry', () => {
     assert.ok(on.includes('view_image'));
   });
 
+  it('the description names the default timeout out of the box', () => {
+    const registry = createToolRegistry(tmpDir);
+    const runCommand = registry
+      .definitions()
+      .find((d) => d.name === 'run_command');
+    assert.match(runCommand.description, /time out after 10 minutes/);
+  });
+
+  it('the description names the configured timeout when one is set', () => {
+    const registry = createToolRegistry(tmpDir, { commandTimeoutMs: 90_000 });
+    const runCommand = registry
+      .definitions()
+      .find((d) => d.name === 'run_command');
+    assert.match(runCommand.description, /time out after 90 seconds/);
+  });
+
   it('dispatches known tools', async () => {
     await writeFile(join(tmpDir, 'test.txt'), 'hello');
     const registry = createToolRegistry(tmpDir);

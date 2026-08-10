@@ -34,11 +34,17 @@ export function snapshotCap(context) {
   return DEFAULT_SNAPSHOT_CAP;
 }
 
-export default {
-  definition: {
+/**
+ * The definition, rendered for a given timeout. The timeout is configurable
+ * (commandTimeoutMs / registry option), so the sentence naming it must be
+ * rendered from the resolved value -- a hardcoded "10 minutes" would lie to
+ * the model the moment a caller configures anything else.
+ * @param {number} timeoutMs
+ */
+function definitionFor(timeoutMs) {
+  return {
     name: 'run_command',
-    description:
-      'Execute a shell command in the workspace directory. Returns stdout, stderr, and exit code. Commands time out after 10 minutes.',
+    description: `Execute a shell command in the workspace directory. Returns stdout, stderr, and exit code. Commands time out after ${formatTimeout(timeoutMs)}.`,
     parameters: {
       type: 'object',
       properties: {
@@ -49,6 +55,42 @@ export default {
       },
       required: ['command'],
     },
+  };
+}
+
+/**
+ * @param {number} ms
+ * @returns {string}
+ */
+export function formatTimeout(ms) {
+  if (ms >= 60_000 && ms % 60_000 === 0) {
+    const minutes = ms / 60_000;
+    if (minutes === 1) {
+      return '1 minute';
+    }
+    return `${minutes} minutes`;
+  }
+  if (ms >= 1000 && ms % 1000 === 0) {
+    const seconds = ms / 1000;
+    if (seconds === 1) {
+      return '1 second';
+    }
+    return `${seconds} seconds`;
+  }
+  return `${ms} ms`;
+}
+
+export default {
+  definition: definitionFor(DEFAULT_TIMEOUT),
+
+  /**
+   * Render the definition against the registry's resolved configuration.
+   * Preferred by the registry over the static definition (which keeps the
+   * default wording for callers that import the tool directly).
+   * @param {{ commandTimeoutMs?: number }} context
+   */
+  describe(context) {
+    return definitionFor(context.commandTimeoutMs ?? DEFAULT_TIMEOUT);
   },
 
   async execute({ command }, context) {

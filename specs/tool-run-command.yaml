@@ -30,6 +30,10 @@ outputs:
 constraints:
   - Commands run via /bin/sh -c (the shared shell runner, see shell spec)
   - 10 minute timeout by default (configurable)
+  - The tool description's timeout sentence is rendered from the resolved
+    timeout via a describe(context) hook the registry prefers over the static
+    definition -- a hardcoded number would lie to the model the moment a
+    caller configures a different timeout
   - Timeout is capped by the remaining maxRunMs budget when a run budget is active
   - Output truncated at 50,000 characters per stream
   - Runs in workspace directory (cwd)
@@ -60,5 +64,7 @@ tests:
     - does not expose non-allowlisted environment variables by default
     - exposes extra variables named in envPassthrough
     - caps command timeout to the remaining run budget
+    - the description names the default timeout out of the box
+    - the description names the configured timeout when one is set
   eval:
     - model uses run_command to run tests

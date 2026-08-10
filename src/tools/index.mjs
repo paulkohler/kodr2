@@ -131,11 +131,19 @@ export function createToolRegistry(cwd, options = {}) {
 
   return {
     /**
-     * Tool definitions for the chat completions API.
+     * Tool definitions for the chat completions API. A tool with a
+     * describe() hook renders its definition against the registry's resolved
+     * configuration -- run_command names its actual timeout, for example --
+     * so a configurable limit never leaves a stale number in the prompt.
      * @returns {Array}
      */
     definitions() {
-      return activeTools.map((t) => t.definition);
+      return activeTools.map((tool) => {
+        if ('describe' in tool && typeof tool.describe === 'function') {
+          return tool.describe(context);
+        }
+        return tool.definition;
+      });
     },
 
     /**
