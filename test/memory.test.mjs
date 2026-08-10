@@ -517,6 +517,30 @@ describe('runMemoryConsolidation', () => {
     assert.equal(await readMemory(tmpDir), before);
   });
 
+  it('a proposal identical to the current content proposes nothing to apply', async () => {
+    // Observed live: a small model rewrites the file byte-identically
+    // instead of honouring the NO CHANGES sentinel. A no-op must not
+    // consume a y/N prompt or a proposal file.
+    const before = await seedMemory('- already tight\n');
+    const client = scriptedClient([finalTurn(before)]);
+    let prompted = false;
+    const result = await runMemoryConsolidation({
+      client,
+      modelId: 'm',
+      cwd: tmpDir,
+      runsDir: runsDir(),
+      attended: true,
+      promptYesNoFn: async () => {
+        prompted = true;
+        return true;
+      },
+    });
+    assert.equal(prompted, false);
+    assert.equal(result.notes, '');
+    assert.equal(result.applied, false);
+    assert.equal(await readMemory(tmpDir), before);
+  });
+
   it('attended consolidation rewrites MEMORY.md on "y" and backs up the prior content', async () => {
     const before = await seedMemory();
     const client = scriptedClient([finalTurn('- merged lesson')]);

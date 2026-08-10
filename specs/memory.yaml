@@ -175,7 +175,10 @@ constraints:
     rewrite would silently discard exactly such an entry.
   - The model's "already tight" signal is the literal reply "NO CHANGES."
     — treated like the retrospective's "No findings." (proposed but empty,
-    nothing to confirm or write)
+    nothing to confirm or write). A proposal byte-identical to the current
+    content is treated the same way mechanically — observed live: a small
+    model rewrites the file unchanged instead of honouring the sentinel,
+    and a no-op must not consume a y/N prompt or a proposal file
   - The consolidation reply has any think block stripped (via think.mjs)
     before it is treated as file content — a reasoning model's scratchpad
     must never be written into MEMORY.md
@@ -210,6 +213,7 @@ tests:
     - consolidation is skipped when MEMORY.md is missing or empty
     - consolidation strips a think block from the proposal
     - a NO CHANGES reply proposes nothing to apply
+    - a proposal identical to the current content proposes nothing to apply
     - attended consolidation rewrites MEMORY.md on "y" and backs up the prior content
     - attended consolidation discards on "n"
     - apply rewrites without prompting
@@ -220,3 +224,5 @@ tests:
     - the size notice names kodr consolidate
   eval:
     - two sequential runs in the same workspace, second run's approach visibly reflects an applied lesson from the first
+    - consolidation merges duplicates, keeps the surviving truth of a contradiction, and strips dated headings
+    - consolidation leaves an already-tight memory file untouched unattended

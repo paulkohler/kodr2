@@ -524,7 +524,11 @@ export async function runMemoryConsolidation(params) {
   const usage = response.usage || { prompt: 0, completion: 0, cost: 0 };
   const retries = response.retries || 0;
 
-  if (!notes || isNoChanges(notes)) {
+  // notes === before catches the model rewriting the file byte-identically
+  // instead of honouring the NO CHANGES sentinel -- observed live (qwen3-
+  // coder-30b, eval/memory.eval.mjs): the mechanics must not depend on a
+  // small model remembering the sentinel when a no-op is detectable here.
+  if (!notes || isNoChanges(notes) || notes === before) {
     return {
       proposed: true,
       notes: '',

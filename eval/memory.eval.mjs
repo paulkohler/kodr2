@@ -23,8 +23,11 @@ import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
 import { run } from '../src/harness.mjs';
+import { readMemory, runMemoryConsolidation } from '../src/memory.mjs';
+import { createProvider } from '../src/provider.mjs';
 
 const LM_STUDIO_URL = 'http://localhost:1234/v1';
+const MODEL = process.env.KODR_TEST_MODEL || 'qwen/qwen3-coder-30b';
 
 async function lmStudioAvailable() {
   return new Promise((resolve) => {
@@ -113,5 +116,126 @@ describe('memory retrospective eval', {
       "memory eval: second run's system prompt included the applied lesson:",
       result1.memory.notes,
     );
+  });
+});
+
+// The consolidation fixture: two duplicate lessons, one contradiction whose
+// later entry must win, session narrative to drop, and one distinct durable
+// lesson that must survive verbatim enough to grep for.
+const CLUTTERED_MEMORY = `## 2026-03-01T10:00:00.000Z
+
+- Tests are run with \`npm test\`, which wraps \`node --test test/*.test.mjs\`.
+
+## 2026-03-04T09:00:00.000Z
+
+- The API client lives in src/api-client.mjs; retry logic is in src/retry.mjs.
+- Run the test suite with \`npm test\` before committing.
+
+## 2026-05-20T15:00:00.000Z
+
+- In this session I spent a long time debugging the fetch mock before
+  realizing the fixture server was already running on port 4000.
+- Database fixtures MUST be regenerated with \`npm run fixtures\` after any
+  schema change.
+
+## 2026-06-10T08:00:00.000Z
+
+- Correction: the API client moved to src/net/client.mjs; the old
+  src/api-client.mjs path no longer exists.
+`;
+
+describe('memory consolidation eval', {
+  skip: !(await lmStudioAvailable()) && 'LM Studio not available',
+}, () => {
+  let client;
+  let modelId;
+
+  before(async () => {
+    client = createProvider({ baseUrl: LM_STUDIO_URL, model: MODEL });
+    modelId = await client.resolveModel();
+  });
+
+  it('merges duplicates, keeps the surviving truth of a contradiction, strips dated headings', {
+    timeout: 300_000,
+  }, async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), 'kodr-consolidate-eval-'));
+    try {
+      await writeFile(join(tmpDir, 'MEMORY.md'), CLUTTERED_MEMORY);
+      const before = await readMemory(tmpDir);
+
+      const result = await runMemoryConsolidation({
+        client,
+        modelId,
+        cwd: tmpDir,
+        runsDir: join(tmpDir, '.kodr', 'runs'),
+        apply: true,
+      });
+
+      assert.equal(result.proposed, true);
+      assert.equal(result.error, undefined);
+      assert.equal(result.applied, true);
+      assert.ok(result.backupPath, 'expected the prior content backed up');
+      assert.equal(await readFile(result.backupPath, 'utf8'), before);
+
+      const after = await readMemory(tmpDir);
+      // Hard assertions: explicit prompt contract, or a lesson that must
+      // survive any faithful consolidation.
+      assert.ok(
+        after.includes('npm run fixtures'),
+        'the distinct fixtures lesson must survive',
+      );
+      assert.ok(
+        after.includes('src/net/client.mjs'),
+        'the surviving truth of the contradiction must be kept',
+      );
+      assert.ok(
+        !/^## 2026-/m.test(after),
+        'dated headings are an artifact of appending and must go',
+      );
+      assert.ok(!after.includes('<think>'), 'no think text in the file');
+
+      // Probabilistic quality -- logged, not asserted, per this repo's eval
+      // philosophy (track pass rates, not binary pass/fail).
+      console.log(
+        `consolidation eval: ${before.length} -> ${after.length} chars;`,
+        `narrative dropped: ${!after.includes('port 4000')};`,
+        `stale path gone: ${!after.includes('src/api-client.mjs')}`,
+      );
+      console.log(`consolidation eval: consolidated file:\n${after}`);
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves an already-tight memory file untouched unattended', {
+    timeout: 300_000,
+  }, async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), 'kodr-consolidate-eval-'));
+    try {
+      const tight = '- Run tests with `npm test` before committing.\n';
+      await writeFile(join(tmpDir, 'MEMORY.md'), tight);
+
+      // Unattended, no apply: whatever the model says, MEMORY.md must not
+      // change -- that mechanic is deterministic. Whether the model answers
+      // NO CHANGES for a file this tight is the probabilistic part.
+      const result = await runMemoryConsolidation({
+        client,
+        modelId,
+        cwd: tmpDir,
+        runsDir: join(tmpDir, '.kodr', 'runs'),
+      });
+
+      assert.equal(result.proposed, true);
+      assert.equal(await readMemory(tmpDir), tight.trim());
+      console.log(
+        `consolidation eval: tight file -> ${
+          result.notes === ''
+            ? 'no-op (sentinel or identical rewrite -- ideal)'
+            : 'proposed a reworded rewrite'
+        }`,
+      );
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
   });
 });
