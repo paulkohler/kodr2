@@ -605,12 +605,11 @@ describe('runToolLoop compaction', () => {
     // A provider like Ollama reports prompt: 0. Without an estimate fallback,
     // needsCompaction(0, ...) is always false and the session never compacts.
     // The seed is small (so the pre-loop check below doesn't fire yet). Turn
-    // 1's large tool call is appended to the conversation but, since the
-    // check runs on the pre-turn snapshot, only turn 2's post-turn estimate
-    // reflects it and crosses the threshold.
+    // 1's large tool call crosses the threshold as soon as it is appended --
+    // the post-turn check estimates the conversation as it now stands, so the
+    // summary call is the very next request.
     const client = scriptedClient([
       toolCallTurn('list_files', { blob: 'x'.repeat(2000) }, 0),
-      toolCallTurn('list_files', {}, 0),
       finalTurn('COMPACTED SUMMARY', 0),
       finalTurn('all done', 0),
     ]);
@@ -629,6 +628,47 @@ describe('runToolLoop compaction', () => {
 
     assert.equal(loop.completed, true);
     assert.equal(loop.compactions, 1);
+    assert.match(messages[1].content, /COMPACTED SUMMARY/);
+  });
+
+  it('compacts when a huge tool result lands, before the next request goes out', async () => {
+    // The provider reports accurate-but-small usage for the request it saw:
+    // the huge tool result was appended *after* that request was measured.
+    // Checked against reported usage alone, the next request would go out
+    // still carrying the result and fail at the backend -- the check must
+    // see the conversation as it now stands.
+    const tools = /** @type {import('../src/tools/index.mjs').ToolRegistry} */ (
+      /** @type {any} */ ({
+        definitions: () => [],
+        dispatch: async () => ({ content: 'y'.repeat(4000) }),
+      })
+    );
+    const client = scriptedClient([
+      toolCallTurn('read_file', { path: 'big.txt' }, 10),
+      finalTurn('COMPACTED SUMMARY', 5),
+      finalTurn('all done', 5),
+    ]);
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'task' },
+    ];
+
+    const loop = await runToolLoop({
+      client,
+      modelId: 'm',
+      messages,
+      tools,
+      contextWindow: 500,
+    });
+
+    assert.equal(loop.completed, true);
+    assert.equal(loop.compactions, 1);
+    // The request after the summary call no longer carries the tool result.
+    const lastCall = client.calls[client.calls.length - 1];
+    assert.equal(
+      lastCall.messages.some((m) => m.role === 'tool'),
+      false,
+    );
     assert.match(messages[1].content, /COMPACTED SUMMARY/);
   });
 

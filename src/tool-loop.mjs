@@ -290,7 +290,16 @@ export async function runToolLoop(params) {
         break;
       }
 
-      await compactIfNeeded(lastPromptTokens);
+      // The reported prompt usage measures the request sent *this* turn --
+      // before the turn's tool results were appended. Checked alone it lags
+      // one turn behind the largest additions: a huge result (a big file
+      // read, a long command output) would ride out in the next request
+      // uncompacted and fail at the backend instead of compacting here. So
+      // check whichever is larger -- the reported usage, or an estimate of
+      // what the next request will actually carry.
+      await compactIfNeeded(
+        Math.max(lastPromptTokens, estimateTokens(messages)),
+      );
     }
   }
 }

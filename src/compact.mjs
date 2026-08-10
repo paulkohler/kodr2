@@ -16,12 +16,14 @@ export const DEFAULT_COMPACT_TASK_CHARS = 8000;
 export const CHARS_PER_TOKEN = 4;
 
 /**
- * Rough token estimate for a message history, used only as a fallback when the
- * provider does not report prompt-token usage (e.g. Ollama's /v1 endpoint).
- * Without it, needsCompaction sees promptTokens 0 and auto-compaction never
- * fires, so a long session grows unbounded until the backend truncates or
- * errors. A chars/token heuristic is deliberately crude -- it only has to be
- * good enough to cross the compaction threshold before the real window does.
+ * Rough token estimate for a message history. Two consumers: the fallback
+ * when the provider reports no prompt-token usage (e.g. Ollama's /v1
+ * endpoint) -- without it, needsCompaction sees promptTokens 0 and
+ * auto-compaction never fires -- and the post-turn compaction check, whose
+ * reported usage measures the request *before* the turn's tool results were
+ * appended and so alone would lag one turn behind the largest additions. A
+ * chars/token heuristic is deliberately crude -- it only has to be good
+ * enough to cross the compaction threshold before the real window does.
  * @param {Array} messages
  * @param {number} [charsPerToken] - Overridable estimation ratio
  * @returns {number} Estimated prompt tokens

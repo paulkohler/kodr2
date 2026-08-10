@@ -87,7 +87,12 @@ constraints:
   - The history is replaced by a single user message holding the summary,
     so no assistant tool_call is left without its matching tool result
   - Auto-compaction is checked between tool turns, after the turn's results
-    are appended, using the most recent request's prompt-token count
+    are appended, using whichever is larger of the most recent request's
+    reported prompt-token count and a chars/token estimate of the
+    conversation as it now stands. The reported count measures the request
+    *before* the turn's tool results were appended, so alone it lags one
+    turn behind the largest additions -- a huge tool result would ride out
+    in the next request uncompacted and fail at the backend
   - Auto-compaction is also checked once before the loop's first request,
     against a chars/token estimate of the seeded conversation -- a
     continuation or a goal-loop retry (see specs/goal.yaml) carries the
@@ -145,6 +150,7 @@ tests:
     - estimateTokens counts reasoning text alongside content and tool calls
     - tool loop compacts in place when a turn crosses the threshold
     - tool loop compacts using an estimate when the provider reports no prompt usage
+    - tool loop compacts when a huge tool result lands, before the next request goes out
     - tool loop caps the compaction summary call to the remaining run budget
     - tool loop adds the compaction summary call's retries to the run total
     - tool loop forwards heartbeatMs and onHeartbeat to the compaction summary call
