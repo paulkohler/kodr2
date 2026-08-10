@@ -20,7 +20,7 @@ describe('createToolRegistry', () => {
   beforeEach(setup);
   afterEach(teardown);
 
-  it('returns definitions for all tools', () => {
+  it('returns definitions for all core tools', () => {
     const registry = createToolRegistry(tmpDir);
     const defs = registry.definitions();
     assert.ok(defs.length >= 6);
@@ -31,7 +31,6 @@ describe('createToolRegistry', () => {
     assert.ok(names.includes('list_files'));
     assert.ok(names.includes('search'));
     assert.ok(names.includes('run_command'));
-    assert.ok(names.includes('load_skill'));
   });
 
   it('offers view_image only when vision is enabled', () => {
@@ -44,6 +43,18 @@ describe('createToolRegistry', () => {
       .definitions()
       .map((d) => d.name);
     assert.ok(on.includes('view_image'));
+  });
+
+  it('offers load_skill only when the workspace has skills', () => {
+    const off = createToolRegistry(tmpDir)
+      .definitions()
+      .map((d) => d.name);
+    assert.ok(!off.includes('load_skill'));
+
+    const on = createToolRegistry(tmpDir, { skills: true })
+      .definitions()
+      .map((d) => d.name);
+    assert.ok(on.includes('load_skill'));
   });
 
   it('the description names the default timeout out of the box', () => {

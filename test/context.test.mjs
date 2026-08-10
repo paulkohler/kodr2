@@ -252,6 +252,19 @@ describe('buildSystemPrompt', () => {
     assert.ok(!prompt.includes('<available-skills>'));
   });
 
+  it('uses a pre-fetched skill list without re-discovering', async () => {
+    // Nothing on disk -- the listing must come from the passed-through list,
+    // the same one the harness uses to gate the load_skill tool.
+    const prompt = await buildSystemPrompt(tmpDir, {
+      skills: [{ name: 'deploy', description: 'Ship it' }],
+    });
+    assert.ok(prompt.includes('<available-skills>'));
+    assert.ok(prompt.includes('deploy: Ship it'));
+
+    const none = await buildSystemPrompt(tmpDir, { skills: [] });
+    assert.ok(!none.includes('<available-skills>'));
+  });
+
   it('includes MEMORY.md as a section distinct from workspace-instructions', async () => {
     await writeFile(join(tmpDir, 'KODR.md'), 'human-authored rules');
     await writeFile(

@@ -43,6 +43,7 @@ import {
   hasContextHeadroom,
 } from './model.mjs';
 import { createProvider, resolveProviderName } from './provider.mjs';
+import { discoverSkills } from './skills.mjs';
 import { DEFAULT_OLLAMA_BASE_URL } from './provider-ollama.mjs';
 import { DEFAULT_OPENROUTER_BASE_URL } from './provider-openrouter.mjs';
 import {
@@ -325,10 +326,17 @@ export async function run(prompt, options) {
     contextWindow,
     startedAt: startedAt.toISOString(),
   };
+  // Discovered once and shared: the registry needs to know whether to offer
+  // the load_skill tool at all, and the system prompt lists the same set --
+  // two independent discoveries could disagree if skills changed on disk in
+  // between, offering a tool for a listing the model never saw (or vice
+  // versa).
+  const skills = await discoverSkills(cwd);
   const tools = createToolRegistry(cwd, {
     envPassthrough,
     startedAt,
     maxRunMs,
+    skills: skills.length > 0,
     vision: options.vision,
     initialFilesChanged: priorFilesChanged,
     backend: options.backend,
@@ -339,7 +347,10 @@ export async function run(prompt, options) {
   // two independent reads could otherwise observe different content if a
   // concurrent process appended to it in between.
   const memoryContent = await readMemory(cwd);
-  const systemPrompt = await buildSystemPrompt(cwd, { memory: memoryContent });
+  const systemPrompt = await buildSystemPrompt(cwd, {
+    memory: memoryContent,
+    skills,
+  });
 
   // MEMORY.md is always loaded into the prompt above when it exists; this
   // never truncates it, just flags an oversized file so a human notices

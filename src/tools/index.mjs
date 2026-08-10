@@ -19,8 +19,12 @@ const ALL_TOOLS = [
   listFiles,
   search,
   runCommand,
-  loadSkill,
 ];
+
+// Only offered when the workspace actually has skills (see specs/skills.yaml)
+// -- in a skill-less workspace the model could only call load_skill to get an
+// error, so it never sees the tool. Same gating pattern as vision below.
+const SKILL_TOOLS = [loadSkill];
 
 // Only offered when vision is enabled (--vision / KODR_VISION); see
 // specs/vision.yaml. Kept out of ALL_TOOLS so a text-only model never sees it.
@@ -53,6 +57,8 @@ const VISION_TOOLS = [viewImage];
  *   them but never got them committed) so this session's own tracking
  *   reflects the full set of changes still sitting in the working tree,
  *   not just what this specific process touches.
+ * @param {boolean} [options.skills] - Offer the load_skill tool; set when the
+ *   workspace has discovered skills (see specs/skills.yaml)
  * @param {boolean} [options.vision] - Offer the view_image tool (see specs/vision.yaml)
  * @param {number} [options.maxImageBytes] - Size cap for view_image reads
  * @param {number} [options.maxReadBytes] - Byte cap for read_file (also
@@ -119,7 +125,16 @@ export function createToolRegistry(cwd, options = {}) {
     },
   };
 
-  const pool = options.vision ? [...ALL_TOOLS, ...VISION_TOOLS] : ALL_TOOLS;
+  /**
+   * @type {Array<(typeof ALL_TOOLS)[number] | (typeof SKILL_TOOLS)[number] | (typeof VISION_TOOLS)[number]>}
+   */
+  const pool = [...ALL_TOOLS];
+  if (options.skills) {
+    pool.push(...SKILL_TOOLS);
+  }
+  if (options.vision) {
+    pool.push(...VISION_TOOLS);
+  }
   const activeTools = options.allowedTools
     ? pool.filter((tool) => options.allowedTools.includes(tool.definition.name))
     : pool;

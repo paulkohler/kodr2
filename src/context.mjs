@@ -41,6 +41,11 @@ function workspaceRootNote(cwd) {
  *   itself when omitted; callers that also need the content separately (e.g. for a
  *   size-cap notice) should read it once and pass it through here instead, so the
  *   file can't change between two independent reads.
+ * @param {Array<{ name: string, description: string }>} [options.skills] -
+ *   Pre-fetched skill list. Discovers itself when omitted; callers that also
+ *   need the list separately (the harness gates the load_skill tool on it)
+ *   should discover once and pass it through, so the prompt's listing and the
+ *   tool's availability can't disagree.
  * @returns {Promise<string>}
  */
 export async function buildSystemPrompt(cwd, options = {}) {
@@ -68,7 +73,8 @@ export async function buildSystemPrompt(cwd, options = {}) {
     parts.push('</memory>');
   }
 
-  const skills = await discoverSkills(cwd);
+  const skills =
+    options.skills !== undefined ? options.skills : await discoverSkills(cwd);
   if (skills.length > 0) {
     parts.push('<available-skills>');
     parts.push(
