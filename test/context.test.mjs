@@ -185,7 +185,12 @@ describe('buildSystemPrompt', () => {
     const prompt = await buildSystemPrompt(tmpDir);
     assert.ok(prompt.includes('Use the provided tool channel'));
     assert.ok(prompt.includes('Never write tool calls as plain text'));
-    assert.ok(prompt.includes('tool_name[ARGS]'));
+    // The banned syntax is deliberately NOT spelled out: small models
+    // pattern-complete negative examples, so naming tool_name[ARGS]{...}
+    // risks teaching the exact format the ban exists to prevent. The
+    // text-form recovery fallback still parses it if a model produces it.
+    assert.ok(!prompt.includes('tool_name[ARGS]'));
+    assert.ok(prompt.includes('any other text form'));
     assert.ok(prompt.includes('one tool call per message'));
   });
 

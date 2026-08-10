@@ -81,7 +81,7 @@ export async function heal(params) {
       role: 'user',
       content: `Verification failed. Fix the issues and try again.
 
-Use the provided tool channel for every tool call. Do not write tool calls as text, Markdown, XML, JSON blocks, or formats like tool_name[ARGS]{...}.
+Use the provided tool channel for every tool call. Do not write tool calls as text, Markdown, XML, JSON blocks, or any other text form.
 
 <failure>
 ${lastOutput}
