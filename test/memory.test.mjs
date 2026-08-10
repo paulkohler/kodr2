@@ -15,6 +15,7 @@ import {
   promptYesNo,
   readMemory,
   retrospectiveBudgetMs,
+  runMemoryConsolidation,
   runMemoryRetrospective,
   writeMemoryProposal,
 } from '../src/memory.mjs';
@@ -444,6 +445,200 @@ describe('memorySizeNotice', () => {
     const content = 'x'.repeat(101);
     const notice = memorySizeNotice(content, 100);
     assert.match(notice, /over the 100-character cap/);
+  });
+
+  it('the size notice names kodr consolidate', () => {
+    const notice = memorySizeNotice('x'.repeat(101), 100);
+    assert.match(notice, /kodr consolidate/);
+  });
+});
+
+describe('runMemoryConsolidation', () => {
+  const runsDir = () => join(tmpDir, '.kodr', 'runs');
+
+  async function seedMemory(content = '## 2026-01-01\n\n- lesson one\n') {
+    await writeFile(join(tmpDir, 'MEMORY.md'), content);
+    return content.trim();
+  }
+
+  it('consolidation is skipped when MEMORY.md is missing or empty', async () => {
+    const client = scriptedClient([finalTurn('- merged')]);
+    const missing = await runMemoryConsolidation({
+      client,
+      modelId: 'm',
+      cwd: tmpDir,
+      runsDir: runsDir(),
+    });
+    assert.equal(missing.proposed, false);
+    assert.match(missing.reason, /no MEMORY\.md/);
+    assert.equal(client.calls.length, 0);
+
+    await writeFile(join(tmpDir, 'MEMORY.md'), '   \n');
+    const empty = await runMemoryConsolidation({
+      client,
+      modelId: 'm',
+      cwd: tmpDir,
+      runsDir: runsDir(),
+    });
+    assert.equal(empty.proposed, false);
+  });
+
+  it('consolidation strips a think block from the proposal', async () => {
+    await seedMemory();
+    const client = scriptedClient([
+      finalTurn('<think>\nlet me merge these\n</think>\n- merged lesson'),
+    ]);
+    const result = await runMemoryConsolidation({
+      client,
+      modelId: 'm',
+      cwd: tmpDir,
+      runsDir: runsDir(),
+      apply: true,
+    });
+    assert.equal(result.applied, true);
+    const memory = await readFile(join(tmpDir, 'MEMORY.md'), 'utf8');
+    assert.equal(memory, '- merged lesson\n');
+    assert.ok(!memory.includes('think'));
+  });
+
+  it('a NO CHANGES reply proposes nothing to apply', async () => {
+    const before = await seedMemory();
+    const client = scriptedClient([finalTurn('NO CHANGES.')]);
+    const result = await runMemoryConsolidation({
+      client,
+      modelId: 'm',
+      cwd: tmpDir,
+      runsDir: runsDir(),
+      apply: true,
+    });
+    assert.equal(result.proposed, true);
+    assert.equal(result.notes, '');
+    assert.equal(result.applied, false);
+    assert.equal(await readMemory(tmpDir), before);
+  });
+
+  it('attended consolidation rewrites MEMORY.md on "y" and backs up the prior content', async () => {
+    const before = await seedMemory();
+    const client = scriptedClient([finalTurn('- merged lesson')]);
+    const result = await runMemoryConsolidation({
+      client,
+      modelId: 'm',
+      cwd: tmpDir,
+      runsDir: runsDir(),
+      attended: true,
+      promptYesNoFn: async () => true,
+    });
+    assert.equal(result.applied, true);
+    assert.ok(result.backupPath);
+    assert.equal(await readFile(result.backupPath, 'utf8'), before);
+    assert.equal(await readMemory(tmpDir), '- merged lesson');
+  });
+
+  it('attended consolidation discards on "n"', async () => {
+    const before = await seedMemory();
+    const client = scriptedClient([finalTurn('- merged lesson')]);
+    const result = await runMemoryConsolidation({
+      client,
+      modelId: 'm',
+      cwd: tmpDir,
+      runsDir: runsDir(),
+      attended: true,
+      promptYesNoFn: async () => false,
+    });
+    assert.equal(result.applied, false);
+    assert.equal(result.proposalPath, null);
+    assert.equal(await readMemory(tmpDir), before);
+  });
+
+  it('apply rewrites without prompting', async () => {
+    await seedMemory();
+    const client = scriptedClient([finalTurn('- merged lesson')]);
+    let prompted = false;
+    const result = await runMemoryConsolidation({
+      client,
+      modelId: 'm',
+      cwd: tmpDir,
+      runsDir: runsDir(),
+      apply: true,
+      promptYesNoFn: async () => {
+        prompted = true;
+        return false;
+      },
+    });
+    assert.equal(prompted, false);
+    assert.equal(result.applied, true);
+    assert.equal(await readMemory(tmpDir), '- merged lesson');
+  });
+
+  it('unattended consolidation writes a proposal file and leaves MEMORY.md untouched', async () => {
+    const before = await seedMemory();
+    const client = scriptedClient([finalTurn('- merged lesson')]);
+    const result = await runMemoryConsolidation({
+      client,
+      modelId: 'm',
+      cwd: tmpDir,
+      runsDir: runsDir(),
+    });
+    assert.equal(result.applied, false);
+    assert.ok(result.proposalPath.endsWith('.memory-consolidation.md'));
+    assert.equal(
+      await readFile(result.proposalPath, 'utf8'),
+      '- merged lesson',
+    );
+    assert.equal(await readMemory(tmpDir), before);
+  });
+
+  it('apply aborts when MEMORY.md changed between read and write', async () => {
+    await seedMemory();
+    // The chat call itself appends a new entry mid-flight, simulating a
+    // concurrent run's O_APPEND write landing during consolidation.
+    const client = /** @type {any} */ ({
+      calls: [],
+      async chat() {
+        await appendMemoryNotes(tmpDir, 'late-breaking lesson');
+        return finalTurn('- merged lesson');
+      },
+    });
+    const result = await runMemoryConsolidation({
+      client,
+      modelId: 'm',
+      cwd: tmpDir,
+      runsDir: runsDir(),
+      apply: true,
+    });
+    assert.equal(result.applied, false);
+    assert.match(result.error, /changed while consolidating/);
+    // The concurrent entry survived.
+    assert.match(await readMemory(tmpDir), /late-breaking lesson/);
+  });
+
+  it('apply skips the backup under noSave but still rewrites', async () => {
+    await seedMemory();
+    const client = scriptedClient([finalTurn('- merged lesson')]);
+    const result = await runMemoryConsolidation({
+      client,
+      modelId: 'm',
+      cwd: tmpDir,
+      runsDir: runsDir(),
+      apply: true,
+      noSave: true,
+    });
+    assert.equal(result.applied, true);
+    assert.equal(result.backupPath, null);
+    assert.equal(await readMemory(tmpDir), '- merged lesson');
+  });
+
+  it('the consolidation result reports retries used by its chat call', async () => {
+    await seedMemory();
+    const client = scriptedClient([{ ...finalTurn('- merged'), retries: 2 }]);
+    const result = await runMemoryConsolidation({
+      client,
+      modelId: 'm',
+      cwd: tmpDir,
+      runsDir: runsDir(),
+      apply: true,
+    });
+    assert.equal(result.retries, 2);
   });
 });
 

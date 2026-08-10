@@ -13,6 +13,7 @@ const KNOWN_PROMPTS = [
   'review-retry',
   'review-retry-ungrounded',
   'retrospective',
+  'memory-consolidate',
   'compact',
 ];
 

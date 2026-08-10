@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { renderTranscript } from './compact.mjs';
 import { loadPrompt } from './prompts.mjs';
+import { splitThinking } from './think.mjs';
 import { remainingRunBudgetMs } from './tool-loop.mjs';
 
 export const MEMORY_FILE = 'MEMORY.md';
@@ -48,6 +49,7 @@ export function memoryPromptTimeoutMs(option) {
 }
 
 const RETROSPECTIVE_SYSTEM = loadPrompt('retrospective');
+const CONSOLIDATE_SYSTEM = loadPrompt('memory-consolidate');
 
 /**
  * Whether the end-of-run retrospective is enabled, via the memory option
@@ -148,7 +150,7 @@ export function memorySizeNotice(content, cap) {
   if (!content || content.length <= cap) {
     return null;
   }
-  return `MEMORY.md is ${content.length} characters, over the ${cap}-character cap -- consider pruning it`;
+  return `MEMORY.md is ${content.length} characters, over the ${cap}-character cap -- consider pruning it or running \`kodr consolidate\``;
 }
 
 /**
@@ -186,17 +188,50 @@ export async function appendMemoryNotes(cwd, notes) {
  * @returns {Promise<string>} Path written
  */
 export async function writeMemoryProposal(runsDir, notes) {
+  return writeTimestampedFile(runsDir, notes, 'memory-proposal');
+}
+
+/**
+ * Write a consolidation proposal (the model's proposed full replacement for
+ * MEMORY.md) as a flat runsDir file, same layout as retrospective proposals.
+ * @param {string} runsDir
+ * @param {string} notes
+ * @returns {Promise<string>} Path written
+ */
+export async function writeConsolidationProposal(runsDir, notes) {
+  return writeTimestampedFile(runsDir, notes, 'memory-consolidation');
+}
+
+/**
+ * Back up MEMORY.md's current content before a consolidation rewrites it --
+ * the one memory operation that is destructive by design, so the prior
+ * state must be recoverable from runsDir.
+ * @param {string} runsDir
+ * @param {string} content
+ * @returns {Promise<string>} Path written
+ */
+export async function writeMemoryBackup(runsDir, content) {
+  return writeTimestampedFile(runsDir, content, 'memory-backup');
+}
+
+/**
+ * @param {string} runsDir
+ * @param {string} content
+ * @param {string} suffix
+ * @returns {Promise<string>}
+ */
+async function writeTimestampedFile(runsDir, content, suffix) {
   await mkdir(runsDir, { recursive: true });
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   // The random suffix guards the same collision incident.mjs's
   // writeIncident hit: a millisecond-resolution timestamp alone can
-  // collide and silently overwrite when two retrospectives land in the
-  // same process tick.
+  // collide and silently overwrite when two writes land in the same
+  // process tick.
   const path = join(
     runsDir,
-    `${timestamp}-${randomUUID().slice(0, 8)}.memory-proposal.md`,
+    `${timestamp}-${randomUUID().slice(0, 8)}.${suffix}.md`,
   );
-  await writeFile(path, notes, 'utf8');
+  await writeFile(path, content, 'utf8');
   return path;
 }
 
@@ -420,4 +455,210 @@ async function persistProposal(runsDir, notes, noSave) {
     return null;
   }
   return writeMemoryProposal(runsDir, notes);
+}
+
+function isNoChanges(notes) {
+  return /^no changes\.?$/i.test(notes);
+}
+
+/**
+ * @typedef {object} MemoryConsolidation
+ * @property {boolean} proposed
+ * @property {string} [reason] - Why nothing was proposed (e.g. no MEMORY.md)
+ * @property {string} [notes] - The proposed replacement content
+ * @property {boolean} [applied]
+ * @property {string|null} [proposalPath]
+ * @property {string|null} [backupPath] - Where the prior content went on apply
+ * @property {{ prompt: number, completion: number, cost: number }} [usage]
+ * @property {number} [retries]
+ * @property {string} [error]
+ */
+
+/**
+ * Consolidate MEMORY.md: ask the model for a rewrite that merges duplicate
+ * entries and drops stale ones, then apply it only with a human decision in
+ * the loop -- attended y/N, an explicit apply flag, or (unattended) a
+ * proposal file and no write. The counterpart to append-only proposals:
+ * without it the file is a log, not a memory, and every stale contradiction
+ * is loaded into every future prompt.
+ * @param {object} params
+ * @param {import('./provider.mjs').Provider} params.client - Model client
+ * @param {string} params.modelId - Model to consolidate with
+ * @param {string} params.cwd - Workspace root
+ * @param {string} params.runsDir - Where proposals and backups are written
+ * @param {boolean} [params.attended] - Prompt inline for confirmation
+ * @param {boolean} [params.apply] - Rewrite without prompting (explicit opt-in)
+ * @param {boolean} [params.noSave] - Skip runsDir writes (proposals and the
+ *   apply-time backup); an apply still rewrites MEMORY.md itself
+ * @param {number} [params.timeoutMs] - Cap for the consolidation chat call
+ * @param {function} [params.promptYesNoFn] - Overridable for tests
+ * @returns {Promise<MemoryConsolidation>}
+ */
+export async function runMemoryConsolidation(params) {
+  const { client, modelId, cwd, runsDir } = params;
+  const { attended = false, apply = false, noSave = false } = params;
+  const { promptYesNoFn = promptYesNo } = params;
+
+  const before = await readMemory(cwd);
+  if (!before) {
+    return { proposed: false, reason: 'no MEMORY.md to consolidate' };
+  }
+
+  let response;
+  try {
+    response = await client.chat({
+      model: modelId,
+      messages: [
+        { role: 'system', content: CONSOLIDATE_SYSTEM },
+        { role: 'user', content: `Current MEMORY.md:\n\n${before}` },
+      ],
+      timeoutMs: params.timeoutMs,
+    });
+  } catch (err) {
+    return { proposed: false, error: err.message, retries: err.retries ?? 0 };
+  }
+
+  // A reasoning model's scratchpad must never be written into MEMORY.md --
+  // only the visible reply is the proposed file content.
+  const notes = splitThinking(response.message.content || '').visible.trim();
+  const usage = response.usage || { prompt: 0, completion: 0, cost: 0 };
+  const retries = response.retries || 0;
+
+  if (!notes || isNoChanges(notes)) {
+    return {
+      proposed: true,
+      notes: '',
+      applied: false,
+      proposalPath: null,
+      usage,
+      retries,
+    };
+  }
+
+  if (apply) {
+    return applyOutcome(
+      await applyConsolidation({ cwd, runsDir, before, notes, noSave }),
+      notes,
+      usage,
+      retries,
+    );
+  }
+
+  if (attended) {
+    const confirmed = await promptYesNoFn(
+      `\n${notes}\n\nReplace MEMORY.md (${before.length} -> ${notes.length} characters)? [y/N] `,
+    );
+    if (confirmed === true) {
+      return applyOutcome(
+        await applyConsolidation({ cwd, runsDir, before, notes, noSave }),
+        notes,
+        usage,
+        retries,
+      );
+    }
+    if (confirmed === null) {
+      // Timed out -- same fallback as the retrospective: persist the
+      // proposal rather than discarding an answer that never arrived.
+      return {
+        proposed: true,
+        notes,
+        applied: false,
+        proposalPath: await persistConsolidation(runsDir, notes, noSave),
+        usage,
+        retries,
+      };
+    }
+    return {
+      proposed: true,
+      notes,
+      applied: false,
+      proposalPath: null,
+      usage,
+      retries,
+    };
+  }
+
+  return {
+    proposed: true,
+    notes,
+    applied: false,
+    proposalPath: await persistConsolidation(runsDir, notes, noSave),
+    usage,
+    retries,
+  };
+}
+
+/**
+ * Rewrite MEMORY.md with the consolidated content, backing the prior content
+ * up to runsDir first. Aborts when the file changed since the read that fed
+ * the model: appendMemoryNotes is deliberately O_APPEND so a concurrent run
+ * can append mid-consolidation, and a blind rewrite would silently discard
+ * exactly such an entry.
+ * @param {object} params
+ * @param {string} params.cwd
+ * @param {string} params.runsDir
+ * @param {string} params.before - The content the model consolidated
+ * @param {string} params.notes - The replacement content
+ * @param {boolean} params.noSave
+ * @returns {Promise<{ backupPath: string|null, error?: string }>}
+ */
+async function applyConsolidation(params) {
+  const { cwd, runsDir, before, notes, noSave } = params;
+  const current = await readMemory(cwd);
+  if (current !== before) {
+    return {
+      backupPath: null,
+      error:
+        'MEMORY.md changed while consolidating -- another run may have appended; rerun to consolidate the new content',
+    };
+  }
+  let backupPath = null;
+  if (!noSave) {
+    backupPath = await writeMemoryBackup(runsDir, before);
+  }
+  await writeFile(join(cwd, MEMORY_FILE), `${notes}\n`, 'utf8');
+  return { backupPath };
+}
+
+/**
+ * @param {{ backupPath: string|null, error?: string }} outcome
+ * @param {string} notes
+ * @param {{ prompt: number, completion: number, cost: number }} usage
+ * @param {number} retries
+ * @returns {MemoryConsolidation}
+ */
+function applyOutcome(outcome, notes, usage, retries) {
+  if (outcome.error) {
+    return {
+      proposed: true,
+      notes,
+      applied: false,
+      proposalPath: null,
+      error: outcome.error,
+      usage,
+      retries,
+    };
+  }
+  return {
+    proposed: true,
+    notes,
+    applied: true,
+    proposalPath: null,
+    backupPath: outcome.backupPath,
+    usage,
+    retries,
+  };
+}
+
+/**
+ * @param {string} runsDir
+ * @param {string} notes
+ * @param {boolean} [noSave]
+ * @returns {Promise<string|null>}
+ */
+async function persistConsolidation(runsDir, notes, noSave) {
+  if (noSave) {
+    return null;
+  }
+  return writeConsolidationProposal(runsDir, notes);
 }

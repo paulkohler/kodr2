@@ -240,6 +240,24 @@ kodr "…" --memory
 kodr "…" --memory --memory-auto-apply   # trust the loop; skip the prompt
 ```
 
+Applying a proposal always **appends**, so after enough runs `MEMORY.md` is
+a log, not a memory: dated entries accrete, older ones contradict newer
+ones, and every contradiction is loaded into every prompt — small models
+follow whichever instruction they read last. `kodr consolidate` is the
+other half of the design:
+
+```bash
+kodr consolidate            # propose a rewrite; y/N before anything changes
+kodr consolidate --apply    # skip the prompt (prior content is backed up)
+```
+
+The model merges duplicate lessons, drops entries later ones contradict
+(the later entry wins), and strips session narrative — never inventing or
+altering a lesson. Attended you get a `y/N` prompt; unattended a proposal
+file lands in `.kodr/runs/` and `MEMORY.md` is untouched. On apply the
+prior content is backed up next to the transcripts first, and the apply
+aborts safely if a concurrent run appended to the file mid-consolidation.
+
 ## 10. A second pair of eyes — `--review-model`
 
 After a successful build, run a review pass on a _different_ model: a fresh

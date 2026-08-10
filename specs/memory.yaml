@@ -151,6 +151,36 @@ constraints:
     durable workspace lessons (not session narrative, not what the
     workspace instructions already say) and must never contain secrets,
     tokens, or credentials even if they appeared in the transcript.
+  - >
+    Consolidation (kodr consolidate) is the other half of the append-only
+    design: applying proposals only ever appends, so after enough runs
+    MEMORY.md is a log, not a memory — dated entries accrete, older ones
+    contradict newer ones, and every contradiction is loaded into every
+    prompt (small models follow whichever instruction they read last).
+    Consolidation asks the model to rewrite the file into its smallest
+    faithful form: merge duplicates, drop entries later ones contradict
+    (the later entry wins), drop session narrative, never invent or alter
+    a lesson's meaning.
+  - Consolidation never applies without a human decision, same as the
+    retrospective — attended it prompts y/N before rewriting; unattended it
+    writes a .memory-consolidation.md proposal to runsDir and leaves
+    MEMORY.md untouched; --apply skips the prompt explicitly
+  - Before an apply rewrites MEMORY.md, the prior content is backed up to
+    runsDir as a .memory-backup.md file (skipped under noSave, which
+    promises no runsDir writes), so a bad consolidation is recoverable
+  - >
+    An apply aborts with an error when MEMORY.md changed between the read
+    that fed the model and the write — appendMemoryNotes is deliberately
+    O_APPEND so concurrent runs can append mid-consolidation, and a blind
+    rewrite would silently discard exactly such an entry.
+  - The model's "already tight" signal is the literal reply "NO CHANGES."
+    — treated like the retrospective's "No findings." (proposed but empty,
+    nothing to confirm or write)
+  - The consolidation reply has any think block stripped (via think.mjs)
+    before it is treated as file content — a reasoning model's scratchpad
+    must never be written into MEMORY.md
+  - The size notice points at kodr consolidate, so the signal names its
+    remedy
 
 open_questions:
   - What triggers "worth a retrospective"? Every run, or only non-trivial ones (tool calls above some floor, or stoppedReason != complete)? Running it unconditionally is the simplest default but spends tokens on runs that taught nothing.
@@ -177,5 +207,16 @@ tests:
     - an attended prompt timeout falls back to a persisted proposal rather than discarding the notes
     - concurrent appendMemoryNotes calls never lose an entry
     - the retrospective result reports retries used by its chat call
+    - consolidation is skipped when MEMORY.md is missing or empty
+    - consolidation strips a think block from the proposal
+    - a NO CHANGES reply proposes nothing to apply
+    - attended consolidation rewrites MEMORY.md on "y" and backs up the prior content
+    - attended consolidation discards on "n"
+    - apply rewrites without prompting
+    - unattended consolidation writes a proposal file and leaves MEMORY.md untouched
+    - apply aborts when MEMORY.md changed between read and write
+    - apply skips the backup under noSave but still rewrites
+    - the consolidation result reports retries used by its chat call
+    - the size notice names kodr consolidate
   eval:
     - two sequential runs in the same workspace, second run's approach visibly reflects an applied lesson from the first

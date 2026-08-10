@@ -49,6 +49,7 @@ import {
   runLoop,
   validateLoopStart,
 } from './loop.mjs';
+import { readMemory, runMemoryConsolidation } from './memory.mjs';
 import { DEFAULT_MAX_RETRIES } from './model.mjs';
 import { createProvider, resolveProviderName } from './provider.mjs';
 import {
@@ -108,6 +109,7 @@ import { MAX_TOOL_TURNS } from './tool-loop.mjs';
  * @property {boolean} rawThenFixCommits
  * @property {boolean} memory
  * @property {boolean} memoryAutoApply
+ * @property {boolean} apply
  * @property {boolean} debug
  * @property {number} commitTimeoutMs
  * @property {boolean} json
@@ -151,6 +153,11 @@ export async function main(argv) {
 
   if (args.command === 'stats') {
     await printStats(args);
+    return;
+  }
+
+  if (args.command === 'consolidate') {
+    await runConsolidateCommand(args);
     return;
   }
 
@@ -712,6 +719,7 @@ export function parseArgs(argv) {
     rawThenFixCommits: false,
     memory: false,
     memoryAutoApply: false,
+    apply: false,
     debug: false,
     commitTimeoutMs: DEFAULT_COMMIT_TIMEOUT_MS,
     json: false,
@@ -977,6 +985,11 @@ export function parseArgs(argv) {
       i++;
       continue;
     }
+    if (arg === '--apply') {
+      args.apply = true;
+      i++;
+      continue;
+    }
     if (arg === '--json') {
       args.json = true;
       i++;
@@ -1048,6 +1061,10 @@ export function parseArgs(argv) {
     // `kodr acp` — launch the ACP front-end over stdio (specs/acp.yaml). Takes
     // no prompt (the client sends prompts as session/prompt requests), so don't
     // shorthand a bare `kodr acp` into a run with prompt "acp".
+  } else if (args.command === 'consolidate') {
+    // `kodr consolidate` — rewrite MEMORY.md into its smallest faithful form
+    // (specs/memory.yaml). Takes no prompt; don't shorthand a bare
+    // `kodr consolidate` into a run with prompt "consolidate".
   } else if (args.command && !args.prompt) {
     // Treat the command as the prompt (shorthand)
     args.prompt = args.command;
@@ -1072,6 +1089,9 @@ Usage:
   kodr loop                       Drive a checklist (--tasks, default TASKS.md) unattended: commit on
                                   green, retry on red, revert-and-park on giving up (specs/loop.yaml)
   kodr acp                        Serve Kodr as an ACP agent over stdio for an editor (specs/acp.yaml)
+  kodr consolidate                Rewrite MEMORY.md into its smallest faithful form: merge duplicate
+                                  lessons, drop stale ones. Asks before rewriting; --apply skips the
+                                  prompt; unattended it writes a proposal file instead (specs/memory.yaml)
 
 Options:
   --cwd <path>                    Workspace directory (default: .)
@@ -1175,6 +1195,8 @@ Options:
   --memory-auto-apply             Skip the confirmation prompt and apply proposed notes
                                   directly; opt-in only, for a pipeline that has already
                                   decided to trust the loop.
+  --apply                         (consolidate) Rewrite MEMORY.md without the y/N prompt;
+                                  the prior content is still backed up to the runs dir.
   --json                          Print a machine-readable run summary to stdout
   --events                        Stream the run as newline-delimited JSON events on stdout
                                   (specs/reporter.yaml); can be combined with --json
@@ -1257,6 +1279,99 @@ async function printStats(args) {
   const records = await loadRunRecords(runsDir);
   const stats = computeStats(records);
   process.stdout.write(`${formatStats(stats)}\n`);
+}
+
+/**
+ * `kodr consolidate` -- ask the model to rewrite MEMORY.md into its smallest
+ * faithful form, and apply only with a human decision in the loop (attended
+ * y/N, or --apply). See specs/memory.yaml.
+ * @param {CliArgs} args
+ */
+export async function runConsolidateCommand(args) {
+  const cwd = resolve(args.cwd || '.');
+  const runsDir = resolveRunsDir(cwd, args.runsDir);
+
+  // Checked before any provider setup: "nothing to consolidate" should not
+  // require a reachable model server to say so.
+  if (!(await readMemory(cwd))) {
+    process.stdout.write('no MEMORY.md to consolidate\n');
+    return;
+  }
+
+  let client;
+  let modelId;
+  try {
+    client = createProvider({
+      provider: args.provider,
+      baseUrl: args.baseUrl,
+      model: args.model,
+      timeout: resolveRequestTimeoutMs(args.requestTimeoutMs),
+      maxRetries: args.modelRetries,
+      reasoning: args.reasoning,
+      noZdr: args.openrouterNoZdr,
+      allowDataCollection: args.openrouterAllowDataCollection,
+      providerOrder: args.openrouterProviderOnly,
+    });
+    modelId = await client.resolveModel();
+  } catch (err) {
+    process.stderr.write(`Error: ${err.message}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const attended =
+    Boolean(process.stdout.isTTY) && !args.quiet && !args.json && !args.apply;
+  const result = await runMemoryConsolidation({
+    client,
+    modelId,
+    cwd,
+    runsDir,
+    attended,
+    apply: args.apply,
+    noSave: args.noSave,
+  });
+
+  if (args.json) {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  } else {
+    reportConsolidation(result);
+  }
+  if (result.error) {
+    process.exitCode = 1;
+  }
+}
+
+/**
+ * @param {import('./memory.mjs').MemoryConsolidation} result
+ */
+function reportConsolidation(result) {
+  if (result.error) {
+    process.stderr.write(`consolidation failed: ${result.error}\n`);
+    return;
+  }
+  if (!result.proposed) {
+    process.stdout.write(`${result.reason || 'nothing to consolidate'}\n`);
+    return;
+  }
+  if (result.notes === '') {
+    process.stdout.write('MEMORY.md is already tight -- no changes.\n');
+    return;
+  }
+  if (result.applied) {
+    let backupNote = '';
+    if (result.backupPath) {
+      backupNote = ` (previous content backed up to ${result.backupPath})`;
+    }
+    process.stdout.write(`MEMORY.md consolidated${backupNote}.\n`);
+    return;
+  }
+  if (result.proposalPath) {
+    process.stdout.write(
+      `Consolidation proposal written to ${result.proposalPath} -- review it, then rerun with --apply or replace MEMORY.md yourself.\n`,
+    );
+    return;
+  }
+  process.stdout.write('Consolidation discarded.\n');
 }
 
 /**
