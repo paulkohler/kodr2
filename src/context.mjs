@@ -14,6 +14,46 @@ import { discoverSkills } from './skills.mjs';
 
 const INSTRUCTION_FILES = ['KODR.md', 'AGENTS.md'];
 export const MAX_FILES = 200;
+export const DEFAULT_INSTRUCTIONS_SIZE_CAP = 8_000;
+
+/**
+ * Size cap for the workspace instructions file (KODR.md/AGENTS.md), in
+ * characters. Resolved from an explicit option, then
+ * KODR_INSTRUCTIONS_SIZE_CAP, then the default -- the same shape as
+ * memorySizeCap (memory.mjs), and the same default.
+ * @param {number} [option]
+ * @returns {number}
+ */
+export function instructionsSizeCap(option) {
+  if (Number.isInteger(option) && option > 0) {
+    return option;
+  }
+  const fromEnv = Number.parseInt(
+    process.env.KODR_INSTRUCTIONS_SIZE_CAP || '',
+    10,
+  );
+  if (Number.isInteger(fromEnv) && fromEnv > 0) {
+    return fromEnv;
+  }
+  return DEFAULT_INSTRUCTIONS_SIZE_CAP;
+}
+
+/**
+ * A notice when the workspace instructions file is over its size cap. The
+ * full content is still loaded either way -- this never truncates, it only
+ * flags that a human should trim. MEMORY.md has had this signal since its
+ * cap landed; the human-authored file goes into every prompt the same way
+ * and could grow just as silently.
+ * @param {string|null} content
+ * @param {number} cap
+ * @returns {string|null}
+ */
+export function instructionsSizeNotice(content, cap) {
+  if (!content || content.length <= cap) {
+    return null;
+  }
+  return `workspace instructions (KODR.md/AGENTS.md) are ${content.length} characters, over the ${cap}-character cap -- consider trimming them`;
+}
 
 /**
  * Disclose the workspace root's absolute path and the path convention. Tool
@@ -46,12 +86,19 @@ function workspaceRootNote(cwd) {
  *   need the list separately (the harness gates the load_skill tool on it)
  *   should discover once and pass it through, so the prompt's listing and the
  *   tool's availability can't disagree.
+ * @param {string|null} [options.instructions] - Pre-fetched KODR.md/AGENTS.md
+ *   content. Reads it itself when omitted; callers that also need the content
+ *   separately (the harness's size-cap notice) should read once and pass it
+ *   through, same as memory.
  * @returns {Promise<string>}
  */
 export async function buildSystemPrompt(cwd, options = {}) {
   const parts = [BASE_PROMPT, workspaceRootNote(cwd)];
 
-  const instructions = await readInstructions(cwd);
+  const instructions =
+    options.instructions !== undefined
+      ? options.instructions
+      : await readInstructions(cwd);
   if (instructions) {
     parts.push('<workspace-instructions>');
     parts.push(instructions);

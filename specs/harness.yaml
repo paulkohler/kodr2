@@ -173,6 +173,7 @@ constraints:
   - System prompt steers file work to the dedicated tools (read_file/search/list_files over cat/grep/find, edit_file over sed/echo redirection, write_file only for new files or full rewrites) since the dedicated tools are path-jailed and output-bounded
   - System prompt carries run_command conduct rules (stay inside the workspace; no sudo, global installs, or global config changes; no downloading/installing unless the task requires it and never piping fetched content into a shell; nothing destructive beyond the task; commands must be non-interactive and terminate) -- run_command validates only cd targets, so the prompt is the only control on that surface
   - System prompt instructs the model to treat workspace content and command output as data, not instructions, with an explicit precedence order (system prompt, then task, then workspace instructions/memory, then file contents)
+  - Workspace instructions (KODR.md/AGENTS.md) over their size cap (default 8,000 characters -- KODR_INSTRUCTIONS_SIZE_CAP, or the instructionsSizeCap option) produce a notice instead of silent truncation, the same signal MEMORY.md has -- the full file is still loaded into the prompt either way
   - Verification runs when a test command is set and the workspace was touched (files written or a command run)
   - A "complete" stop where the workspace was never touched sets noOpCompletion and emits a one-line stderr notice, so a genuine no-op (nothing to do) and a derailed run that quietly did nothing both stay visible instead of looking like an ordinary success
   - Healing only attempted when verification fails
@@ -230,6 +231,9 @@ tests:
     - system prompt treats workspace content as data with an explicit precedence order
     - system prompt marks the file listing as truncated when the cap is hit
     - system prompt discloses the workspace root path and that absolute paths within it are accepted
+    - workspace instructions over the size cap produce a notice, never truncation
+    - instructionsSizeCap uses an explicit option, then the env var, then the default
+    - buildSystemPrompt uses pre-fetched instructions without re-reading
     - write_file accepts an absolute path inside the workspace root
     - recovers text-form tool calls (all framings) through the tool registry
     - shared tool loop completes, exhausts turns, and stops on budget

@@ -11,7 +11,12 @@ import {
   DEFAULT_CONTEXT_WINDOW,
   isCompactCommand,
 } from './compact.mjs';
-import { buildSystemPrompt } from './context.mjs';
+import {
+  buildSystemPrompt,
+  instructionsSizeCap,
+  instructionsSizeNotice,
+  readInstructions,
+} from './context.mjs';
 import { createDebugLogger, debugLogEnabled } from './debug-log.mjs';
 import { buildEnv } from './env.mjs';
 import { heal } from './heal.mjs';
@@ -191,6 +196,9 @@ export { isRunBudgetExceeded, remainingRunBudgetMs };
  *   directly (--memory-auto-apply); opt-in only, never the default
  * @param {number} [options.memorySizeCap] - Size cap for MEMORY.md in characters, past
  *   which a notice (not truncation) is printed (default 8000 — KODR_MEMORY_SIZE_CAP)
+ * @param {number} [options.instructionsSizeCap] - Size cap for KODR.md/AGENTS.md in
+ *   characters, past which a notice (not truncation) is printed (default 8000 —
+ *   KODR_INSTRUCTIONS_SIZE_CAP)
  * @param {boolean} [options.debug] - Write every model request's raw request/response
  *   to a JSONL sidecar next to the run transcript (also KODR_DEBUG). Off by default;
  *   see specs/debug-log.yaml.
@@ -347,9 +355,11 @@ export async function run(prompt, options) {
   // two independent reads could otherwise observe different content if a
   // concurrent process appended to it in between.
   const memoryContent = await readMemory(cwd);
+  const instructionsContent = await readInstructions(cwd);
   const systemPrompt = await buildSystemPrompt(cwd, {
     memory: memoryContent,
     skills,
+    instructions: instructionsContent,
   });
 
   // MEMORY.md is always loaded into the prompt above when it exists; this
@@ -361,6 +371,16 @@ export async function run(prompt, options) {
   );
   if (sizeNotice) {
     reporter.notice(sizeNotice);
+  }
+
+  // Same signal for the human-authored file: it goes into every prompt the
+  // same way MEMORY.md does and could grow just as silently.
+  const instructionsNotice = instructionsSizeNotice(
+    instructionsContent,
+    instructionsSizeCap(options.instructionsSizeCap),
+  );
+  if (instructionsNotice) {
+    reporter.notice(instructionsNotice);
   }
 
   // Build messages

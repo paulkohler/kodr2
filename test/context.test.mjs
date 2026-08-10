@@ -6,6 +6,9 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import {
   buildSystemPrompt,
+  DEFAULT_INSTRUCTIONS_SIZE_CAP,
+  instructionsSizeCap,
+  instructionsSizeNotice,
   listWorkspaceFiles,
   MAX_FILES,
   readInstructions,
@@ -252,6 +255,21 @@ describe('buildSystemPrompt', () => {
     assert.ok(!prompt.includes('<available-skills>'));
   });
 
+  it('uses pre-fetched instructions without re-reading', async () => {
+    // KODR.md on disk says one thing; the passed-through content says
+    // another. The prompt must carry the passed content -- the same one the
+    // harness measured for its size notice.
+    await writeFile(join(tmpDir, 'KODR.md'), 'on-disk rules');
+    const prompt = await buildSystemPrompt(tmpDir, {
+      instructions: 'passed-through rules',
+    });
+    assert.ok(prompt.includes('passed-through rules'));
+    assert.ok(!prompt.includes('on-disk rules'));
+
+    const none = await buildSystemPrompt(tmpDir, { instructions: null });
+    assert.ok(!none.includes('<workspace-instructions>'));
+  });
+
   it('uses a pre-fetched skill list without re-discovering', async () => {
     // Nothing on disk -- the listing must come from the passed-through list,
     // the same one the harness uses to gate the load_skill tool.
@@ -287,5 +305,36 @@ describe('buildSystemPrompt', () => {
   it('omits the memory section when MEMORY.md does not exist', async () => {
     const prompt = await buildSystemPrompt(tmpDir);
     assert.ok(!prompt.includes('<memory>'));
+  });
+});
+
+describe('instructionsSizeNotice', () => {
+  it('is null under the cap', () => {
+    assert.equal(instructionsSizeNotice('short', 100), null);
+  });
+
+  it('is null for missing instructions', () => {
+    assert.equal(instructionsSizeNotice(null, 100), null);
+  });
+
+  it('workspace instructions over the size cap produce a notice, never truncation', () => {
+    const content = 'x'.repeat(150);
+    const notice = instructionsSizeNotice(content, 100);
+    assert.match(notice, /150 characters/);
+    assert.match(notice, /100-character cap/);
+    assert.match(notice, /KODR\.md\/AGENTS\.md/);
+  });
+});
+
+describe('instructionsSizeCap', () => {
+  afterEach(() => {
+    delete process.env.KODR_INSTRUCTIONS_SIZE_CAP;
+  });
+
+  it('uses an explicit option, then the env var, then the default', () => {
+    assert.equal(instructionsSizeCap(), DEFAULT_INSTRUCTIONS_SIZE_CAP);
+    process.env.KODR_INSTRUCTIONS_SIZE_CAP = '123';
+    assert.equal(instructionsSizeCap(), 123);
+    assert.equal(instructionsSizeCap(456), 456);
   });
 });
