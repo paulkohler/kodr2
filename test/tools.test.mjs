@@ -130,6 +130,102 @@ describe('read_file', () => {
     assert.match(result.error, /path is required/);
     assert.match(result.error, /read_file needs/);
   });
+
+  it('reads a line range with offset and limit', async () => {
+    await writeFile(join(tmpDir, 'lines.txt'), 'one\ntwo\nthree\nfour\nfive\n');
+    const result = await readFileTool.execute(
+      { path: 'lines.txt', offset: 2, limit: 2 },
+      context,
+    );
+    assert.equal(result.content, 'two\nthree');
+    assert.equal(result.offset, 2);
+    assert.equal(result.lines, 2);
+    assert.equal(result.totalLines, 5);
+    assert.equal(result.truncated, undefined);
+  });
+
+  it('offset without limit reads to the end of the file', async () => {
+    await writeFile(join(tmpDir, 'lines.txt'), 'one\ntwo\nthree\n');
+    const result = await readFileTool.execute(
+      { path: 'lines.txt', offset: 2 },
+      context,
+    );
+    assert.equal(result.content, 'two\nthree');
+    assert.equal(result.lines, 2);
+  });
+
+  it('limit without offset reads from the top', async () => {
+    await writeFile(join(tmpDir, 'lines.txt'), 'one\ntwo\nthree\n');
+    const result = await readFileTool.execute(
+      { path: 'lines.txt', limit: 2 },
+      context,
+    );
+    assert.equal(result.content, 'one\ntwo');
+    assert.equal(result.offset, 1);
+  });
+
+  it('rejects a non-integer offset or limit', async () => {
+    await writeFile(join(tmpDir, 'lines.txt'), 'one\n');
+    const badOffset = await readFileTool.execute(
+      { path: 'lines.txt', offset: 1.5 },
+      context,
+    );
+    assert.match(badOffset.error, /offset must be a positive integer/);
+    const badLimit = await readFileTool.execute(
+      { path: 'lines.txt', limit: 0 },
+      context,
+    );
+    assert.match(badLimit.error, /limit must be a positive integer/);
+  });
+
+  it('rejects an offset past the end of the file', async () => {
+    await writeFile(join(tmpDir, 'lines.txt'), 'one\ntwo\n');
+    const result = await readFileTool.execute(
+      { path: 'lines.txt', offset: 9 },
+      context,
+    );
+    assert.match(result.error, /past the end of the file \(2 lines\)/);
+  });
+
+  it('truncates an oversized full read at a line boundary with a paging note', async () => {
+    const body = Array.from({ length: 50 }, (_, i) => `line-${i + 1}`).join(
+      '\n',
+    );
+    await writeFile(join(tmpDir, 'big.txt'), `${body}\n`);
+    const capped = { ...context, maxReadChars: 100 };
+    const result = await readFileTool.execute({ path: 'big.txt' }, capped);
+    assert.equal(result.truncated, true);
+    assert.equal(result.totalLines, 50);
+    assert.ok(result.content.length <= 100);
+    assert.ok(!result.content.endsWith('\n'));
+    assert.match(result.content, /line-1\n/);
+    assert.match(result.note, /pass offset\/limit to read more/);
+  });
+
+  it('a ranged read under the character cap is not marked truncated', async () => {
+    await writeFile(join(tmpDir, 'lines.txt'), 'one\ntwo\nthree\n');
+    const capped = { ...context, maxReadChars: 100 };
+    const result = await readFileTool.execute(
+      { path: 'lines.txt', offset: 1, limit: 3 },
+      capped,
+    );
+    assert.equal(result.truncated, undefined);
+    assert.equal(result.content, 'one\ntwo\nthree');
+  });
+
+  it('the byte and character caps are overridable via context options', async () => {
+    await writeFile(join(tmpDir, 'small.txt'), 'x'.repeat(200));
+    const tightBytes = { ...context, maxReadBytes: 100 };
+    const tooBig = await readFileTool.execute(
+      { path: 'small.txt' },
+      tightBytes,
+    );
+    assert.match(tooBig.error, /too large: 200 bytes \(max 100\)/);
+
+    const roomyBytes = { ...context, maxReadBytes: 500 };
+    const ok = await readFileTool.execute({ path: 'small.txt' }, roomyBytes);
+    assert.equal(ok.content, 'x'.repeat(200));
+  });
 });
 
 // --- write_file ---

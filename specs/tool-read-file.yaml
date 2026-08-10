@@ -1,21 +1,47 @@
 name: read_file tool
 status: implemented
 description: >
-  Read the contents of a file relative to the workspace root.
-  Path-jailed: cannot read above the workspace directory.
-  Returns file contents as a string, or an error for missing,
-  binary, or oversized files.
+  Read the contents of a file relative to the workspace root, optionally a
+  line range. Path-jailed: cannot read above the workspace directory.
+  Returns file contents as a string, or an error for missing, binary, or
+  oversized files. A full-file read larger than the soft character cap is
+  truncated at a line boundary with a note telling the model to page with
+  offset/limit -- a huge read "successfully" dumped into a small context
+  window is a run-killer, not a success.
 
 inputs:
   path:
     type: string
     required: true
     description: Relative path from workspace root
+  offset:
+    type: integer
+    required: false
+    description: 1-based line number to start reading from
+  limit:
+    type: integer
+    required: false
+    description: Maximum number of lines to return
 
 outputs:
   content:
     type: string
-    description: File contents (UTF-8)
+    description: File contents (UTF-8), possibly a slice
+  totalLines:
+    type: integer
+    description: Total lines in the file (present on ranged or truncated reads)
+  offset:
+    type: integer
+    description: First line returned (present on ranged reads)
+  lines:
+    type: integer
+    description: Number of lines returned (present on ranged reads)
+  truncated:
+    type: boolean
+    description: Whether the returned content was cut at the character cap
+  note:
+    type: string
+    description: Paging hint when content was truncated
   error:
     type: string
     description: Error message if read failed
@@ -23,7 +49,15 @@ outputs:
 constraints:
   - Path must resolve within workspace root (no ../ escape)
   - Binary files (null bytes in first 8KB) return an error
-  - Files over 1MB return an error
+  - The byte cap (default 1MB) is configurable via the registry's maxReadBytes
+    option or KODR_MAX_READ_BYTES; files over it return an error
+  - The soft character cap (default 50000, matching run_command's per-stream
+    output cap) is configurable via the registry's maxReadChars option or
+    KODR_MAX_READ_CHARS; a read over it is truncated at a line boundary, never
+    silently -- truncated:true, totalLines, and a paging note are set
+  - offset is 1-based; offset and limit must be positive integers when given;
+    an offset past the end of the file is an error naming the file's length
+  - A small full-file read keeps the plain { content } result shape
   - Symlinks resolved before jail check
   - Directories return "not a file" error
   - Required-argument errors name the tool and its expected shape (e.g.
@@ -39,5 +73,13 @@ tests:
     - returns error for missing files
     - rejects directories
     - requires path parameter, naming the tool and its shape
+    - reads a line range with offset and limit
+    - offset without limit reads to the end of the file
+    - limit without offset reads from the top
+    - rejects a non-integer offset or limit
+    - rejects an offset past the end of the file
+    - truncates an oversized full read at a line boundary with a paging note
+    - a ranged read under the character cap is not marked truncated
+    - the byte and character caps are overridable via context options
   eval:
     - model asked to read a specific file gets correct contents

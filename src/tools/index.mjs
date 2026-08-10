@@ -55,6 +55,12 @@ const VISION_TOOLS = [viewImage];
  *   not just what this specific process touches.
  * @param {boolean} [options.vision] - Offer the view_image tool (see specs/vision.yaml)
  * @param {number} [options.maxImageBytes] - Size cap for view_image reads
+ * @param {number} [options.maxReadBytes] - Byte cap for read_file (also
+ *   KODR_MAX_READ_BYTES; default 1MB)
+ * @param {number} [options.maxReadChars] - Soft character cap on what one
+ *   read_file result returns into the conversation (also KODR_MAX_READ_CHARS;
+ *   default 50000) -- over it, the read is truncated at a line boundary with
+ *   a paging note
  * @param {import('./backend.mjs').ToolBackend} [options.backend] - Filesystem/exec
  *   backend for the file and command tools (see specs/acp.yaml). Defaults to the
  *   local, in-process backend; the ACP front-end injects one that delegates
@@ -76,6 +82,8 @@ const VISION_TOOLS = [viewImage];
  * @property {Date} [startedAt]
  * @property {number} maxRunMs
  * @property {number} [maxImageBytes]
+ * @property {number} [maxReadBytes]
+ * @property {number} [maxReadChars]
  * @property {import('./backend.mjs').ToolBackend} backend
  * @property {(path: string) => void} trackWrite
  * @property {() => void} trackCommand
@@ -95,6 +103,8 @@ export function createToolRegistry(cwd, options = {}) {
     startedAt: options.startedAt,
     maxRunMs: options.maxRunMs ?? 0,
     maxImageBytes: options.maxImageBytes,
+    maxReadBytes: options.maxReadBytes,
+    maxReadChars: options.maxReadChars,
     backend: options.backend ?? localBackend,
     trackWrite(path) {
       if (!filesChanged.includes(path)) {
