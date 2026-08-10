@@ -120,6 +120,51 @@ describe('runReview', () => {
     assert.equal(result.toolTurns, 2);
   });
 
+  it('forwards the cancellation signal to every attempt', async () => {
+    // A review pass is a whole tool loop on a second model -- one dogfooded
+    // reviewer spent 1,234 seconds on a single pass. Without the signal it is
+    // unstoppable.
+    await writeFile(join(tmpDir, 'a.mjs'), 'export const x = 1;\n');
+    const client = scriptedClient([finalTurn('No findings.\n\nVERDICT: PASS')]);
+    const controller = new AbortController();
+
+    await runReview({
+      reporter: silentReporter,
+      client,
+      modelId: 'reviewer',
+      cwd: tmpDir,
+      filesChanged: ['a.mjs'],
+      signal: controller.signal,
+    });
+
+    assert.ok(client.calls.length > 0);
+    for (const call of client.calls) {
+      assert.equal(call.signal, controller.signal);
+    }
+  });
+
+  it('a cancelled attempt is a skip, never a FAIL verdict', async () => {
+    // Fail-closed verdict parsing must not turn "the operator aborted" into
+    // a review failure that could block a commit under --fail-on-review.
+    await writeFile(join(tmpDir, 'a.mjs'), 'export const x = 1;\n');
+    const client = scriptedClient([finalTurn('')]);
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await runReview({
+      reporter: silentReporter,
+      client,
+      modelId: 'reviewer',
+      cwd: tmpDir,
+      filesChanged: ['a.mjs'],
+      signal: controller.signal,
+    });
+
+    assert.equal(result.skipped, true);
+    assert.match(result.reason, /cancelled/);
+    assert.equal(result.verdict, undefined);
+  });
+
   it('system prompt states the read-only tool set, completion semantics, grounding rules, and reply format', async () => {
     await writeFile(join(tmpDir, 'a.mjs'), 'export const x = 1;\n');
     const client = scriptedClient([finalTurn('No findings.')]);

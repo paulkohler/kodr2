@@ -771,6 +771,33 @@ describe('runLoop', () => {
     assert.equal(checklist.items[0].mark, ' ');
   });
 
+  it('a GOAL: item cancelled between attempts stops the loop instead of parking', async () => {
+    // The dangerous shape: runGoal reports reason "cancelled" while the last
+    // build it managed to run looks perfectly healthy (stoppedReason
+    // "complete") -- a cancel caught between attempts, or during a completed
+    // attempt's post-build phase. Reading lastResult.stoppedReason alone
+    // missed this and fell through to park(), which is reset --hard plus
+    // clean -fd over the work the operator had just interrupted.
+    const checklist = fakeChecklist(['GOAL: something']);
+    const git = fakeGit();
+    const result = await runLoop({
+      checklist,
+      buildTask: async () => fakeRunResult(),
+      buildGoal: async () =>
+        fakeGoalResult({
+          met: false,
+          reason: 'cancelled',
+          lastResult: { filesChanged: ['a.mjs'], stoppedReason: 'complete' },
+        }),
+      git,
+      reporter: silentReporter,
+    });
+    assert.equal(result.reason, 'cancelled');
+    assert.equal(git.parkCalls.length, 0, 'must not discard interrupted work');
+    assert.equal(git.commitCalls.length, 0);
+    assert.equal(checklist.items[0].mark, ' ');
+  });
+
   it('the loop record is written after every task transition, not only at the end', async () => {
     const checklist = fakeChecklist(['one', 'two']);
     const snapshots = [];

@@ -31,10 +31,22 @@ inputs:
     type: string
     required: true
     description: Workspace root — where MEMORY.md lives
-  stoppedReason:
-    type: string
-    required: true
-    description: How the run ended ("complete", "tool-limit", "budget-exceeded"); informs whether a retrospective is worth running at all
+  signal:
+    type: AbortSignal
+    description: >
+      Cancellation signal (see specs/cancel.yaml), forwarded to the
+      retrospective's chat call. An already-aborted signal means the
+      retrospective never starts.
+
+      This replaces a `stoppedReason` input this spec used to declare
+      required, describing it as what "informs whether a retrospective is
+      worth running at all" -- it was never passed by the harness and never
+      read by runMemoryRetrospective, so the gate it described did not exist.
+      The real gate on how a run ended is cancellation, and it lives in the
+      harness (runCancelled) plus the signal check here. A retrospective on a
+      run that hit tool-limit or budget-exceeded still has lessons in it and
+      deliberately still runs; an exhausted budget is already handled by
+      memoryReserve.
   startedAt:
     type: object
     description: Run start time, for the deadline-aware timeoutMs
@@ -136,6 +148,10 @@ constraints:
     notice, so a human notices and prunes instead of memory silently
     shrinking or growing unbounded with no signal either way.
   - A run with no meaningful tool activity (e.g. the model answered with no tool call at all) skips the retrospective — nothing to learn from
+  - A cancelled run skips the retrospective entirely, and an abort mid-call
+    returns { cancelled: true } rather than { error } — a deliberate Ctrl-C is
+    not a failure. The harness gates on this too (specs/cancel.yaml); the check
+    here is belt-and-braces for direct callers of the module.
   - >
     The model's own signal for "nothing worth keeping" is the literal
     reply "No findings." (matching the same convention specs/review.yaml
@@ -222,6 +238,9 @@ tests:
     - apply skips the backup under noSave but still rewrites
     - the consolidation result reports retries used by its chat call
     - the size notice names kodr consolidate
+    - forwards the signal to the retrospective chat call
+    - never starts when the signal is already aborted
+    - reports an aborted retrospective as cancelled, not failed
   eval:
     - two sequential runs in the same workspace, second run's approach visibly reflects an applied lesson from the first
     - consolidation merges duplicates, keeps the surviving truth of a contradiction, and strips dated headings

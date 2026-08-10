@@ -13,11 +13,14 @@ import {
   healReserveFraction,
   heartbeatIntervalMs,
   isRunBudgetExceeded,
+  memorySkippedForCancel,
   modelMaxRetries,
   remainingRunBudgetMs,
   resolveRequestTimeoutMs,
+  reviewSkippedForCancel,
   reviewSkippedForIncompleteBuild,
   run,
+  runCancelled,
   runReviewPass,
   stopVerifyBudgetMs,
   toLocalIso,
@@ -560,6 +563,188 @@ describe('cancellation', () => {
       await rm(cwd, { recursive: true, force: true });
     }
   });
+
+  it('starts no memory retrospective after a cancelled run', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'kodr-cancel-mem-'));
+    // Turn 1 answers with a tool call, so the run banks a tool turn -- the
+    // retrospective's own floor is toolTurns > 0, and without one it would
+    // skip for the wrong reason and prove nothing. Turn 2 hangs, so the abort
+    // is what ends the run.
+    let chatRequests = 0;
+    const controller = new AbortController();
+    const server = createServer((req, res) => {
+      if (req.url === '/api/v0/models') {
+        res.writeHead(404);
+        res.end('not found');
+        return;
+      }
+      chatRequests++;
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      if (chatRequests === 1) {
+        const call = {
+          index: 0,
+          id: 'c1',
+          type: 'function',
+          function: { name: 'list_files', arguments: '{}' },
+        };
+        res.write(
+          `data: {"choices":[{"delta":{"tool_calls":[${JSON.stringify(call)}]}}]}\n\n`,
+        );
+        res.write('data: [DONE]\n\n');
+        res.end();
+        return;
+      }
+      // Aborted from inside the handler rather than on a wall-clock timer:
+      // the cancel then always lands mid-request, however slow the machine
+      // is. A timer racing turn 1 could fire before turn 2 was even sent.
+      res.write('data: {"choices":[{"delta":{"content":"thinking"}}]}\n\n');
+      controller.abort();
+    });
+    await new Promise((resolve) =>
+      server.listen(0, '127.0.0.1', () => resolve(undefined)),
+    );
+    const { port } = /** @type {import('node:net').AddressInfo} */ (
+      server.address()
+    );
+
+    try {
+      const result = await run('do work', {
+        cwd,
+        baseUrl: `http://127.0.0.1:${port}`,
+        model: 'test',
+        quiet: true,
+        noSave: true,
+        memory: true,
+        signal: controller.signal,
+      });
+
+      assert.equal(result.stoppedReason, 'cancelled');
+      assert.ok(result.toolTurns > 0, 'the run must have banked a tool turn');
+      // The whole point: no third request. The retrospective is a fresh model
+      // call the operator cannot cancel, started after they already did.
+      assert.equal(chatRequests, 2);
+      assert.equal(result.memory.proposed, false);
+      assert.equal(result.memory.cancelled, true);
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('does not enter heal when the cancel lands during verify', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'kodr-cancel-heal-'));
+    const marker = join(cwd, 'verify-started');
+    // The build completes normally, so stoppedReason stays "complete" -- the
+    // case a stoppedReason-only gate misses. The failing verify command
+    // announces itself, the test aborts while it runs, and heal must not start.
+    let chatRequests = 0;
+    const server = createServer((req, res) => {
+      if (req.url === '/api/v0/models') {
+        res.writeHead(404);
+        res.end('not found');
+        return;
+      }
+      chatRequests++;
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      if (chatRequests === 1) {
+        const call = {
+          index: 0,
+          id: 'c1',
+          type: 'function',
+          function: {
+            name: 'write_file',
+            arguments: JSON.stringify({ path: 'a.txt', content: 'x' }),
+          },
+        };
+        res.write(
+          `data: {"choices":[{"delta":{"tool_calls":[${JSON.stringify(call)}]}}]}\n\n`,
+        );
+        res.write('data: [DONE]\n\n');
+        res.end();
+        return;
+      }
+      res.write('data: {"choices":[{"delta":{"content":"done"}}]}\n\n');
+      res.write('data: [DONE]\n\n');
+      res.end();
+    });
+    await new Promise((resolve) =>
+      server.listen(0, '127.0.0.1', () => resolve(undefined)),
+    );
+    const { port } = /** @type {import('node:net').AddressInfo} */ (
+      server.address()
+    );
+
+    const controller = new AbortController();
+    const poll = setInterval(async () => {
+      try {
+        await readFile(marker, 'utf8');
+        controller.abort();
+        clearInterval(poll);
+      } catch {
+        // not started yet
+      }
+    }, 10);
+
+    try {
+      const result = await run('do work', {
+        cwd,
+        baseUrl: `http://127.0.0.1:${port}`,
+        model: 'test',
+        quiet: true,
+        noSave: true,
+        testCommand: `node -e "require('fs').writeFileSync(process.argv[1],'1');setTimeout(()=>process.exit(1),400)" ${JSON.stringify(marker)}`,
+        signal: controller.signal,
+      });
+
+      assert.equal(result.stoppedReason, 'complete');
+      assert.equal(result.verification.passed, false);
+      // Heal would have opened at least one more model request.
+      assert.equal(chatRequests, 2);
+      assert.equal(result.healed ?? false, false);
+    } finally {
+      clearInterval(poll);
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('runCancelled', () => {
+  it('is true when the signal aborted, whatever the stop reason says', () => {
+    const controller = new AbortController();
+    controller.abort();
+    // "complete" is exactly what a cancel during verify leaves behind.
+    assert.equal(runCancelled(controller.signal, 'complete'), true);
+  });
+
+  it('is true for a cancelled stop reason with no signal in hand', () => {
+    assert.equal(runCancelled(undefined, 'cancelled'), true);
+  });
+
+  it('is false for a live signal on a healthy run', () => {
+    const controller = new AbortController();
+    assert.equal(runCancelled(controller.signal, 'complete'), false);
+    assert.equal(runCancelled(undefined, 'complete'), false);
+  });
+});
+
+describe('cancel skip records', () => {
+  it('reviewSkippedForCancel names the cancel, not an incomplete build', () => {
+    const skipped = reviewSkippedForCancel();
+    assert.equal(skipped.skipped, true);
+    assert.match(skipped.reason, /cancelled/);
+    // Must not carry a verdict: reviewBlocks treats a skip as non-blocking,
+    // and a cancel must never be able to fail a commit.
+    assert.equal('verdict' in skipped, false);
+  });
+
+  it('memorySkippedForCancel proposes nothing and flags the cancel', () => {
+    const skipped = memorySkippedForCancel();
+    assert.equal(skipped.proposed, false);
+    assert.equal(skipped.cancelled, true);
+  });
 });
 
 function git(cwd, args) {
@@ -992,6 +1177,71 @@ describe('review pass wiring', () => {
     /** @type {import('../src/provider.mjs').Provider} */ ({
       capabilities: { modelLifecycle: true },
     });
+
+  it('skips the model swap and the review when already cancelled', async () => {
+    // The swap is the one step here that is not signal-aware: it shells out
+    // to `lms` to unload and reload models with a 2-minute default timeout
+    // and nothing watching the signal, so a cancel would otherwise wait out
+    // that whole sequence before the review's own tool loop could notice.
+    let loadCalled = false;
+    let reviewCalled = false;
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await runReviewPass({
+      cwd: '/tmp',
+      client: modelLifecycleClient,
+      reviewModel: 'reviewer',
+      buildContextWindow: 8192,
+      startedAt: new Date(),
+      maxRunMs: 60000,
+      filesChanged: ['a.mjs'],
+      signal: controller.signal,
+      ensureModelLoadedFn: async () => {
+        loadCalled = true;
+        return { model: { identifier: 'reviewer' } };
+      },
+      runReviewFn: async () => {
+        reviewCalled = true;
+        return { grounded: true };
+      },
+    });
+
+    assert.equal(loadCalled, false);
+    assert.equal(reviewCalled, false);
+    assert.equal(result.skipped, true);
+    assert.match(result.reason, /cancelled/);
+  });
+
+  it('skips the review when the cancel lands during the model swap', async () => {
+    // The far side of the bracket: the swap was already in flight when the
+    // operator aborted, so the load completes but the review must not start.
+    let reviewCalled = false;
+    const controller = new AbortController();
+
+    const result = await runReviewPass({
+      cwd: '/tmp',
+      client: modelLifecycleClient,
+      reviewModel: 'reviewer',
+      buildContextWindow: 8192,
+      startedAt: new Date(),
+      maxRunMs: 60000,
+      filesChanged: ['a.mjs'],
+      signal: controller.signal,
+      ensureModelLoadedFn: async () => {
+        controller.abort();
+        return { model: { identifier: 'reviewer' } };
+      },
+      runReviewFn: async () => {
+        reviewCalled = true;
+        return { grounded: true };
+      },
+    });
+
+    assert.equal(reviewCalled, false);
+    assert.equal(result.skipped, true);
+    assert.match(result.reason, /cancelled/);
+  });
 
   it('skips the model-load step when the swap is turned off', async () => {
     // The point of --no-review-swap: with the reviewer on its own endpoint,

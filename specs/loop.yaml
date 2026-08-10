@@ -166,7 +166,10 @@ outputs:
       parked and stopOnPark is set — the park itself is already committed, so
       a rerun resumes cleanly), "cancelled" (Ctrl-C mid-attempt — the
       checklist and workspace are left exactly as the interrupted attempt
-      left them; no mark, no commit, no park), "commit-failed" (a git commit
+      left them; no mark, no commit, no park. For a GOAL: item this is
+      detected from runGoal's own `reason`, not just the last build's
+      stoppedReason, which can read "complete" on a cancelled goal — see
+      specs/cancel.yaml), "commit-failed" (a git commit
       failed — the workspace may be inconsistent and the loop stops rather
       than continue on a false assumption), or "error" (a startup precondition
       failed, or an uncaught error propagated out of runLoop — the CLI's own
@@ -294,6 +297,7 @@ constraints:
 
 tests:
   unit:
+    - a GOAL: item cancelled between attempts stops the loop instead of parking
     - taskIsGreen ignores a failed review unless failOnReview is set
     - goalIsGreen ignores a failed review unless failOnReview is set
     - a task whose review verdict is FAIL is not green and is not committed

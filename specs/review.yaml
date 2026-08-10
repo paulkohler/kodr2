@@ -74,6 +74,14 @@ inputs:
     description: >
       Timeout for the git diff call that gathers review context (default
       30,000 — KODR_REVIEW_DIFF_TIMEOUT_MS)
+  signal:
+    type: AbortSignal
+    required: false
+    description: >
+      Cancellation signal (see specs/cancel.yaml), forwarded to every
+      attempt's tool loop. Without it a review pass is unstoppable: it is a
+      whole tool loop on a second model, and a dogfooded reasoning model
+      spent 1,234 seconds on a single pass.
 
 outputs:
   skipped:
@@ -186,6 +194,11 @@ constraints:
     being lazy on a trivial diff, and parking good work overnight is the
     expensive direction to fail in. Revisit if reviewGroundedRate says
     otherwise.
+  - The signal is forwarded into each attempt's tool loop, and the harness will
+    not start a review pass at all once the run is cancelled -- including a
+    cancel that landed during verify, where stoppedReason is still "complete"
+    (specs/cancel.yaml). A cancelled attempt takes the skip path below, so an
+    abort can never produce a FAIL verdict that blocks a commit.
   - >
     A review whose tool loop did not reach stoppedReason "complete" -- budget
     exceeded, tool-turn ceiling, cancelled -- is skipped, not failed, and no
@@ -273,6 +286,8 @@ constraints:
 
 tests:
   unit:
+    - forwards the cancellation signal to every attempt
+    - a cancelled attempt is a skip, never a FAIL verdict
     - reviewSwapEnabled is on by default, honours an explicit false over the env var, and is off when KODR_REVIEW_SWAP is 0
     - reviewEndpoint reuses the build provider and base URL when neither is overridden
     - reviewEndpoint moves the build provider to a different endpoint when only a base URL is given

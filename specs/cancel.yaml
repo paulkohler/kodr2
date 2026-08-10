@@ -27,8 +27,17 @@ outputs:
     type: string
     description: >
       "cancelled" when the run stopped because the signal fired. Treated like any
-      other non-complete stop: verify, heal, review, and memory are skipped (they
-      gate on "complete"), and the CLI exits non-zero (shouldFailProcess).
+      other non-complete stop: verify, heal, and review are skipped, and the CLI
+      exits non-zero (shouldFailProcess).
+
+      Note that stoppedReason alone is not a sufficient cancellation gate, and
+      this spec previously claimed it was ("verify, heal, review, and memory are
+      skipped (they gate on complete)"). Two ways that was wrong: the memory
+      retrospective never gated on stoppedReason at all, and a cancel can land
+      *after* the build completes -- during a long verify command -- leaving
+      stoppedReason "complete" on a run the operator has already stopped. The
+      post-build phases therefore consult runCancelled(signal, stoppedReason),
+      not stoppedReason on its own.
 
 constraints:
   - The model client (src/model.mjs) accepts a per-call signal on chat(). When it
@@ -51,6 +60,59 @@ constraints:
   - heal (src/heal.mjs) forwards the signal to its tool loop and, when the loop
     comes back cancelled (or the signal is aborted), returns immediately rather
     than spending the (possibly long) verify command on a run the user aborted.
+  - >
+    Every phase that can start a model call after the build's tool loop
+    returns -- heal, the review pass, the memory retrospective, and the goal
+    judge -- is gated on runCancelled(signal, stoppedReason), re-read at each
+    gate rather than computed once, since the signal can fire between them.
+    Without this a Ctrl-C was followed by brand-new model work the operator
+    had no way to stop: the retrospective in particular gated only on being
+    enabled and on a non-zero tool-turn count.
+  - >
+    runCancelled lives in tool-loop.mjs beside the budget predicates and is
+    re-exported by harness.mjs, so the phases outside run() (the goal judge)
+    can gate on it without importing the whole harness.
+  - >
+    The goal loop (specs/goal.yaml) is the worst instance of this, because it
+    multiplies: runGoal checked only for a build *error*, so a cancelled
+    attempt fell through to the judge -- itself a full read-only tool loop,
+    uncancellable, since evaluateGoal took no signal -- and then started every
+    remaining attempt. One Ctrl-C cost up to maxAttempts builds plus
+    maxAttempts judges. runGoal now checks at the top of each attempt and
+    again after the build, finishing with reason "cancelled", and evaluateGoal
+    forwards the signal to its tool loop.
+  - >
+    The review model swap is bracketed by cancel checks rather than made
+    signal-aware: ensureModelLoaded shells out to `lms` to unload and reload
+    models with a 2-minute default timeout and nothing watching the signal, so
+    a cancel landing mid-swap would otherwise wait out that whole sequence
+    before the tool loop could notice it.
+  - A phase skipped for cancellation records why, rather than being left as the
+    same undefined a disabled feature shows -- reviewSkippedForCancel and
+    memorySkippedForCancel, so --json output distinguishes "off" from
+    "cancelled before it ran".
+  - The review pass forwards the signal into its own tool loop
+    (specs/review.yaml). A cancelled attempt returns a skip, never a FAIL
+    verdict -- fail-closed verdict parsing must not let an abort block a commit
+    under --fail-on-review.
+  - The memory retrospective and consolidation forward the signal to their chat
+    calls and return { cancelled: true } rather than { error } on an abort, so
+    a deliberate Ctrl-C is not reported to the operator as a failure.
+  - kodr consolidate installs the same SIGINT canceller as a run and exits
+    non-zero when cancelled.
+  - >
+    The checklist loop reads runGoal's own `reason` to detect a cancelled
+    GOAL: item, not just the last build's stoppedReason. runGoal reports
+    "cancelled" in two cases where the last build looks healthy -- a cancel
+    caught between attempts, and one caught after a build that itself
+    completed -- and missing either is expensive: the loop falls through to
+    park(), which is reset --hard plus clean -fd over the work the operator
+    just interrupted.
+  - >
+    Known gap: an in-flight verify/Stop-hook child process is not killed by a
+    cancel. The signal stops the harness from starting anything further (heal,
+    review, memory), but the running test command finishes on its own. Killing
+    child processes would mean threading the signal through shell.mjs's spawn.
   - The CLI installs a SIGINT handler (createSigintCanceller) only around the
     foreground run(): the first Ctrl-C aborts the run's controller and prints a
     notice; a second force-quits (exit 130) in case the graceful unwind hangs. The
@@ -73,3 +135,22 @@ tests:
     - the ACP session controller is cleared after a prompt settles (a late cancel is a no-op)
     - createSigintCanceller aborts on the first Ctrl-C and force-quits on the second
     - shouldFailProcess fails the CLI process when the run was cancelled
+    - runCancelled is true when the signal aborted, whatever the stop reason says
+    - runCancelled is true for a cancelled stop reason with no signal in hand
+    - runCancelled is false for a live signal on a healthy run
+    - starts no memory retrospective after a cancelled run
+    - does not enter heal when the cancel lands during verify
+    - reviewSkippedForCancel names the cancel, not an incomplete build
+    - memorySkippedForCancel proposes nothing and flags the cancel
+    - forwards the signal to the retrospective chat call
+    - never starts when the signal is already aborted
+    - reports an aborted retrospective as cancelled, not failed
+    - forwards the cancellation signal to every attempt
+    - a cancelled attempt is a skip, never a FAIL verdict
+    - stops the whole goal when an attempt comes back cancelled, without judging it
+    - stops before the next attempt when the signal fired during the judge
+    - does not start a single attempt when the signal is already aborted
+    - forwards the cancellation signal to the judge tool loop
+    - skips the model swap and the review when already cancelled
+    - skips the review when the cancel lands during the model swap
+    - a GOAL: item cancelled between attempts stops the loop instead of parking

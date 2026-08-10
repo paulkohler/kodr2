@@ -64,12 +64,13 @@ import {
   isRunBudgetExceeded,
   MAX_TOOL_TURNS,
   remainingRunBudgetMs,
+  runCancelled,
   runToolLoop,
 } from './tool-loop.mjs';
 import { createToolRegistry } from './tools/index.mjs';
 
 // Re-exported for callers (and tests) that imported them from the harness.
-export { isRunBudgetExceeded, remainingRunBudgetMs };
+export { isRunBudgetExceeded, remainingRunBudgetMs, runCancelled };
 
 /** @typedef {Parameters<typeof run>[1]} RunOptions */
 
@@ -585,11 +586,16 @@ export async function run(prompt, options) {
         reporter.verification(hookResult);
       }
 
-      // Heal if a blocking hook failed
+      // Heal if a blocking hook failed. The cancel check is its own condition
+      // rather than a stoppedReason read: the build completed, so stoppedReason
+      // is "complete" even when the operator aborted during the verify command
+      // that just failed. Heal's own tool loop would stop early, but entering
+      // heal at all re-runs that same command.
       if (
         hookResult.results.length > 0 &&
         !hookResult.passed &&
-        !isRunBudgetExceeded(startedAt, maxRunMs)
+        !isRunBudgetExceeded(startedAt, maxRunMs) &&
+        !runCancelled(options.signal, stoppedReason)
       ) {
         reporter.phase('heal');
         const healResult = await heal({
@@ -674,54 +680,69 @@ export async function run(prompt, options) {
   // write, a usage-accumulation bug) so it can't take an otherwise-
   // successful build result down with it.
   try {
+    // Re-read at each gate rather than computed once: the signal can fire
+    // between them (during the review pass, say), and each phase below opens
+    // model calls of its own.
+    const cancelled = () => runCancelled(options.signal, result.stoppedReason);
+
     // Review pass: a fresh tool-loop conversation over what the build phase
     // changed, on the review model if one's configured. Never lets a review
     // failure overwrite an otherwise-successful build result -- it's an
     // added opinion, not part of the outcome the run is judged on.
-    if (options.reviewModel && result.stoppedReason === 'complete') {
-      reporter.phase('review');
-      result.review = await runReviewPass({
-        cwd,
-        client,
-        reviewModel: options.reviewModel,
-        reviewContextWindow: options.reviewContextWindow,
-        reviewProvider: options.reviewProvider,
-        reviewBaseUrl: options.reviewBaseUrl,
-        reviewSwap: options.reviewSwap,
-        buildProvider: options.provider,
-        buildBaseUrl: options.baseUrl,
-        timeout: resolveRequestTimeoutMs(options.requestTimeoutMs),
-        maxRetries: options.maxRetries,
-        buildContextWindow: contextWindow,
-        filesChanged: tools.filesChanged(),
-        startedAt,
-        maxRunMs,
-        heartbeatMs,
-        onHeartbeat: onModelHeartbeat,
-        onDebug: onModelDebug,
-        envPassthrough,
-        minToolCalls: options.reviewMinToolCalls,
-        maxToolTurns: options.reviewMaxToolTurns,
-        reporter,
-      });
-      if (result.review.usage) {
-        result.usage.prompt += result.review.usage.prompt;
-        result.usage.completion += result.review.usage.completion;
-        result.usage.cost += result.review.usage.cost || 0;
+    if (options.reviewModel) {
+      if (cancelled()) {
+        // Checked before the stoppedReason branch below: a cancel during
+        // verify leaves stoppedReason "complete", and the review pass is the
+        // most expensive post-build step there is (a model swap plus a whole
+        // tool loop -- one dogfooded reviewer spent 1,234 seconds on a single
+        // pass). Starting that after Ctrl-C is the opposite of cancelling.
+        result.review = reviewSkippedForCancel();
+      } else if (result.stoppedReason === 'complete') {
+        reporter.phase('review');
+        result.review = await runReviewPass({
+          cwd,
+          client,
+          reviewModel: options.reviewModel,
+          reviewContextWindow: options.reviewContextWindow,
+          reviewProvider: options.reviewProvider,
+          reviewBaseUrl: options.reviewBaseUrl,
+          reviewSwap: options.reviewSwap,
+          buildProvider: options.provider,
+          buildBaseUrl: options.baseUrl,
+          timeout: resolveRequestTimeoutMs(options.requestTimeoutMs),
+          maxRetries: options.maxRetries,
+          buildContextWindow: contextWindow,
+          filesChanged: tools.filesChanged(),
+          startedAt,
+          maxRunMs,
+          heartbeatMs,
+          onHeartbeat: onModelHeartbeat,
+          onDebug: onModelDebug,
+          envPassthrough,
+          minToolCalls: options.reviewMinToolCalls,
+          maxToolTurns: options.reviewMaxToolTurns,
+          signal: options.signal,
+          reporter,
+        });
+        if (result.review.usage) {
+          result.usage.prompt += result.review.usage.prompt;
+          result.usage.completion += result.review.usage.completion;
+          result.usage.cost += result.review.usage.cost || 0;
+        }
+        if (result.review.retries) {
+          result.retries = (result.retries || 0) + result.review.retries;
+        }
+      } else {
+        // A review model is configured but the build itself didn't reach
+        // 'complete' (a timeout, a hang recovered externally, tool-limit,
+        // budget-exceeded) -- reviewing a build that didn't finish isn't
+        // meaningful, so the pass is skipped outright rather than attempted.
+        // Recorded explicitly rather than left as the same undefined a run
+        // with no --review-model at all would show, so --json output (and
+        // anyone reading it later) can tell "no review configured" apart
+        // from "configured, but never got to run."
+        result.review = reviewSkippedForIncompleteBuild(result.stoppedReason);
       }
-      if (result.review.retries) {
-        result.retries = (result.retries || 0) + result.review.retries;
-      }
-    } else if (options.reviewModel) {
-      // A review model is configured but the build itself didn't reach
-      // 'complete' (a timeout, a hang recovered externally, tool-limit,
-      // budget-exceeded) -- reviewing a build that didn't finish isn't
-      // meaningful, so the pass is skipped outright rather than attempted.
-      // Recorded explicitly rather than left as the same undefined a run
-      // with no --review-model at all would show, so --json output (and
-      // anyone reading it later) can tell "no review configured" apart
-      // from "configured, but never got to run."
-      result.review = reviewSkippedForIncompleteBuild(result.stoppedReason);
     }
 
     // End-of-run retrospective: never writes to MEMORY.md without a human
@@ -731,7 +752,14 @@ export async function run(prompt, options) {
     // the whole feature -- --memory-auto-apply writes directly to
     // MEMORY.md at the workspace root, unrelated to runsDir hygiene, and
     // must keep working under --no-save.
-    if (isMemoryEnabled(options.memory)) {
+    if (isMemoryEnabled(options.memory) && cancelled()) {
+      // The bug this guards: the retrospective gates on isMemoryEnabled and a
+      // non-zero tool-turn count, never on how the run ended -- so a run the
+      // operator just aborted went straight on to open a brand-new model call.
+      // Recorded rather than left undefined, so --json can tell "memory off"
+      // apart from "memory on, but the run was cancelled first".
+      result.memory = memorySkippedForCancel();
+    } else if (isMemoryEnabled(options.memory)) {
       reporter.phase('memory');
       try {
         result.memory = await runMemoryRetrospective({
@@ -747,12 +775,15 @@ export async function run(prompt, options) {
           attended: options.memoryAttended,
           autoApply: options.memoryAutoApply,
           noSave,
+          signal: options.signal,
         });
       } catch (err) {
         result.memory = { proposed: false, error: err.message };
       }
 
-      if (result.memory.error) {
+      if (result.memory.cancelled) {
+        reporter.notice('memory retrospective cancelled');
+      } else if (result.memory.error) {
         reporter.notice(`memory retrospective failed: ${result.memory.error}`);
       } else if (result.memory.proposalPath) {
         reporter.notice(
@@ -1098,6 +1129,26 @@ export function reviewSkippedForIncompleteBuild(stoppedReason) {
 }
 
 /**
+ * The result.review value for a run cancelled before the review pass could
+ * start. Distinct from reviewSkippedForIncompleteBuild because a cancel can
+ * land *after* a complete build (during verify), where stoppedReason alone
+ * would read as a healthy run.
+ * @returns {{ skipped: true, reason: string }}
+ */
+export function reviewSkippedForCancel() {
+  return { skipped: true, reason: 'run cancelled' };
+}
+
+/**
+ * The result.memory value for a run cancelled before the retrospective could
+ * start.
+ * @returns {{ proposed: false, cancelled: true, reason: string }}
+ */
+export function memorySkippedForCancel() {
+  return { proposed: false, cancelled: true, reason: 'run cancelled' };
+}
+
+/**
  * Orchestrates the review pass: switch to the review model, run the
  * review, and never let a failure in either step escape as a thrown
  * error -- a review is an added opinion, not part of the outcome the run
@@ -1119,6 +1170,8 @@ export function reviewSkippedForIncompleteBuild(stoppedReason) {
  * @param {string[]} [params.envPassthrough]
  * @param {number} [params.minToolCalls]
  * @param {number} [params.maxToolTurns]
+ * @param {AbortSignal} [params.signal] - Cancellation signal, forwarded to the
+ *   review's own tool loop (see specs/cancel.yaml)
  * @param {import('./reporter.mjs').Reporter} [params.reporter]
  * @param {string} [params.reviewProvider]
  * @param {string} [params.reviewBaseUrl]
@@ -1196,6 +1249,7 @@ export async function runReviewPass(params) {
     envPassthrough,
     minToolCalls,
     maxToolTurns,
+    signal,
     reporter = createNullReporter(),
     ensureModelLoadedFn = ensureModelLoaded,
     runReviewFn = runReview,
@@ -1222,6 +1276,14 @@ export async function runReviewPass(params) {
     // both models stay resident and swapping would unload the wrong backend's
     // model. Or the operator may have said not to (--no-review-swap).
     if (swap && reviewClient.capabilities.modelLifecycle) {
+      // Bracketed by cancel checks because the swap itself is not
+      // signal-aware: it shells out to `lms` to unload and reload models, up
+      // to a 2-minute default timeout, with nothing watching the signal. A
+      // cancel landing here would otherwise wait out that whole sequence
+      // before the (signal-aware) tool loop below could notice it.
+      if (signal?.aborted) {
+        return reviewSkippedForCancel();
+      }
       const loadResult = await ensureModelLoadedFn({
         model: reviewModel,
         contextWindow,
@@ -1229,6 +1291,9 @@ export async function runReviewPass(params) {
       if (loadResult.error) {
         reporter.notice(`review skipped: ${loadResult.error}`);
         return { skipped: true, error: loadResult.error };
+      }
+      if (signal?.aborted) {
+        return reviewSkippedForCancel();
       }
     }
 
@@ -1246,6 +1311,7 @@ export async function runReviewPass(params) {
       envPassthrough,
       minToolCalls: minReviewToolCalls(minToolCalls),
       maxToolTurns: reviewMaxToolTurns(maxToolTurns),
+      signal,
     });
 
     if (!reviewResult.skipped) {

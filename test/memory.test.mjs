@@ -453,6 +453,62 @@ describe('memorySizeNotice', () => {
   });
 });
 
+describe('retrospective cancellation', () => {
+  it('forwards the signal to the retrospective chat call', async () => {
+    const client = scriptedClient([finalTurn('- a lesson')]);
+    const controller = new AbortController();
+    await runMemoryRetrospective({
+      client,
+      modelId: 'm',
+      messages: baseMessages(),
+      cwd: tmpDir,
+      toolTurns: 1,
+      runsDir: join(tmpDir, 'runs'),
+      signal: controller.signal,
+    });
+    assert.equal(client.calls[0].signal, controller.signal);
+  });
+
+  it('never starts when the signal is already aborted', async () => {
+    const client = scriptedClient([finalTurn('- a lesson')]);
+    const controller = new AbortController();
+    controller.abort();
+    const result = await runMemoryRetrospective({
+      client,
+      modelId: 'm',
+      messages: baseMessages(),
+      cwd: tmpDir,
+      toolTurns: 1,
+      runsDir: join(tmpDir, 'runs'),
+      signal: controller.signal,
+    });
+    assert.equal(client.calls.length, 0);
+    assert.equal(result.proposed, false);
+    assert.equal(result.cancelled, true);
+  });
+
+  it('reports an aborted retrospective as cancelled, not failed', async () => {
+    // A deliberate Ctrl-C must not surface as "memory retrospective failed".
+    const client = /** @type {any} */ ({
+      async chat() {
+        throw Object.assign(new Error('Request aborted'), {
+          code: 'ABORT_ERR',
+        });
+      },
+    });
+    const result = await runMemoryRetrospective({
+      client,
+      modelId: 'm',
+      messages: baseMessages(),
+      cwd: tmpDir,
+      toolTurns: 1,
+      runsDir: join(tmpDir, 'runs'),
+    });
+    assert.equal(result.cancelled, true);
+    assert.equal(result.error, undefined);
+  });
+});
+
 describe('runMemoryConsolidation', () => {
   const runsDir = () => join(tmpDir, '.kodr', 'runs');
 

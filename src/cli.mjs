@@ -1321,22 +1321,35 @@ export async function runConsolidateCommand(args) {
 
   const attended =
     Boolean(process.stdout.isTTY) && !args.quiet && !args.json && !args.apply;
-  const result = await runMemoryConsolidation({
-    client,
-    modelId,
-    cwd,
-    runsDir,
-    attended,
-    apply: args.apply,
-    noSave: args.noSave,
-  });
+  // Consolidation is a single model call, but on a long MEMORY.md with a
+  // reasoning model it is not a quick one -- Ctrl-C has to reach it.
+  const controller = new AbortController();
+  const onSigint = createSigintCanceller(controller);
+  process.on('SIGINT', onSigint);
+  let result;
+  try {
+    result = await runMemoryConsolidation({
+      client,
+      modelId,
+      cwd,
+      runsDir,
+      attended,
+      apply: args.apply,
+      noSave: args.noSave,
+      signal: controller.signal,
+    });
+  } finally {
+    process.removeListener('SIGINT', onSigint);
+  }
 
   if (args.json) {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   } else {
     reportConsolidation(result);
   }
-  if (result.error) {
+  // A cancel exits non-zero for the same reason a cancelled run does
+  // (specs/cancel.yaml): the operator stopped it, so it did not succeed.
+  if (result.error || result.cancelled) {
     process.exitCode = 1;
   }
 }
@@ -1345,6 +1358,10 @@ export async function runConsolidateCommand(args) {
  * @param {import('./memory.mjs').MemoryConsolidation} result
  */
 function reportConsolidation(result) {
+  if (result.cancelled) {
+    process.stderr.write('consolidation cancelled\n');
+    return;
+  }
   if (result.error) {
     process.stderr.write(`consolidation failed: ${result.error}\n`);
     return;
@@ -1562,10 +1579,12 @@ export async function runGoalCommand(args) {
             contextWindow: judgeContextWindow,
             heartbeatMs: args.heartbeatMs,
             envPassthrough: args.env,
+            signal: controller.signal,
             reporter: judgeReporter,
           }),
         failOnReviewEnabled(args.failOnReview),
       ),
+      signal: controller.signal,
     });
     if (args.json) {
       process.stdout.write(
@@ -1691,6 +1710,13 @@ export async function runLoopCommand(args) {
 
   const recordPath = join(loopsDir(cwd), loopRecordFilename(new Date()));
 
+  // Declared before the builders below, which close over it: they only run
+  // later (inside runLoop), so a later declaration would still work, but
+  // reading it as a temporal-dead-zone hazard is a needless invitation to
+  // break it.
+  const controller = new AbortController();
+  runOptions.signal = controller.signal;
+
   const buildTask = (prompt, continuation) =>
     run(prompt, {
       ...runOptions,
@@ -1716,14 +1742,14 @@ export async function runLoopCommand(args) {
             contextWindow: judgeContextWindow,
             heartbeatMs: args.heartbeatMs,
             envPassthrough: args.env,
+            signal: controller.signal,
             reporter,
           }),
         failOnReviewEnabled(args.failOnReview),
       ),
+      signal: controller.signal,
     });
 
-  const controller = new AbortController();
-  runOptions.signal = controller.signal;
   const onSigint = createSigintCanceller(controller);
   process.on('SIGINT', onSigint);
   try {

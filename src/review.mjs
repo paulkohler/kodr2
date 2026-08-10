@@ -352,6 +352,9 @@ function nudgeFor(attempt, minToolCalls) {
  * @param {number} [params.minToolCalls] - Tool-call floor before a review counts as grounded
  * @param {number} [params.maxToolTurns] - Tool-turn ceiling per attempt
  * @param {number} [params.diffTimeoutMs] - Timeout for the git diff call (default 30 seconds — KODR_REVIEW_DIFF_TIMEOUT_MS)
+ * @param {AbortSignal} [params.signal] - Cancellation signal (see specs/cancel.yaml),
+ *   forwarded to every attempt's tool loop. Without it a review pass is
+ *   unstoppable: a reasoning model has spent 20 minutes on a single pass.
  * @param {import('./reporter.mjs').Reporter} [params.reporter] - Output channel; defaults to a terminal reporter (see comment below)
  * @returns {Promise<ReviewResult>}
  */
@@ -368,6 +371,7 @@ export async function runReview(params) {
     onHeartbeat,
     onDebug,
     envPassthrough = [],
+    signal,
     // The review pass has always streamed its inner tool loop to the terminal
     // even under --quiet (runReview never forwarded quiet), and that stays
     // true -- but it streams to stderr, not stdout. A terminal reporter sends
@@ -406,6 +410,10 @@ export async function runReview(params) {
     onHeartbeat,
     onDebug,
     maxToolTurns,
+    // A cancelled attempt comes back stoppedReason "cancelled", which
+    // reviewCutOff below turns into a skip -- never a FAIL verdict. Aborting
+    // a review must not be able to block a commit.
+    signal,
   };
 
   let attempt = await runReviewAttempt({

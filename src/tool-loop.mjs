@@ -362,6 +362,30 @@ async function maybeCompact(params) {
 }
 
 /**
+ * Whether the run was cancelled -- either a tool loop already reported it, or
+ * the signal fired afterwards.
+ *
+ * The second case is the one that bites. A cancel landing after the loop
+ * returns -- during a long verify command, say -- leaves stoppedReason
+ * "complete", so a gate reading only stoppedReason goes on to heal, review,
+ * the memory retrospective, or the next goal attempt, starting fresh model
+ * calls after the user asked the run to stop.
+ *
+ * Lives here beside the budget predicates, and is re-exported by harness.mjs,
+ * so the phases outside run() (the goal judge) can gate on it without
+ * importing the whole harness.
+ * @param {AbortSignal} [signal]
+ * @param {string} [stoppedReason]
+ * @returns {boolean}
+ */
+export function runCancelled(signal, stoppedReason) {
+  if (signal?.aborted) {
+    return true;
+  }
+  return stoppedReason === 'cancelled';
+}
+
+/**
  * Whether the run has exceeded its wall-clock budget. A maxRunMs of 0 (or any
  * falsy value) disables the budget, so startedAt is never required then.
  * @param {Date} startedAt

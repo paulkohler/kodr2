@@ -14,7 +14,7 @@
 import { loadPrompt } from './prompts.mjs';
 import { createNullReporter } from './reporter.mjs';
 import { reviewBlocks } from './review.mjs';
-import { runToolLoop } from './tool-loop.mjs';
+import { runCancelled, runToolLoop } from './tool-loop.mjs';
 import { createToolRegistry } from './tools/index.mjs';
 import {
   GOAL_LABELS,
@@ -194,6 +194,9 @@ function buildJudgeMessages(goal, filesChanged) {
  * @param {string[]} [params.envPassthrough]
  * @param {number} [params.minToolCalls]
  * @param {number} [params.maxToolTurns]
+ * @param {AbortSignal} [params.signal] - Cancellation signal (see specs/cancel.yaml),
+ *   forwarded to the judge's tool loop. The judge is a full read-only tool loop
+ *   plus a verdict call, so without it a Ctrl-C cannot stop the judge phase.
  * @param {import('./reporter.mjs').Reporter} [params.reporter]
  * @returns {Promise<Verdict>}
  */
@@ -215,6 +218,7 @@ export async function evaluateGoal(params) {
     onHeartbeat,
     onDebug,
     envPassthrough = [],
+    signal,
     reporter = createNullReporter(),
   } = params;
 
@@ -240,6 +244,7 @@ export async function evaluateGoal(params) {
     onHeartbeat,
     onDebug,
     maxToolTurns,
+    signal,
   });
 
   const parsed = parseVerdict(loop.finalText);
@@ -281,7 +286,7 @@ function addUsage(total, usage) {
 /**
  * @typedef {object} GoalResult
  * @property {boolean} met
- * @property {string} reason - "met" | "exhausted" | "stalled" | "build-error" | "judge-error"
+ * @property {string} reason - "met" | "exhausted" | "stalled" | "build-error" | "judge-error" | "cancelled"
  * @property {number} attempts
  * @property {Verdict[]} verdicts
  * @property {import('./harness.mjs').RunResult|null} lastResult
@@ -310,11 +315,14 @@ function addUsage(total, usage) {
  * @param {(prompt: string, continuation: ({ priorMessages: Array, priorFilesChanged: string[] }|null)) => Promise<import('./harness.mjs').RunResult>} params.runTask
  * @param {(result: import('./harness.mjs').RunResult, attempt: number) => Promise<Verdict>} params.evaluate
  * @param {number} [params.maxAttempts]
+ * @param {AbortSignal} [params.signal] - Cancellation signal (see specs/cancel.yaml).
+ *   Checked at the top of each attempt and again after the build, so one Ctrl-C
+ *   ends the goal instead of being absorbed by a single attempt.
  * @param {import('./reporter.mjs').Reporter} [params.reporter]
  * @returns {Promise<GoalResult>}
  */
 export async function runGoal(params) {
-  const { goal, runTask, evaluate } = params;
+  const { goal, runTask, evaluate, signal } = params;
   const reporter = params.reporter || createNullReporter();
   const maxAttempts = goalMaxAttempts(params.maxAttempts);
 
@@ -326,6 +334,23 @@ export async function runGoal(params) {
   let noChangeStreak = 0;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    // A cancel is terminal for the whole goal, not just the attempt that saw
+    // it. Without these two checks one Ctrl-C still paid for the judge on the
+    // aborted attempt (a full read-only tool loop) and then started every
+    // remaining attempt -- the cancellation bug, multiplied by maxAttempts.
+    if (signal?.aborted) {
+      reporter.notice('goal stopped: cancelled');
+      return finish(
+        false,
+        'cancelled',
+        attempt - 1,
+        verdicts,
+        lastResult,
+        usage,
+        retries,
+      );
+    }
+
     reporter.phase(`goal attempt ${attempt}/${maxAttempts}`);
 
     let prompt = goal;
@@ -337,6 +362,19 @@ export async function runGoal(params) {
     lastResult = result;
     addUsage(usage, result.usage);
     retries += result.retries || 0;
+
+    if (runCancelled(signal, result.stoppedReason)) {
+      reporter.notice('goal stopped: cancelled');
+      return finish(
+        false,
+        'cancelled',
+        attempt,
+        verdicts,
+        lastResult,
+        usage,
+        retries,
+      );
+    }
 
     if (result.stoppedReason === 'error') {
       reporter.notice('goal stopped: build error');

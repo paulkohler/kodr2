@@ -15,6 +15,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { renderTranscript } from './compact.mjs';
+import { isAbortError } from './model.mjs';
 import { loadPrompt } from './prompts.mjs';
 import { splitThinking } from './think.mjs';
 import { remainingRunBudgetMs } from './tool-loop.mjs';
@@ -289,6 +290,9 @@ function isNoFindings(notes) {
  * @property {{ prompt: number, completion: number, cost: number }} [usage]
  * @property {number} [retries]
  * @property {string} [error]
+ * @property {boolean} [cancelled] - The signal fired; distinct from `error` so
+ *   a deliberate Ctrl-C isn't reported to the operator as a failure
+ * @property {string} [reason] - Why nothing was proposed
  */
 
 /**
@@ -310,6 +314,9 @@ function isNoFindings(notes) {
  *   the run's own noSave) -- the notes are still returned either way, since applying
  *   directly to MEMORY.md (autoApply, or an attended "yes") has nothing to do with
  *   runsDir hygiene and must keep working under noSave
+ * @param {AbortSignal} [params.signal] - Cancellation signal (see specs/cancel.yaml).
+ *   Forwarded to the retrospective's chat call so an in-flight reflection can be
+ *   aborted; an already-aborted signal means it never starts.
  * @param {function} [params.promptYesNoFn] - Overridable for tests; defaults to this module's promptYesNo
  * @returns {Promise<MemoryRetrospective>}
  */
@@ -326,11 +333,19 @@ export async function runMemoryRetrospective(params) {
     attended = false,
     autoApply = false,
     noSave = false,
+    signal,
     promptYesNoFn = promptYesNo,
   } = params;
 
   if (!toolTurns) {
     return { proposed: false };
+  }
+
+  // Belt-and-braces with the harness's own gate: this module is called
+  // directly too, and a reflection on a run the operator just aborted is
+  // exactly the model call they were trying to stop.
+  if (signal?.aborted) {
+    return { proposed: false, cancelled: true, reason: 'run cancelled' };
   }
 
   const reserveFraction = memoryReserveFraction(params.memoryReserve);
@@ -354,8 +369,12 @@ export async function runMemoryRetrospective(params) {
         { role: 'user', content: `Session transcript:\n\n${transcript}` },
       ],
       timeoutMs: budgetMs,
+      signal,
     });
   } catch (err) {
+    if (isAbortError(err)) {
+      return { proposed: false, cancelled: true, reason: 'run cancelled' };
+    }
     return { proposed: false, error: err.message, retries: err.retries ?? 0 };
   }
 
@@ -472,6 +491,7 @@ function isNoChanges(notes) {
  * @property {{ prompt: number, completion: number, cost: number }} [usage]
  * @property {number} [retries]
  * @property {string} [error]
+ * @property {boolean} [cancelled] - The signal fired; distinct from `error`
  */
 
 /**
@@ -491,17 +511,21 @@ function isNoChanges(notes) {
  * @param {boolean} [params.noSave] - Skip runsDir writes (proposals and the
  *   apply-time backup); an apply still rewrites MEMORY.md itself
  * @param {number} [params.timeoutMs] - Cap for the consolidation chat call
+ * @param {AbortSignal} [params.signal] - Cancellation signal (see specs/cancel.yaml)
  * @param {function} [params.promptYesNoFn] - Overridable for tests
  * @returns {Promise<MemoryConsolidation>}
  */
 export async function runMemoryConsolidation(params) {
-  const { client, modelId, cwd, runsDir } = params;
+  const { client, modelId, cwd, runsDir, signal } = params;
   const { attended = false, apply = false, noSave = false } = params;
   const { promptYesNoFn = promptYesNo } = params;
 
   const before = await readMemory(cwd);
   if (!before) {
     return { proposed: false, reason: 'no MEMORY.md to consolidate' };
+  }
+  if (signal?.aborted) {
+    return { proposed: false, cancelled: true, reason: 'cancelled' };
   }
 
   let response;
@@ -513,8 +537,12 @@ export async function runMemoryConsolidation(params) {
         { role: 'user', content: `Current MEMORY.md:\n\n${before}` },
       ],
       timeoutMs: params.timeoutMs,
+      signal,
     });
   } catch (err) {
+    if (isAbortError(err)) {
+      return { proposed: false, cancelled: true, reason: 'cancelled' };
+    }
     return { proposed: false, error: err.message, retries: err.retries ?? 0 };
   }
 

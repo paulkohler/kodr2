@@ -63,8 +63,9 @@ outputs:
     description: >
       Why the loop stopped: "met", "exhausted" (hit maxAttempts unmet), "stalled"
       (two consecutive attempts changed no files), "build-error" (a build attempt
-      ended in stoppedReason "error"), or "judge-error" (the judge assessment
-      itself threw, e.g. a backend crash mid-request)
+      ended in stoppedReason "error"), "judge-error" (the judge assessment
+      itself threw, e.g. a backend crash mid-request), or "cancelled" (the
+      operator aborted -- see specs/cancel.yaml)
   judgeError:
     type: object
     description: >
@@ -114,6 +115,13 @@ constraints:
     "build-error" — a crashing backend is not fixed by another attempt. A
     tool-limit or budget-exceeded build is still judged, since it may hold partial
     progress worth assessing.
+  - >
+    A cancel is terminal for the whole goal, not just the attempt that saw it:
+    runGoal checks the signal at the top of each attempt and checks
+    runCancelled after each build, finishing with reason "cancelled" without
+    judging the aborted attempt. evaluateGoal forwards the signal to its own
+    tool loop. Before this, one Ctrl-C cost up to maxAttempts builds plus
+    maxAttempts uncancellable judge passes (see specs/cancel.yaml).
   - A judge assessment that throws (evaluateGoal calls runToolLoop directly, not
     through run(), so it has none of run()'s own error-to-return-value handling)
     stops the loop with reason "judge-error" rather than propagating out of
@@ -145,6 +153,10 @@ constraints:
 
 tests:
   unit:
+    - stops the whole goal when an attempt comes back cancelled, without judging it
+    - stops before the next attempt when the signal fired during the judge
+    - does not start a single attempt when the signal is already aborted
+    - forwards the cancellation signal to the judge tool loop
     - withReviewGate short-circuits the judge with a not-met verdict when the build's review blocked
     - withReviewGate carries the reviewer's findings into the feedback, attributed to the review
     - withReviewGate marks a synthesized verdict source "review"

@@ -68,6 +68,72 @@ describe('runGoal', () => {
     assert.equal(taskCalls, 1);
   });
 
+  it('stops the whole goal when an attempt comes back cancelled, without judging it', async () => {
+    // The bug this covers: runGoal only ever checked for a build *error*, so a
+    // cancelled attempt fell through to the judge -- a full read-only tool
+    // loop the operator could not stop -- and then started every remaining
+    // attempt. One Ctrl-C cost maxAttempts judges plus maxAttempts builds.
+    let taskCalls = 0;
+    let judgeCalls = 0;
+    const result = await runGoal({
+      goal: 'g',
+      maxAttempts: 3,
+      runTask: async () => {
+        taskCalls += 1;
+        return fakeResult({ stoppedReason: 'cancelled' });
+      },
+      evaluate: async () => {
+        judgeCalls += 1;
+        return verdict({ met: false });
+      },
+    });
+    assert.equal(result.met, false);
+    assert.equal(result.reason, 'cancelled');
+    assert.equal(taskCalls, 1);
+    assert.equal(judgeCalls, 0);
+  });
+
+  it('stops before the next attempt when the signal fired during the judge', async () => {
+    // A cancel landing while the judge runs leaves the build's own
+    // stoppedReason "complete", so only the signal reveals it.
+    const controller = new AbortController();
+    let taskCalls = 0;
+    const result = await runGoal({
+      goal: 'g',
+      maxAttempts: 3,
+      signal: controller.signal,
+      runTask: async () => {
+        taskCalls += 1;
+        return fakeResult();
+      },
+      evaluate: async () => {
+        controller.abort();
+        return verdict({ met: false });
+      },
+    });
+    assert.equal(result.reason, 'cancelled');
+    assert.equal(taskCalls, 1);
+  });
+
+  it('does not start a single attempt when the signal is already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let taskCalls = 0;
+    const result = await runGoal({
+      goal: 'g',
+      maxAttempts: 3,
+      signal: controller.signal,
+      runTask: async () => {
+        taskCalls += 1;
+        return fakeResult();
+      },
+      evaluate: async () => verdict({ met: true, grounded: true }),
+    });
+    assert.equal(result.reason, 'cancelled');
+    assert.equal(result.attempts, 0);
+    assert.equal(taskCalls, 0);
+  });
+
   it('retries with continuation carrying the prior judge feedback when not met', async () => {
     const prompts = [];
     const continuations = [];
@@ -449,6 +515,24 @@ describe('evaluateGoal', () => {
     assert.equal(v.met, true);
     assert.equal(v.grounded, true);
     assert.equal(v.toolTurns, 1);
+  });
+
+  it('forwards the cancellation signal to the judge tool loop', async () => {
+    const client = scriptedClient([finalTurn('VERDICT: MET')]);
+    const controller = new AbortController();
+    await evaluateGoal({
+      reporter: silentReporter,
+      client,
+      modelId: 'judge',
+      cwd: tmpDir,
+      goal: 'x is exported',
+      filesChanged: ['a.mjs'],
+      signal: controller.signal,
+    });
+    assert.ok(client.calls.length > 0);
+    for (const call of client.calls) {
+      assert.equal(call.signal, controller.signal);
+    }
   });
 
   it('marks a zero-tool-call verdict ungrounded', async () => {

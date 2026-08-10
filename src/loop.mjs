@@ -438,11 +438,26 @@ function taskWasCancelled(result) {
 }
 
 /**
- * Whether a GOAL: item's build attempt was cancelled.
+ * Whether a GOAL: item was cancelled.
+ *
+ * runGoal's own `reason` is the reliable signal and is checked first: it
+ * reports "cancelled" in two cases where the last *build* looks perfectly
+ * healthy -- a cancel caught between attempts (lastResult is the previous,
+ * uncancelled attempt) and one caught after a build that itself completed,
+ * with the signal firing during that attempt's post-build phase. Reading
+ * lastResult.stoppedReason alone missed both, and missing a cancel here is
+ * expensive: the caller falls through to park(), which is reset --hard plus
+ * clean -fd over the work the operator just interrupted.
+ *
+ * The stoppedReason check stays as a fallback for a GoalResult assembled by
+ * something other than runGoal.
  * @param {import('./goal.mjs').GoalResult} goalResult
  * @returns {boolean}
  */
 function goalWasCancelled(goalResult) {
+  if (goalResult?.reason === 'cancelled') {
+    return true;
+  }
   return goalResult?.lastResult?.stoppedReason === 'cancelled';
 }
 
