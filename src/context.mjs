@@ -173,51 +173,57 @@ export async function readInstructions(cwd) {
 }
 
 /**
- * Build a flat file listing of the workspace. The walk stops at MAX_FILES;
- * `truncated` reports whether it did, so the prompt can mark the listing as
- * incomplete -- a model shown a silently partial listing concludes the
- * missing files don't exist instead of looking for them.
+ * Build a flat file listing of the workspace, breadth-first: the root's own
+ * files, then each top-level directory's, then deeper. The walk stops at
+ * MAX_FILES; `truncated` reports whether it did, so the prompt can mark the
+ * listing as incomplete -- a model shown a silently partial listing concludes
+ * the missing files don't exist instead of looking for them.
+ *
+ * Breadth-first because the listing is the model's map of the workspace:
+ * under the cap, a depth-first walk could spend every entry inside the
+ * alphabetically-first directory tree (all of docs/, none of src/), while
+ * breadth-first shows every top-level area before descending. A single
+ * shallow directory holding more files than the remaining cap can still
+ * crowd out its later siblings -- the truncation marker covers that.
  * @param {string} cwd
  * @returns {Promise<{ files: string[], truncated: boolean }>}
  */
 export async function listWorkspaceFiles(cwd) {
   const files = [];
-  const truncated = await walk(cwd, cwd, files);
-  return { files, truncated };
-}
+  const queue = [cwd];
 
-async function walk(dir, root, files) {
-  let entries;
-  try {
-    entries = await readdir(dir, { withFileTypes: true });
-  } catch {
-    return false;
-  }
-
-  let truncated = false;
-  for (const entry of entries) {
-    if (shouldIgnoreEntry(entry.name)) {
+  while (queue.length > 0) {
+    const dir = queue.shift();
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
       continue;
     }
-    // A non-ignored entry remains once the cap is hit: the listing is
-    // incomplete. (A directory here may turn out empty -- counted as
-    // truncated anyway rather than walking it just to find out.)
-    if (files.length >= MAX_FILES) {
-      return true;
-    }
-
-    const full = join(dir, entry.name);
-    const rel = relative(root, full);
-
-    if (entry.isDirectory()) {
-      if (await walk(full, root, files)) {
-        truncated = true;
+    for (const entry of entries) {
+      if (shouldIgnoreEntry(entry.name)) {
+        continue;
       }
-    } else {
-      files.push(rel);
+      // A non-ignored entry remains once the cap is hit: the listing is
+      // incomplete. (A directory here may turn out empty -- counted as
+      // truncated anyway rather than walking it just to find out.)
+      if (files.length >= MAX_FILES) {
+        return { files, truncated: true };
+      }
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        queue.push(full);
+      } else {
+        files.push(relative(cwd, full));
+      }
+    }
+    // Directories still queued were seen before the cap; anything inside
+    // them is unlisted, so stopping here is truncation too.
+    if (files.length >= MAX_FILES && queue.length > 0) {
+      return { files, truncated: true };
     }
   }
-  return truncated;
+  return { files, truncated: false };
 }
 
 const BASE_PROMPT = loadPrompt('system');

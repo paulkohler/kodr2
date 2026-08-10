@@ -131,6 +131,30 @@ describe('listWorkspaceFiles', () => {
     assert.equal(truncated, true);
   });
 
+  it('covers every top-level area before descending', async () => {
+    // 'aaa' holds a deep tree big enough to eat the whole cap by itself; a
+    // depth-first walk would list nothing but aaa/deep/*. Breadth-first must
+    // still surface the root file and every top-level directory's own files
+    // (aaa/deep/ sits a level below them, so they all list first).
+    await mkdir(join(tmpDir, 'aaa/deep'), { recursive: true });
+    for (let i = 0; i < MAX_FILES + 5; i++) {
+      await writeFile(
+        join(tmpDir, `aaa/deep/f-${String(i).padStart(3, '0')}.txt`),
+        '',
+      );
+    }
+    await mkdir(join(tmpDir, 'zzz'));
+    await writeFile(join(tmpDir, 'zzz/late.txt'), '');
+    await writeFile(join(tmpDir, 'root.txt'), '');
+
+    const { files, truncated } = await listWorkspaceFiles(tmpDir);
+    assert.equal(truncated, true);
+    assert.ok(files.includes('root.txt'));
+    assert.ok(files.includes('zzz/late.txt'));
+    // The root file lists before anything inside a subdirectory.
+    assert.ok(files.indexOf('root.txt') < files.indexOf('zzz/late.txt'));
+  });
+
   it('does not report truncation when remaining entries are all ignored', async () => {
     for (let i = 0; i < MAX_FILES; i++) {
       await writeFile(
