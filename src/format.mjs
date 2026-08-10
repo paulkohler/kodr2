@@ -318,6 +318,7 @@ export function formatStats(stats) {
   lines.push(
     `  ${DIM}review attempted:${RESET} ${pct(stats.reviewAttemptedRate)}${DIM}  passed:${RESET} ${pctOrNA(stats.reviewPassRate)}${DIM}  grounded:${RESET} ${pctOrNA(stats.reviewGroundedRate)}${DIM}  no verdict:${RESET} ${pctOrNA(stats.reviewVerdictMissingRate)}`,
   );
+  lines.push(...reviewerLines(stats.reviewModels));
   lines.push(
     `  ${DIM}avg tool turns:${RESET} ${stats.avgToolTurns.toFixed(1)}`,
   );
@@ -332,6 +333,23 @@ export function formatStats(stats) {
   );
 
   return lines.join('\n');
+}
+
+// One line per reviewer under the aggregate, naming the model. Two reviewers
+// over the same workspace otherwise blend into a single rate -- which defeats
+// the comparison docs/usage.md tells operators to make when picking one.
+/**
+ * @param {Array<import('./stats.mjs').ReviewerStats>} [reviewModels]
+ * @returns {string[]}
+ */
+function reviewerLines(reviewModels) {
+  if (!reviewModels) {
+    return [];
+  }
+  return reviewModels.map(
+    (entry) =>
+      `    ${DIM}${entry.model}:${RESET} ${entry.attempted} reviewed${DIM}  passed:${RESET} ${pctOrNA(entry.passRate)}${DIM}  grounded:${RESET} ${pctOrNA(entry.groundedRate)}${DIM}  no verdict:${RESET} ${pctOrNA(entry.verdictMissingRate)}`,
+  );
 }
 
 function pct(fraction) {

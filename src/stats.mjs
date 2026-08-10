@@ -47,9 +47,20 @@ export async function loadRunRecords(runsDir) {
  * @property {number|null} [reviewPassRate]
  * @property {number|null} [reviewGroundedRate]
  * @property {number|null} [reviewVerdictMissingRate]
+ * @property {Array<ReviewerStats>} [reviewModels]
  * @property {number} [avgToolTurns]
  * @property {number|null} [avgDurationMs]
  * @property {{ prompt: number, completion: number, cost: number }} [totalUsage]
+ */
+
+/**
+ * @typedef {object} ReviewerStats
+ * @property {string} model - The reviewer, or "unknown" for records written
+ *   before the reviewer's identity was recorded
+ * @property {number} attempted - Reviews this model actually assessed
+ * @property {number|null} passRate
+ * @property {number|null} groundedRate
+ * @property {number|null} verdictMissingRate
  */
 
 /**
@@ -62,8 +73,8 @@ export async function loadRunRecords(runsDir) {
  * @property {number} [compactions]
  * @property {number} [retries]
  * @property {boolean} [verified]
- * @property {{ skipped: boolean, passed?: boolean, grounded?: boolean,
- *   verdictFound?: boolean, reason?: string }|null} [review]
+ * @property {{ skipped: boolean, model?: string, passed?: boolean,
+ *   grounded?: boolean, verdictFound?: boolean, reason?: string }|null} [review]
  * @property {number} [toolTurns]
  * @property {number} [durationMs]
  * @property {string[]} [filesChanged]
@@ -80,6 +91,73 @@ function rate(count, denominator) {
     return count / denominator;
   }
   return null;
+}
+
+// Reviewer choice is load-bearing -- the same diff gets opposite verdicts from
+// two models (specs/review.yaml) -- so the review numbers are counted per
+// reviewer and the set-wide rates are summed back out of those buckets. One
+// accumulation point, so the headline and the breakdown cannot disagree.
+// "unknown" covers records written before the reviewer's identity was.
+function accumulateReviewer(byModel, review) {
+  const model = review.model || 'unknown';
+  let entry = byModel.get(model);
+  if (!entry) {
+    entry = { model, attempted: 0, passed: 0, grounded: 0, verdictMissing: 0 };
+    byModel.set(model, entry);
+  }
+  entry.attempted++;
+  if (review.passed) {
+    entry.passed++;
+  }
+  if (review.grounded) {
+    entry.grounded++;
+  }
+  if (review.verdictFound === false) {
+    entry.verdictMissing++;
+  }
+}
+
+function totalReviewCounts(byModel) {
+  const totals = { attempted: 0, passed: 0, grounded: 0, verdictMissing: 0 };
+  for (const entry of byModel.values()) {
+    totals.attempted += entry.attempted;
+    totals.passed += entry.passed;
+    totals.grounded += entry.grounded;
+    totals.verdictMissing += entry.verdictMissing;
+  }
+  return totals;
+}
+
+// Busiest reviewer first, then by name so the report is stable across runs
+// (localeCompare would make it depend on the machine's locale).
+function compareReviewers(a, b) {
+  if (a.attempted !== b.attempted) {
+    return b.attempted - a.attempted;
+  }
+  if (a.model < b.model) {
+    return -1;
+  }
+  if (a.model > b.model) {
+    return 1;
+  }
+  return 0;
+}
+
+/**
+ * @param {Map<string, { model: string, attempted: number, passed: number,
+ *   grounded: number, verdictMissing: number }>} byModel
+ * @returns {Array<ReviewerStats>}
+ */
+function summarizeReviewers(byModel) {
+  const entries = [...byModel.values()].map((entry) => ({
+    model: entry.model,
+    attempted: entry.attempted,
+    passRate: rate(entry.passed, entry.attempted),
+    groundedRate: rate(entry.grounded, entry.attempted),
+    verdictMissingRate: rate(entry.verdictMissing, entry.attempted),
+  }));
+  entries.sort(compareReviewers);
+  return entries;
 }
 
 /**
@@ -103,10 +181,7 @@ export function computeStats(records) {
   let totalRetries = 0;
   let verifyAttempted = 0;
   let verifyPassed = 0;
-  let reviewAttempted = 0;
-  let reviewPassed = 0;
-  let reviewGrounded = 0;
-  let reviewVerdictMissing = 0;
+  const reviewsByModel = new Map();
   let totalToolTurns = 0;
   let totalDurationMs = 0;
   let durationSamples = 0;
@@ -146,16 +221,7 @@ export function computeStats(records) {
     // the failure this is here to make visible, and counting skips as
     // attempts would bury it.
     if (record.review && !record.review.skipped) {
-      reviewAttempted++;
-      if (record.review.passed) {
-        reviewPassed++;
-      }
-      if (record.review.grounded) {
-        reviewGrounded++;
-      }
-      if (record.review.verdictFound === false) {
-        reviewVerdictMissing++;
-      }
+      accumulateReviewer(reviewsByModel, record.review);
     }
     totalToolTurns += record.toolTurns || 0;
     if (Number.isInteger(record.durationMs)) {
@@ -169,6 +235,8 @@ export function computeStats(records) {
     }
   }
 
+  const review = totalReviewCounts(reviewsByModel);
+
   return {
     total,
     stoppedReasonCounts,
@@ -181,10 +249,11 @@ export function computeStats(records) {
     avgRetries: totalRetries / total,
     verifyAttemptedRate: verifyAttempted / total,
     verifyPassRate: verifyAttempted > 0 ? verifyPassed / verifyAttempted : null,
-    reviewAttemptedRate: reviewAttempted / total,
-    reviewPassRate: rate(reviewPassed, reviewAttempted),
-    reviewGroundedRate: rate(reviewGrounded, reviewAttempted),
-    reviewVerdictMissingRate: rate(reviewVerdictMissing, reviewAttempted),
+    reviewAttemptedRate: review.attempted / total,
+    reviewPassRate: rate(review.passed, review.attempted),
+    reviewGroundedRate: rate(review.grounded, review.attempted),
+    reviewVerdictMissingRate: rate(review.verdictMissing, review.attempted),
+    reviewModels: summarizeReviewers(reviewsByModel),
     avgToolTurns: totalToolTurns / total,
     avgDurationMs:
       durationSamples > 0 ? totalDurationMs / durationSamples : null,

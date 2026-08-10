@@ -34,6 +34,18 @@ function record(overrides = {}) {
   });
 }
 
+/**
+ * A run record whose review was actually assessed, by a named reviewer.
+ * @param {string} model
+ * @param {{ passed?: boolean, grounded?: boolean, verdictFound?: boolean }} review
+ * @returns {import('../src/stats.mjs').RunRecord}
+ */
+function reviewedBy(model, review) {
+  return record({
+    review: { skipped: false, model, verdictFound: true, ...review },
+  });
+}
+
 describe('loadRunRecords', () => {
   it('reads and parses every run record json file in a directory', async () => {
     runsDir = await mkdtemp(join(tmpdir(), 'kodr-stats-'));
@@ -230,6 +242,66 @@ describe('computeStats', () => {
       record({ review: { skipped: false, passed: true, verdictFound: true } }),
     ]);
     assert.equal(stats.reviewVerdictMissingRate, 0.5);
+  });
+
+  it('breaks the review rates down per reviewer model', () => {
+    // The point of the metric: a workspace that tried two reviewers gets one
+    // blended rate otherwise, so the phi-4 vs gpt-oss comparison the docs tell
+    // operators to make cannot be read back out of its own run records.
+    const stats = computeStats([
+      reviewedBy('gpt-oss-20b', { passed: false, grounded: true }),
+      reviewedBy('gpt-oss-20b', { passed: true, grounded: true }),
+      reviewedBy('phi-4-reasoning-plus', { passed: true, grounded: false }),
+    ]);
+
+    assert.deepEqual(stats.reviewModels, [
+      {
+        model: 'gpt-oss-20b',
+        attempted: 2,
+        passRate: 0.5,
+        groundedRate: 1,
+        verdictMissingRate: 0,
+      },
+      {
+        model: 'phi-4-reasoning-plus',
+        attempted: 1,
+        passRate: 1,
+        groundedRate: 0,
+        verdictMissingRate: 0,
+      },
+    ]);
+    // The set-wide rates are summed back out of the same buckets, so the
+    // headline and the breakdown cannot drift apart.
+    assert.equal(stats.reviewGroundedRate, 2 / 3);
+  });
+
+  it('orders reviewers with the same review count by name', () => {
+    // Deterministic output: a report that reshuffles between runs on nothing
+    // but Map insertion order is a report you cannot diff.
+    const stats = computeStats([
+      reviewedBy('zeta', { passed: true }),
+      reviewedBy('alpha', { passed: true }),
+      reviewedBy('mistral', { passed: true }),
+    ]);
+    assert.deepEqual(
+      stats.reviewModels.map((entry) => entry.model),
+      ['alpha', 'mistral', 'zeta'],
+    );
+  });
+
+  it('labels a review from before the reviewer was recorded as unknown', () => {
+    const stats = computeStats([
+      record({
+        review: { skipped: false, passed: true, grounded: true },
+      }),
+    ]);
+    assert.equal(stats.reviewModels[0].model, 'unknown');
+    assert.equal(stats.reviewModels[0].attempted, 1);
+  });
+
+  it('reports no reviewer breakdown when nothing in the set was reviewed', () => {
+    const stats = computeStats([record({ review: null })]);
+    assert.deepEqual(stats.reviewModels, []);
   });
 
   it('computes avgToolTurns and avgDurationMs across the set', () => {

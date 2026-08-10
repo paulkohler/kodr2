@@ -280,6 +280,53 @@ describe('formatStats', () => {
     assert.match(out, /100 in \/ 40 out/);
   });
 
+  it('names each reviewer under the review line', () => {
+    const out = plain(
+      formatStats({
+        total: 3,
+        stoppedReasonCounts: { complete: 3 },
+        noOpRate: 0,
+        healAttemptedRate: 0,
+        healSuccessRate: null,
+        compactionRate: 0,
+        avgCompactions: 0,
+        retryRate: 0,
+        avgRetries: 0,
+        verifyAttemptedRate: 0,
+        verifyPassRate: null,
+        reviewAttemptedRate: 1,
+        reviewPassRate: 2 / 3,
+        reviewGroundedRate: 2 / 3,
+        reviewVerdictMissingRate: 0,
+        reviewModels: [
+          {
+            model: 'gpt-oss-20b',
+            attempted: 2,
+            passRate: 0.5,
+            groundedRate: 1,
+            verdictMissingRate: 0,
+          },
+          {
+            model: 'phi-4-reasoning-plus',
+            attempted: 1,
+            passRate: 1,
+            groundedRate: 0,
+            verdictMissingRate: 0,
+          },
+        ],
+        avgToolTurns: 1,
+        avgDurationMs: null,
+        totalUsage: { prompt: 0, completion: 0, cost: 0 },
+      }),
+    );
+
+    assert.match(out, /gpt-oss-20b: 2 reviewed\s+passed: 50%\s+grounded: 100%/);
+    assert.match(
+      out,
+      /phi-4-reasoning-plus: 1 reviewed\s+passed: 100%\s+grounded: 0%/,
+    );
+  });
+
   it('includes total cost when nonzero', () => {
     const out = plain(
       formatStats({

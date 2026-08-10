@@ -78,6 +78,18 @@ outputs:
       even after the nudge (null when nothing was reviewed). Requiring a
       trailing line makes the prompt load-bearing; this is how you find out
       your reviewer cannot honour it before it silently fails everything.
+  reviewModels:
+    type: array
+    description: >
+      The same review rates broken down per reviewer -- { model, attempted,
+      passRate, groundedRate, verdictMissingRate } per entry, busiest reviewer
+      first, then by name so the report is stable. Reviewer choice is
+      load-bearing (specs/review.yaml: the same diff gets opposite verdicts
+      from two models) and operators are told to pick one by its observed
+      grounded rate, which a single blended rate over a workspace that tried
+      two of them cannot support. Empty when nothing in the set was reviewed.
+      Reviews from records written before the reviewer's identity was recorded
+      bucket under "unknown" rather than being dropped.
   avgToolTurns:
     type: number
     description: Average tool-call round trips per run
@@ -98,6 +110,9 @@ constraints:
   - Rates needing a denominator that could be zero for this set (healSuccessRate,
     verifyPassRate) are null, not NaN or 0, when that denominator is zero -- 0 would
     misleadingly read as "heal always fails" rather than "heal never ran in this set"
+  - The set-wide review rates are summed back out of the per-reviewer buckets
+    rather than counted alongside them, so the headline and the breakdown
+    cannot drift apart
   - CLI `kodr stats` resolves the runs directory the same way `kodr run` does (cwd +
     --runs-dir / KODR_RUNS_DIR via harness.mjs's resolveRunsDir), so pointing it at the same
     workspace a run used just works
@@ -122,6 +137,11 @@ tests:
     - computeStats counts a review skipped for an incomplete build as not attempted
     - computeStats reports reviewPassRate as null when no run in the set was reviewed
     - computeStats computes reviewVerdictMissingRate from verdictFound
+    - computeStats breaks the review rates down per reviewer model
+    - computeStats orders reviewers with the same review count by name
+    - computeStats labels a review from before the reviewer was recorded as unknown
+    - computeStats reports no reviewer breakdown when nothing in the set was reviewed
+    - formatStats names each reviewer under the review line
     - formatStats renders the review line, with n/a when no run in the set was reviewed
     - computeStats computes avgToolTurns and avgDurationMs across the set
     - computeStats sums prompt/completion/cost usage across the set

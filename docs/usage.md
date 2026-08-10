@@ -348,7 +348,14 @@ verify before you trust a gate with your commits. The check is one number —
 
 ```bash
 kodr stats     # review attempted: 100%  passed: 66%  grounded: 0%  no verdict: 0%
+               #   phi-4-reasoning-plus: 3 reviewed  passed: 66%  grounded: 0%  no verdict: 0%
 ```
+
+Each reviewer gets its own line under the summary, so you can run the
+comparison above on your own workspace: try one reviewer for a week, another
+for the next, and read the two rows off `kodr stats` instead of blending them
+into a single number. (Runs recorded before Kodr saved the reviewer's name
+bucket under `unknown`.)
 
 `grounded: 0%` means your reviewer is answering from the diff without reading
 anything, and its verdicts are worth nothing regardless of which way they
