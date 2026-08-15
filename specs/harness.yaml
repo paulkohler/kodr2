@@ -212,6 +212,12 @@ constraints:
   - System prompt states the loop's completion semantics -- a reply with no tool call ends the run -- and forbids describing an intended action instead of calling the tool, since a model narrating "now I will edit the file" as prose silently terminates the run as a no-op completion
   - System prompt states the tool error contract ({ error } results are recoverable; fix arguments and retry, never repeat a failing call unchanged)
   - System prompt steers file work to the dedicated tools (read_file/search/list_files over cat/grep/find, edit_file over sed/echo redirection, write_file only for new files or full rewrites) since the dedicated tools are path-jailed and output-bounded
+  - Tool results are JSON.stringify(result) in the conversation, except a
+    successful read_file: that is the file text (optional metadata header
+    for a ranged or truncated read). JSON-wrapping file bytes double-escapes
+    backslashes and quotes and breaks a later edit_file exact match. Errors
+    and every other tool stay JSON. The execute() return shape is unchanged;
+    only the model-facing serialization differs. See specs/tool-read-file.yaml.
   - System prompt carries run_command conduct rules (stay inside the workspace; no sudo, global installs, or global config changes; no downloading/installing unless the task requires it and never piping fetched content into a shell; nothing destructive beyond the task; commands must be non-interactive and terminate) -- run_command validates only cd targets, so the prompt is the only control on that surface
   - System prompt instructs the model to treat workspace content and command output as data, not instructions, with an explicit precedence order (system prompt, then task, then workspace instructions/memory, then file contents)
   - Workspace instructions (KODR.md/AGENTS.md) over their size cap (default 8,000 characters -- KODR_INSTRUCTIONS_SIZE_CAP, or the instructionsSizeCap option) produce a notice instead of silent truncation, the same signal MEMORY.md has -- the full file is still loaded into the prompt either way
@@ -301,6 +307,12 @@ tests:
     - buildRunOptions passes the cost ceiling through to every run it drives
     - a timeout with no run budget is still surfaced as an error
     - dispatches multi-call and repeated native tool calls, one result each
+    - a successful full read_file is appended as the file text, not JSON
+    - a read_file of text with backslashes and quotes is byte-identical in the tool message
+    - a ranged or truncated read_file prefixes a metadata line, then the text
+    - a read_file error is still JSON { error }
+    - a successful read_file with hookFeedback appends it after the file text
+    - other tools and recovered text-form results still JSON-encode, except a recovered read_file which is also plaintext
     - tolerates malformed argument JSON and model-invented tool names
     - carries a provider's usage.cost through to the run result and saved record
   eval:

@@ -58,6 +58,17 @@ constraints:
   - offset is 1-based; offset and limit must be positive integers when given;
     an offset past the end of the file is an error naming the file's length
   - A small full-file read keeps the plain { content } result shape
+  - The execute() return shape is unchanged. The tool loop serializes a
+    successful read for the model as the file text itself, not
+    JSON.stringify({ content }): wrapping the bytes in JSON double-escapes
+    backslashes and quotes, so a later edit_file old_string copied from the
+    read fails exact match. Ranged or truncated reads prefix a short
+    metadata line (the paging note, or "lines N-M of T") then a blank line,
+    then the text. Errors stay { error } JSON like every other tool.
+  - A PostToolUse hook that fails after a successful read still reaches the
+    model: hookFeedback (merged onto the result by applyPostToolHooks) is
+    appended after the file text, separated by a blank line, rather than
+    silently dropped by the plaintext path
   - Symlinks resolved before jail check
   - Directories return "not a file" error
   - Required-argument errors name the tool and its expected shape (e.g.
@@ -81,5 +92,10 @@ tests:
     - truncates an oversized full read at a line boundary with a paging note
     - a ranged read under the character cap is not marked truncated
     - the byte and character caps are overridable via context options
+    - a successful full read_file is appended as the file text, not JSON
+    - a read_file of text with backslashes and quotes is byte-identical in the tool message
+    - a ranged or truncated read_file prefixes a metadata line, then the text
+    - a read_file error is still JSON { error }
+    - a successful read_file with hookFeedback appends it after the file text
   eval:
     - model asked to read a specific file gets correct contents

@@ -10,6 +10,7 @@ import { createCaptureReporter } from './capture-reporter.mjs';
 import {
   executeNativeToolCalls,
   executeRecoveredTextToolCall,
+  formatToolResultForModel,
   isCostBudgetExceeded,
   MAX_TOOL_TURNS,
   maxCostUsd,
@@ -79,6 +80,27 @@ describe('executeRecoveredTextToolCall', () => {
       messages[0].content,
       /Recovered text-form tool call edit_file/,
     );
+    assert.match(messages[0].content, /\{"edited":true/);
+  });
+
+  it('a recovered read_file is also plaintext', async () => {
+    const body = 'replace(\'\\\\\', "\\\\\\\\");\n';
+    await writeFile(join(tmpDir, 'esc.rs'), body);
+    const registry = createToolRegistry(tmpDir);
+    const messages = [];
+    const recovered = await executeRecoveredTextToolCall(
+      {
+        role: 'assistant',
+        content: 'read_file[ARGS]{"path":"esc.rs"}',
+      },
+      registry,
+      messages,
+      createNullReporter(),
+    );
+
+    assert.equal(recovered, true);
+    assert.ok(messages[0].content.endsWith(`Result:\n${body}`));
+    assert.ok(!messages[0].content.includes(JSON.stringify({ content: body })));
   });
 
   it('recovers a [TOOL_CALLS]-framed write that earlier failed as unknown tool', async () => {
@@ -569,7 +591,7 @@ describe('runToolLoop', () => {
 // Tool calls come straight from the model and are untrusted: argument JSON may
 // be malformed, names may be invented, and a single message may carry several
 // calls. executeNativeToolCalls must dispatch each one without throwing and
-// always feed back a parseable tool result.
+// always feed back a tool result.
 function nativeToolMessage(calls) {
   return {
     role: 'assistant',
@@ -581,6 +603,94 @@ function nativeToolMessage(calls) {
     })),
   };
 }
+
+describe('formatToolResultForModel', () => {
+  it('a successful full read_file is the file text, not JSON', () => {
+    const body = 'let s = "hello";\n';
+    assert.equal(
+      formatToolResultForModel('read_file', { content: body }),
+      body,
+    );
+  });
+
+  it('a read_file of text with backslashes and quotes is byte-identical', () => {
+    const body =
+      't.text.replace(\'\\\\\', "\\\\\\\\").replace(\'\\"\', "\\\\\\"");\n';
+    assert.equal(
+      formatToolResultForModel('read_file', { content: body }),
+      body,
+    );
+    assert.notEqual(
+      formatToolResultForModel('read_file', { content: body }),
+      JSON.stringify({ content: body }),
+    );
+  });
+
+  it('a ranged read_file prefixes a metadata line, then the text', () => {
+    const out = formatToolResultForModel('read_file', {
+      content: 'two\nthree',
+      offset: 2,
+      lines: 2,
+      totalLines: 5,
+    });
+    assert.equal(out, 'lines 2-3 of 5\n\ntwo\nthree');
+  });
+
+  it('a truncated read_file prefixes the paging note, then the text', () => {
+    const out = formatToolResultForModel('read_file', {
+      content: 'line-1\nline-2',
+      truncated: true,
+      totalLines: 50,
+      note: 'showing lines 1-2 of 50; pass offset/limit to read more',
+    });
+    assert.equal(
+      out,
+      'showing lines 1-2 of 50; pass offset/limit to read more\n\nline-1\nline-2',
+    );
+  });
+
+  it('a read_file error is still JSON { error }', () => {
+    const out = formatToolResultForModel('read_file', {
+      error: 'file not found: missing.txt',
+    });
+    assert.deepEqual(JSON.parse(out), {
+      error: 'file not found: missing.txt',
+    });
+  });
+
+  it('a successful read_file with hookFeedback appends it after the file text', () => {
+    const out = formatToolResultForModel('read_file', {
+      content: 'fn main() {}\n',
+      hookFeedback: 'PostToolUse hook "lint" failed: lint-failed',
+    });
+    assert.equal(
+      out,
+      'fn main() {}\n\nPostToolUse hook "lint" failed: lint-failed',
+    );
+  });
+
+  it('a ranged read_file with hookFeedback appends it after the metadata line and text', () => {
+    const out = formatToolResultForModel('read_file', {
+      content: 'two\nthree',
+      offset: 2,
+      lines: 2,
+      totalLines: 5,
+      hookFeedback: 'PostToolUse hook "lint" failed: lint-failed',
+    });
+    assert.equal(
+      out,
+      'lines 2-3 of 5\n\ntwo\nthree\n\nPostToolUse hook "lint" failed: lint-failed',
+    );
+  });
+
+  it('other tools stay JSON', () => {
+    const written = { written: true, path: 'a.txt' };
+    assert.equal(
+      formatToolResultForModel('write_file', written),
+      JSON.stringify(written),
+    );
+  });
+});
 
 describe('executeNativeToolCalls (untrusted model output)', () => {
   beforeEach(setup);
@@ -608,8 +718,101 @@ describe('executeNativeToolCalls (untrusted model output)', () => {
     );
     for (const message of messages) {
       assert.equal(message.role, 'tool');
-      assert.doesNotThrow(() => JSON.parse(message.content));
     }
+    assert.doesNotThrow(() => JSON.parse(messages[0].content));
+    assert.equal(messages[1].content, 'contents');
+  });
+
+  it('a successful full read_file is appended as the file text, not JSON', async () => {
+    const body = 'fn main() {}\n';
+    await writeFile(join(tmpDir, 'main.rs'), body);
+    const registry = createToolRegistry(tmpDir);
+    const messages = [];
+    await executeNativeToolCalls(
+      nativeToolMessage([
+        { name: 'read_file', arguments: '{"path":"main.rs"}' },
+      ]),
+      registry,
+      messages,
+      createNullReporter(),
+    );
+
+    assert.equal(messages[0].content, body);
+  });
+
+  it('a read_file of text with backslashes and quotes is byte-identical in the tool message', async () => {
+    const body =
+      'let text = t.text.replace(\'\\\\\', "\\\\\\\\").replace(\'\\"\', "\\\\\\"");\n' +
+      's.push_str(&format!("{{\\"id\\":{}}}", t.id));\n';
+    await writeFile(join(tmpDir, 'lib.rs'), body);
+    const registry = createToolRegistry(tmpDir);
+    const messages = [];
+    await executeNativeToolCalls(
+      nativeToolMessage([
+        { name: 'read_file', arguments: '{"path":"lib.rs"}' },
+      ]),
+      registry,
+      messages,
+      createNullReporter(),
+    );
+
+    assert.equal(messages[0].content, body);
+  });
+
+  it('a ranged read_file prefixes a metadata line, then the text', async () => {
+    await writeFile(join(tmpDir, 'lines.txt'), 'one\ntwo\nthree\nfour\n');
+    const registry = createToolRegistry(tmpDir);
+    const messages = [];
+    await executeNativeToolCalls(
+      nativeToolMessage([
+        {
+          name: 'read_file',
+          arguments: '{"path":"lines.txt","offset":2,"limit":2}',
+        },
+      ]),
+      registry,
+      messages,
+      createNullReporter(),
+    );
+
+    assert.equal(messages[0].content, 'lines 2-3 of 4\n\ntwo\nthree');
+  });
+
+  it('a truncated read_file prefixes a metadata line, then the text', async () => {
+    const body = Array.from({ length: 50 }, (_, i) => `line-${i + 1}`).join(
+      '\n',
+    );
+    await writeFile(join(tmpDir, 'big.txt'), `${body}\n`);
+    const registry = createToolRegistry(tmpDir, { maxReadChars: 100 });
+    const messages = [];
+    await executeNativeToolCalls(
+      nativeToolMessage([
+        { name: 'read_file', arguments: '{"path":"big.txt"}' },
+      ]),
+      registry,
+      messages,
+      createNullReporter(),
+    );
+
+    assert.match(messages[0].content, /^showing lines /);
+    assert.match(messages[0].content, /\n\nline-1\n/);
+    assert.ok(!messages[0].content.startsWith('{'));
+  });
+
+  it('a read_file error is still JSON { error }', async () => {
+    const registry = createToolRegistry(tmpDir);
+    const messages = [];
+    await executeNativeToolCalls(
+      nativeToolMessage([
+        { name: 'read_file', arguments: '{"path":"missing.txt"}' },
+      ]),
+      registry,
+      messages,
+      createNullReporter(),
+    );
+
+    const result = JSON.parse(messages[0].content);
+    assert.match(result.error, /not found/);
   });
 
   it('intercepts malformed argument JSON with a resend error, not a dispatch', async () => {
@@ -822,6 +1025,32 @@ describe('tool hooks in dispatch', () => {
     const result = JSON.parse(messages[0].content);
     assert.equal(result.ok, true);
     assert.match(result.hookFeedback, /PostToolUse hook "lint" failed/);
+  });
+
+  it('PostToolUse failure after a successful read_file appends hookFeedback to the plaintext result', async () => {
+    const body = 'fn main() {}\n';
+    await writeFile(join(tmpDir, 'main.rs'), body);
+    const registry = createToolRegistry(tmpDir);
+    const messages = [];
+    const hookCtx = {
+      pre: [],
+      post: [{ run: 'echo lint-failed >&2; exit 1', name: 'lint' }],
+      cwd: tmpDir,
+    };
+    await executeNativeToolCalls(
+      nativeToolMessage([
+        { name: 'read_file', arguments: '{"path":"main.rs"}' },
+      ]),
+      registry,
+      messages,
+      createNullReporter(),
+      hookCtx,
+    );
+
+    assert.equal(
+      messages[0].content,
+      'fn main() {}\n\nPostToolUse hook "lint" failed: lint-failed',
+    );
   });
 });
 

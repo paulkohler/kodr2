@@ -516,11 +516,85 @@ export async function executeNativeToolCalls(
       gate,
       repeatTracker,
     );
-    appendToolResult(messages, tc.id, result);
+    appendToolResult(
+      messages,
+      tc.id,
+      recoverToolName(tc.function.name),
+      result,
+    );
     executed++;
   }
 
   return executed;
+}
+
+/**
+ * Serialize a tool result for the model-facing conversation.
+ *
+ * Successful read_file is the file text itself -- JSON.stringify({ content })
+ * double-escapes backslashes and quotes, so a later edit_file old_string
+ * copied from the read fails exact match. Errors, and every other tool,
+ * stay JSON. The execute() return shape is unchanged.
+ *
+ * A PostToolUse hook can still attach hookFeedback to a successful read
+ * (applyPostToolHooks merges it onto the result); that has to survive the
+ * plaintext path too, so it's appended after the file text rather than
+ * folded into a JSON blob the model would otherwise never see.
+ *
+ * @param {string} name
+ * @param {object} result
+ * @returns {string}
+ */
+export function formatToolResultForModel(name, result) {
+  if (name === 'read_file' && typeof result.content === 'string') {
+    return formatReadFileResultForModel(result);
+  }
+  return JSON.stringify(result);
+}
+
+/**
+ * @param {{ content: string, note?: string, offset?: number, lines?: number, totalLines?: number, hookFeedback?: string }} result
+ * @returns {string}
+ */
+function formatReadFileResultForModel(result) {
+  let body = result.content;
+  const header = readFileResultHeader(result);
+  if (header) {
+    body = joinWithBlankLine(header, result.content);
+  }
+  if (result.hookFeedback) {
+    return joinWithBlankLine(body, result.hookFeedback);
+  }
+  return body;
+}
+
+/**
+ * Join two blocks with exactly one blank line, even when the left side
+ * already ends in a newline (typical file content).
+ * @param {string} left
+ * @param {string} right
+ * @returns {string}
+ */
+function joinWithBlankLine(left, right) {
+  if (left.endsWith('\n')) {
+    return `${left}\n${right}`;
+  }
+  return `${left}\n\n${right}`;
+}
+
+/**
+ * @param {{ note?: string, offset?: number, lines?: number, totalLines?: number }} result
+ * @returns {string|null}
+ */
+function readFileResultHeader(result) {
+  if (result.note) {
+    return result.note;
+  }
+  if (result.offset === undefined || result.lines === undefined) {
+    return null;
+  }
+  const last = result.offset + result.lines - 1;
+  return `lines ${result.offset}-${last} of ${result.totalLines}`;
 }
 
 /**
@@ -532,9 +606,10 @@ export async function executeNativeToolCalls(
  * specs/vision.yaml.
  * @param {Array} messages
  * @param {string} toolCallId
- * @param {{ image?: { path: string, mediaType: string, dataBase64: string } }} result
+ * @param {string} name
+ * @param {{ image?: { path: string, mediaType: string, dataBase64: string }, content?: string }} result
  */
-function appendToolResult(messages, toolCallId, result) {
+function appendToolResult(messages, toolCallId, name, result) {
   if (result.image) {
     const { path, mediaType, dataBase64 } = result.image;
     messages.push({
@@ -557,7 +632,7 @@ function appendToolResult(messages, toolCallId, result) {
   messages.push({
     role: 'tool',
     tool_call_id: toolCallId,
-    content: JSON.stringify(result),
+    content: formatToolResultForModel(name, result),
   });
 }
 
@@ -647,7 +722,7 @@ export async function executeRecoveredTextToolCall(
     );
     messages.push({
       role: 'user',
-      content: `Recovered text-form tool call ${call.name}. Result:\n${JSON.stringify(result)}`,
+      content: `Recovered text-form tool call ${call.name}. Result:\n${formatToolResultForModel(call.name, result)}`,
     });
   }
   return true;
