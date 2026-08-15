@@ -200,9 +200,9 @@ describe('parseArgs', () => {
     assert.equal(args.maxToolTurns, 60);
   });
 
-  it('defaults --max-tool-turns to 20', () => {
+  it('defaults --max-tool-turns to 50', () => {
     const args = parseArgs(['run', 'hi']);
-    assert.equal(args.maxToolTurns, 20);
+    assert.equal(args.maxToolTurns, 50);
   });
 
   it('parses --request-timeout-ms, defaulting to null so the env var still applies', () => {

@@ -37,7 +37,7 @@ inputs:
       other limit here -- the interesting ceilings are cents.
   maxToolTurns:
     type: number
-    description: Tool-turn ceiling for the loop, applied to both the main run and each heal turn (default 20, CLI --max-tool-turns)
+    description: Tool-turn ceiling for the loop, applied to both the main run and each heal turn (default 50, CLI --max-tool-turns)
   heartbeatMs:
     type: number
     description: "\"Still running\" notice interval during Stop hooks and while waiting on a model response (default 30,000ms, 0 disables; KODR_HEARTBEAT_MS / CLI --heartbeat-ms)"
@@ -113,7 +113,7 @@ outputs:
     description: Full conversation transcript for continuation
 
 constraints:
-  - The main run and the heal pass share one tool loop, limited to maxToolTurns (default 20, --max-tool-turns) to prevent runaway
+  - The main run and the heal pass share one tool loop, limited to maxToolTurns (default 50, --max-tool-turns) to prevent runaway
   - Optional maxRunMs stops between turns, caps tool and verification command timeouts, before healing, and during healing when the budget is exceeded
   - Each model request is capped to the run's *remaining* budget (not a fresh maxRunMs-length timeout every turn), so a request started near the deadline cannot itself outlive it
   - >

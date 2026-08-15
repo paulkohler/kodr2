@@ -195,10 +195,10 @@ kodr "/compact" --continue last       # from the CLI
 ```
 
 The other budget on a long session is the **tool-turn ceiling**
-(`--max-tool-turns`, default 20). Note how it compounds with the system
+(`--max-tool-turns`, default 50). Note how it compounds with the system
 prompt: the prompt tells the model to make *one tool call per message*
 (deliberately — many small local models mangle parallel calls), so the
-ceiling is effectively a budget of ~20 tool invocations per run. A
+ceiling is effectively a budget of ~50 tool invocations per run. A
 read → edit → test cycle eats that quickly. If a task keeps stopping with
 `tool-limit`, raise the ceiling; the serialization itself is prompt-imposed,
 not a harness limit — the loop executes every native call in a message.

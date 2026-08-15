@@ -280,7 +280,7 @@ routing docs](https://openrouter.ai/docs/features/provider-routing).
 --review-model <id>     Review the change on a second model after a successful build
 --fail-on-review        Treat that review's FAIL verdict as a failure (or KODR_FAIL_ON_REVIEW)
 --heal-turns <n>        Max repair turns (default: 3)
---max-tool-turns <n>    Tool-turn ceiling per loop (default: 20)
+--max-tool-turns <n>    Tool-turn ceiling per loop (default: 50)
 --heartbeat-ms <n>      "Still running" notice interval for Stop hooks and model requests (or KODR_HEARTBEAT_MS; default: 30000, 0 disables)
 --model-retries <n>     Retries for a 5xx chat response, e.g. a local backend crash (or KODR_MODEL_RETRIES; default: 1, 0 disables)
 --context-window <n>    Max context tokens; compact at 80% (auto-detected where the provider supports it; 0 disables)

@@ -1151,7 +1151,7 @@ Options:
                                   KODR_MAX_COST_USD). Hosted providers only -- LM Studio and
                                   Ollama report no cost, so it is inert there. A backstop for
                                   one runaway run; set an account-level cap as well.
-  --max-tool-turns <n>            Tool-turn ceiling per loop (default: 20)
+  --max-tool-turns <n>            Tool-turn ceiling per loop (default: 50)
   --max-repeat-tool-errors <n>    Stop after the same tool call fails this many times in a
                                   row (default: 3, or KODR_MAX_REPEAT_TOOL_ERRORS; 0 disables)
   --request-timeout-ms <n>        Hard per-request timeout ceiling, independent of --max-run-ms,

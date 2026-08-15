@@ -25,7 +25,7 @@ import {
   recoverToolName,
 } from './tool-recovery.mjs';
 
-export const MAX_TOOL_TURNS = 20;
+export const MAX_TOOL_TURNS = 50;
 
 /**
  * State for the repeated-failing-call breaker (createRepeatTracker).
