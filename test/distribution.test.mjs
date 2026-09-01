@@ -98,7 +98,12 @@ async function pack() {
     { cwd: ROOT },
   );
   assert.equal(result.code, 0, result.stderr);
-  return JSON.parse(result.stdout)[0];
+  const parsed = JSON.parse(result.stdout);
+  assert.ok(
+    Array.isArray(parsed) && parsed.length > 0,
+    `npm pack --json returned no tarballs; stdout: ${result.stdout.slice(0, 500)}`,
+  );
+  return parsed[0];
 }
 
 function execute(command, args, options = {}) {
