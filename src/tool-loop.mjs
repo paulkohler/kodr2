@@ -542,7 +542,7 @@ export async function executeNativeToolCalls(
  * folded into a JSON blob the model would otherwise never see.
  *
  * @param {string} name
- * @param {object} result
+ * @param {any} result
  * @returns {string}
  */
 export function formatToolResultForModel(name, result) {
