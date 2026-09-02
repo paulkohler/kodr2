@@ -158,6 +158,21 @@ describe('parseArgs', () => {
     assert.deepEqual(args.openrouterProviderOnly, []);
   });
 
+  it('parses --cache as a boolean flag', () => {
+    const args = parseArgs(['run', 'hi', '--cache']);
+    assert.equal(args.cache, true);
+  });
+
+  it('parses --no-cache as a boolean flag', () => {
+    const args = parseArgs(['run', 'hi', '--no-cache']);
+    assert.equal(args.cache, false);
+  });
+
+  it('defaults --cache to null so KODR_CACHE can still take effect', () => {
+    const args = parseArgs(['run', 'hi']);
+    assert.equal(args.cache, null);
+  });
+
   it('parses --test flag', () => {
     const args = parseArgs(['run', 'hi', '--test', 'npm test']);
     assert.equal(args.test, 'npm test');
@@ -666,5 +681,10 @@ describe('buildRunOptions', () => {
     // the expensive ones -- unbounded.
     const args = parseArgs(['loop', '--max-cost-usd', '1.5']);
     assert.equal(buildRunOptions(args, '/tmp/ws', false).maxCostUsd, 1.5);
+  });
+
+  it('passes --cache through to every run it drives', () => {
+    const args = parseArgs(['loop', '--cache']);
+    assert.equal(buildRunOptions(args, '/tmp/ws', false).cache, true);
   });
 });

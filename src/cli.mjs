@@ -74,6 +74,7 @@ import { MAX_TOOL_TURNS } from './tool-loop.mjs';
  * @property {boolean|null} openrouterNoZdr
  * @property {boolean|null} openrouterAllowDataCollection
  * @property {string[]} openrouterProviderOnly
+ * @property {boolean|null} cache
  * @property {string|null} test
  * @property {number} healTurns
  * @property {number} maxRunMs
@@ -327,6 +328,7 @@ export async function main(argv) {
     noZdr: args.openrouterNoZdr,
     allowDataCollection: args.openrouterAllowDataCollection,
     providerOrder: args.openrouterProviderOnly,
+    cache: args.cache,
     testCommand: args.test,
     maxHealTurns: args.healTurns,
     maxRunMs: args.maxRunMs,
@@ -591,6 +593,7 @@ export function buildRunOptions(args, cwd, quiet) {
     noZdr: args.openrouterNoZdr,
     allowDataCollection: args.openrouterAllowDataCollection,
     providerOrder: args.openrouterProviderOnly,
+    cache: args.cache,
     testCommand: args.test,
     maxHealTurns: args.healTurns,
     maxRunMs: args.maxRunMs,
@@ -671,6 +674,7 @@ export function parseArgs(argv) {
     openrouterNoZdr: null,
     openrouterAllowDataCollection: null,
     openrouterProviderOnly: [],
+    cache: null,
     test: null,
     healTurns: 3,
     maxRunMs: 0,
@@ -809,6 +813,16 @@ export function parseArgs(argv) {
     }
     if (arg === '--openrouter-provider-only' && argv[i + 1]) {
       args.openrouterProviderOnly = parseEnvNames(argv[++i]);
+      i++;
+      continue;
+    }
+    if (arg === '--cache') {
+      args.cache = true;
+      i++;
+      continue;
+    }
+    if (arg === '--no-cache') {
+      args.cache = false;
       i++;
       continue;
     }
@@ -1142,6 +1156,10 @@ Options:
                                   e.g. "akashml,parasail" (or KODR_OPENROUTER_PROVIDER_ONLY). Maps
                                   to OpenRouter's provider.order. See
                                   https://openrouter.ai/docs/features/provider-routing.
+  --cache                        Enable Anthropic prompt caching on OpenRouter (or KODR_CACHE=1).
+                                 On by default for anthropic/* model ids; off otherwise.
+  --no-cache                     Disable Anthropic prompt caching even for anthropic/* models
+                                 (or KODR_CACHE=0).
   --prompt, -p <text>             Prompt text (compatibility alias)
   --test <command>                First Stop hook (e.g. "npm test"); see .kodr/hooks.json
   --heal-turns <n>                Max repair turns (default: 3)
@@ -1338,6 +1356,7 @@ export async function runConsolidateCommand(args) {
       noZdr: args.openrouterNoZdr,
       allowDataCollection: args.openrouterAllowDataCollection,
       providerOrder: args.openrouterProviderOnly,
+      cache: args.cache,
     });
     modelId = await client.resolveModel();
   } catch (err) {
@@ -1453,6 +1472,7 @@ export async function runReplay(args) {
     noZdr: args.openrouterNoZdr,
     allowDataCollection: args.openrouterAllowDataCollection,
     providerOrder: args.openrouterProviderOnly,
+    cache: args.cache,
     testCommand: prior.metadata.testCommand || undefined,
     maxHealTurns: prior.metadata.maxHealTurns,
     maxRunMs: prior.metadata.maxRunMs,
@@ -1557,6 +1577,7 @@ export async function runGoalCommand(args) {
       noZdr: args.openrouterNoZdr,
       allowDataCollection: args.openrouterAllowDataCollection,
       providerOrder: args.openrouterProviderOnly,
+      cache: args.cache,
     });
     judgeModelId = await client.resolveModel();
     // The judge is a read-only tool loop over the same model as the build
@@ -1728,6 +1749,7 @@ export async function runLoopCommand(args) {
       noZdr: args.openrouterNoZdr,
       allowDataCollection: args.openrouterAllowDataCollection,
       providerOrder: args.openrouterProviderOnly,
+      cache: args.cache,
     });
     judgeModelId = await client.resolveModel();
     judgeContextWindow = await resolveContextWindow({
@@ -1875,6 +1897,7 @@ export async function runAcpCommand(args) {
     noZdr: args.openrouterNoZdr,
     allowDataCollection: args.openrouterAllowDataCollection,
     providerOrder: args.openrouterProviderOnly,
+    cache: args.cache,
     testCommand: args.test,
     maxHealTurns: args.healTurns,
     maxRunMs: args.maxRunMs,

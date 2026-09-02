@@ -12,6 +12,8 @@ import { createOllamaProvider } from '../src/provider-ollama.mjs';
 import {
   createOpenRouterProvider,
   dataCollectionDenied,
+  isAnthropicModelId,
+  openRouterCacheEnabled,
   resolveProviderOrder,
   zdrEnabled,
 } from '../src/provider-openrouter.mjs';
@@ -25,6 +27,7 @@ const ENV_VARS = [
   'KODR_OPENROUTER_NO_ZDR',
   'KODR_OPENROUTER_ALLOW_DATA_COLLECTION',
   'KODR_OPENROUTER_PROVIDER_ONLY',
+  'KODR_CACHE',
   'OLLAMA_API_KEY',
 ];
 const originalEnv = Object.fromEntries(
@@ -177,6 +180,81 @@ describe('resolveProviderOrder', () => {
   });
 });
 
+describe('isAnthropicModelId', () => {
+  it('is true for an anthropic/* id', () => {
+    assert.equal(isAnthropicModelId('anthropic/claude-opus-5'), true);
+  });
+
+  it('is true for an anthropic/* id with a :batch suffix', () => {
+    assert.equal(isAnthropicModelId('anthropic/claude-fable-5.1:batch'), true);
+  });
+
+  it('is false for a non-anthropic id', () => {
+    assert.equal(isAnthropicModelId('qwen/qwen3.6-35b-a3b'), false);
+  });
+
+  it('is false for an id that merely contains "anthropic" mid-string', () => {
+    assert.equal(isAnthropicModelId('somevendor/anthropic-like-model'), false);
+  });
+
+  it('is false for an empty or undefined id', () => {
+    assert.equal(isAnthropicModelId(''), false);
+    assert.equal(isAnthropicModelId(undefined), false);
+  });
+});
+
+describe('openRouterCacheEnabled', () => {
+  it('is on by default for an anthropic/* model id', () => {
+    delete process.env.KODR_CACHE;
+    assert.equal(
+      openRouterCacheEnabled(undefined, 'anthropic/claude-opus-5'),
+      true,
+    );
+  });
+
+  it('is off by default for a non-anthropic model id', () => {
+    delete process.env.KODR_CACHE;
+    assert.equal(
+      openRouterCacheEnabled(undefined, 'qwen/qwen3.6-35b-a3b'),
+      false,
+    );
+  });
+
+  it('an explicit --cache (true) forces it on regardless of model id', () => {
+    delete process.env.KODR_CACHE;
+    assert.equal(openRouterCacheEnabled(true, 'qwen/qwen3.6-35b-a3b'), true);
+  });
+
+  it('an explicit --no-cache (false) forces it off even for an anthropic model', () => {
+    delete process.env.KODR_CACHE;
+    assert.equal(
+      openRouterCacheEnabled(false, 'anthropic/claude-opus-5'),
+      false,
+    );
+  });
+
+  it('KODR_CACHE=1 forces it on when no explicit flag is given', () => {
+    process.env.KODR_CACHE = '1';
+    assert.equal(
+      openRouterCacheEnabled(undefined, 'qwen/qwen3.6-35b-a3b'),
+      true,
+    );
+  });
+
+  it('KODR_CACHE=0 forces it off when no explicit flag is given', () => {
+    process.env.KODR_CACHE = '0';
+    assert.equal(
+      openRouterCacheEnabled(undefined, 'anthropic/claude-opus-5'),
+      false,
+    );
+  });
+
+  it('an explicit flag overrides KODR_CACHE', () => {
+    process.env.KODR_CACHE = '0';
+    assert.equal(openRouterCacheEnabled(true, 'qwen/qwen3.6-35b-a3b'), true);
+  });
+});
+
 describe('createProvider', () => {
   it('returns an lmstudio provider by default', () => {
     delete process.env.KODR_PROVIDER;
@@ -263,6 +341,37 @@ describe('createProvider', () => {
         model: 'test',
         reasoning: false,
       }),
+    );
+  });
+
+  it('threads options.cache through to the openrouter factory', async () => {
+    process.env.OPENROUTER_API_KEY = 'sk-test';
+    let requestBody;
+    const baseUrl = await startServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => (body += chunk));
+      req.on('end', () => {
+        requestBody = JSON.parse(body);
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        res.end('data: [DONE]\n\n');
+      });
+    });
+    const provider = createProvider({
+      provider: 'openrouter',
+      baseUrl,
+      model: 'qwen/qwen3.6-35b-a3b',
+      cache: true,
+    });
+    await provider.chat({ messages: [] });
+    assert.deepEqual(requestBody.cache_control, { type: 'ephemeral' });
+  });
+
+  it('ignores options.cache for lmstudio and ollama', () => {
+    assert.doesNotThrow(() =>
+      createProvider({ provider: 'lmstudio', model: 'test', cache: true }),
+    );
+    assert.doesNotThrow(() =>
+      createProvider({ provider: 'ollama', model: 'test', cache: true }),
     );
   });
 });
@@ -603,6 +712,88 @@ describe('createOpenRouterProvider', () => {
       data_collection: 'deny',
       order: ['akashml', 'parasail'],
     });
+  });
+
+  it('sends a root-level cache_control by default for an anthropic model', async () => {
+    let requestBody;
+    const baseUrl = await startServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => (body += chunk));
+      req.on('end', () => {
+        requestBody = JSON.parse(body);
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        res.end('data: [DONE]\n\n');
+      });
+    });
+    const provider = createOpenRouterProvider({
+      baseUrl,
+      model: 'anthropic/claude-opus-5',
+      apiKey: 'sk-test',
+    });
+    await provider.chat({ messages: [] });
+    assert.deepEqual(requestBody.cache_control, { type: 'ephemeral' });
+  });
+
+  it('omits cache_control by default for a non-anthropic model', async () => {
+    let requestBody;
+    const baseUrl = await startServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => (body += chunk));
+      req.on('end', () => {
+        requestBody = JSON.parse(body);
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        res.end('data: [DONE]\n\n');
+      });
+    });
+    const provider = createOpenRouterProvider({
+      baseUrl,
+      model: 'qwen/qwen3.6-35b-a3b',
+      apiKey: 'sk-test',
+    });
+    await provider.chat({ messages: [] });
+    assert.equal(requestBody.cache_control, undefined);
+  });
+
+  it('omits cache_control when --no-cache is set, even for an anthropic model', async () => {
+    let requestBody;
+    const baseUrl = await startServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => (body += chunk));
+      req.on('end', () => {
+        requestBody = JSON.parse(body);
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        res.end('data: [DONE]\n\n');
+      });
+    });
+    const provider = createOpenRouterProvider({
+      baseUrl,
+      model: 'anthropic/claude-opus-5',
+      apiKey: 'sk-test',
+      cache: false,
+    });
+    await provider.chat({ messages: [] });
+    assert.equal(requestBody.cache_control, undefined);
+  });
+
+  it('sends cache_control when --cache is set, even for a non-anthropic model', async () => {
+    let requestBody;
+    const baseUrl = await startServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => (body += chunk));
+      req.on('end', () => {
+        requestBody = JSON.parse(body);
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        res.end('data: [DONE]\n\n');
+      });
+    });
+    const provider = createOpenRouterProvider({
+      baseUrl,
+      model: 'qwen/qwen3.6-35b-a3b',
+      apiKey: 'sk-test',
+      cache: true,
+    });
+    await provider.chat({ messages: [] });
+    assert.deepEqual(requestBody.cache_control, { type: 'ephemeral' });
   });
 
   it('has no loadModel/ejectModel methods', () => {

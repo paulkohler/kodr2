@@ -73,6 +73,9 @@ export function reasoningEnabled(option) {
  * @param {boolean} [options.noZdr] - Disable OpenRouter Zero Data Retention routing
  * @param {boolean} [options.allowDataCollection] - Allow OpenRouter data-collecting providers
  * @param {string[]} [options.providerOrder] - OpenRouter upstream provider slugs
+ * @param {boolean} [options.cache] - Enable Anthropic prompt caching on OpenRouter
+ *   (on by default for Anthropic-family models; off otherwise -- see
+ *   src/provider-openrouter.mjs's openRouterCacheEnabled)
  * @returns {Provider}
  */
 export function createProvider(options = {}) {

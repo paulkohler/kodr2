@@ -75,6 +75,49 @@ export function resolveProviderOrder(option) {
 }
 
 /**
+ * Whether Anthropic prompt caching is enabled for a given model id. On by
+ * default for Anthropic-family model ids (the operator should not have to ask
+ * to cache the prefill cost that every turn re-sends), off otherwise —
+ * matching the same default-on rationale as zdrEnabled/dataCollectionDenied.
+ * Explicit --no-cache (or KODR_CACHE=0) overrides; explicit --cache (or
+ * KODR_CACHE=1) forces it on regardless of model family. See
+ * specs/provider-cache.yaml for why this is a root-level (automatic-caching)
+ * field rather than per-message cache_control markers.
+ * @param {boolean} [cache] - Explicit --cache/--no-cache flag (true = forced
+ *   on, false = forced off)
+ * @param {string} [modelId] - Resolved model id, used to detect Anthropic family
+ * @returns {boolean}
+ */
+export function openRouterCacheEnabled(cache, modelId) {
+  if (cache === true) {
+    return true;
+  }
+  if (cache === false) {
+    return false;
+  }
+  const env = process.env.KODR_CACHE;
+  if (env === '1' || env === 'true') {
+    return true;
+  }
+  if (env === '0' || env === 'false') {
+    return false;
+  }
+  return isAnthropicModelId(modelId);
+}
+
+/**
+ * Whether a model id looks like an Anthropic-family model as routed through
+ * OpenRouter (ids start with `anthropic/`). Used to decide whether root-level
+ * (automatic) prompt caching is enabled by default. A falsy or empty id is
+ * never Anthropic-family.
+ * @param {string} [modelId]
+ * @returns {boolean}
+ */
+export function isAnthropicModelId(modelId) {
+  return Boolean(modelId) && modelId.startsWith('anthropic/');
+}
+
+/**
  * Builds the `provider` routing object OpenRouter's API accepts in the
  * request body (see https://openrouter.ai/docs/features/provider-routing).
  * Returns undefined when there's nothing to say -- ZDR and data-collection
@@ -111,6 +154,10 @@ function buildProviderRouting(options) {
  *   routing restriction (denied by default)
  * @param {string[]} [options.providerOrder] - Provider slugs to try in order
  *   (OpenRouter's `provider.order`), e.g. ["akashml", "parasail"]
+ * @param {boolean} [options.cache] - Enable Anthropic prompt caching via a
+ *   root-level cache_control field (on by default for Anthropic-family
+ *   models; off otherwise). Pass --no-cache (or set KODR_CACHE=0) to disable;
+ *   pass --cache (or KODR_CACHE=1) to force on. See specs/provider-cache.yaml.
  * @param {string} [options.apiKey] - Overridable for tests; defaults to OPENROUTER_API_KEY
  * @returns {Provider}
  */
@@ -124,6 +171,7 @@ export function createOpenRouterProvider(options = {}) {
 
   const model = options.model || process.env.KODR_MODEL || '';
   const providerRouting = buildProviderRouting(options);
+  const cacheEnabled = openRouterCacheEnabled(options.cache, model);
 
   const client = createClient({
     baseUrl: options.baseUrl || DEFAULT_OPENROUTER_BASE_URL,
@@ -134,6 +182,11 @@ export function createOpenRouterProvider(options = {}) {
     extraBody: {
       ...(options.reasoning ? { reasoning: { enabled: true } } : {}),
       ...(providerRouting ? { provider: providerRouting } : {}),
+      // Root-level cache_control is Anthropic's "automatic caching": the API
+      // caches everything through the last cacheable block and advances the
+      // breakpoint forward on each subsequent request. No message mutation
+      // needed -- see specs/provider-cache.yaml.
+      ...(cacheEnabled ? { cache_control: { type: 'ephemeral' } } : {}),
     },
   });
 

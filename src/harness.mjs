@@ -146,6 +146,10 @@ export {
  *   collect/train on prompt data (denied by default with the openrouter provider)
  * @param {string[]} [options.providerOrder] - OpenRouter upstream provider slugs to
  *   try in order, e.g. ["akashml", "parasail"] (maps to provider.order)
+ * @param {boolean} [options.cache] - Enable Anthropic prompt caching via a
+ *   root-level cache_control field on OpenRouter (on by default for
+ *   Anthropic-family models; off otherwise; also KODR_CACHE). See
+ *   specs/provider-cache.yaml.
  * @param {string} [options.testCommand] - Verification command
  * @param {number} [options.maxHealTurns] - Max heal turns (default 3)
  * @param {number} [options.maxRunMs] - Stop between turns after this many ms (0 disables)
@@ -299,6 +303,7 @@ export async function run(prompt, options) {
       noZdr: options.noZdr,
       allowDataCollection: options.allowDataCollection,
       providerOrder: options.providerOrder,
+      cache: options.cache,
     });
 
     modelId = await client.resolveModel();
