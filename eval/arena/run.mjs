@@ -10,6 +10,7 @@
  *   npm run arena
  *   npm run arena -- --variant heal --repeats 1        # quick single cell
  *   npm run arena -- --task todo-rust-lib
+ *   npm run arena -- --model google/gemma-4-26b-a4b     # override variants.json's model
  *
  * Skips cleanly (exit 0) when the model server is unreachable.
  */
@@ -27,6 +28,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { parseArgs, recordDirFor, selectModel } from './options.mjs';
 import { aggregate, toMarkdown } from './report.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -41,6 +43,7 @@ async function main() {
   const tasks = await loadTasks(opts.task);
   const variants = selectVariants(config.variants, opts.variant);
   const baseUrl = config.baseUrl;
+  const model = selectModel(config, opts);
 
   if (!(await modelReachable(baseUrl))) {
     process.stdout.write(
@@ -62,7 +65,7 @@ async function main() {
           task,
           variant,
           k,
-          config,
+          model,
           baseUrl,
           jobsDir,
         });
@@ -82,15 +85,15 @@ async function main() {
 }
 
 /** Run one (task × variant × repeat) cell and return its job record. */
-async function runCell({ task, variant, k, config, baseUrl, jobsDir }) {
+async function runCell({ task, variant, k, model, baseUrl, jobsDir }) {
   const ws = await mkdtemp(join(tmpdir(), `arena-${task.name}-`));
-  const recordDir = join(jobsDir, 'records', `${variant.name}-${k}`);
+  const recordDir = recordDirFor(jobsDir, variant.name, k);
 
   try {
     if (task.setup) {
       await sh(task.setup, ws);
     }
-    await runKodr({ task, variant, config, baseUrl, ws, recordDir });
+    await runKodr({ task, variant, model, baseUrl, ws, recordDir });
 
     // The task's own verify is the ground truth, independent of any Stop gate.
     const passed = (await sh(task.verify, ws)).code === 0;
@@ -101,7 +104,7 @@ async function runCell({ task, variant, k, config, baseUrl, jobsDir }) {
   }
 }
 
-function runKodr({ task, variant, config, baseUrl, ws, recordDir }) {
+function runKodr({ task, variant, model, baseUrl, ws, recordDir }) {
   const args = [
     KODR,
     'run',
@@ -109,7 +112,7 @@ function runKodr({ task, variant, config, baseUrl, ws, recordDir }) {
     '--cwd',
     ws,
     '--model',
-    config.model,
+    model,
     '--base-url',
     baseUrl,
     '--max-run-ms',
@@ -199,22 +202,6 @@ function spawnDone(cmd, args, options) {
     child.on('close', (code) => resolveProcess({ code: code ?? 1 }));
     child.on('error', () => resolveProcess({ code: 1 }));
   });
-}
-
-function parseArgs(argv) {
-  const opts = { task: null, variant: null, repeats: 0, jobsDir: null };
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--task') {
-      opts.task = argv[++i];
-    } else if (argv[i] === '--variant') {
-      opts.variant = argv[++i];
-    } else if (argv[i] === '--repeats') {
-      opts.repeats = Number.parseInt(argv[++i], 10) || 0;
-    } else if (argv[i] === '--jobs-dir') {
-      opts.jobsDir = argv[++i];
-    }
-  }
-  return opts;
 }
 
 main().catch((err) => {

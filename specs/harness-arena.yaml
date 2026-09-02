@@ -58,6 +58,9 @@ behavior:
     task workspace (depends on the runs-dir override).
   - Skips cleanly (exit 0) when the model server is unreachable.
   - Filters: --task, --variant, --repeats, --jobs-dir for quick single cells.
+  - --model overrides variants.json's fixed model for the whole run (e.g. a
+    quick check against a different model without editing variants.json).
+    Absent, the run uses variants.json's model as before.
 
 aggregation:
   - Per variant: pass@k (per task, any repeat passing, averaged over tasks),
@@ -85,3 +88,7 @@ tests:
     - aggregate summarizes per variant with pass@k, cost, heals, and aborts
     - aggregate groups runs by variant
     - toMarkdown renders a table row per variant
+    - parseArgs accepts an optional --model override
+    - selectModel falls back to variants.json's model when --model is absent
+    - selectModel prefers --model over variants.json's model
+    - recordDirFor resolves a cell's record directory outside the temp workspace
