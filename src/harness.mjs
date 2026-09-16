@@ -454,6 +454,7 @@ export async function run(prompt, options) {
       heartbeatMs,
       onHeartbeat: onModelHeartbeat,
       onDebug: onModelDebug,
+      signal: options.signal,
     });
     await disposeIncidentTracking();
     return compactionResult;
@@ -1089,12 +1090,13 @@ export function stopVerifyBudgetMs(startedAt, maxRunMs, reserveFraction) {
  * @param {number} [params.heartbeatMs]
  * @param {function} [params.onHeartbeat]
  * @param {function} [params.onDebug]
+ * @param {AbortSignal} [params.signal]
  * @returns {Promise<object>} Run result
  */
 async function runManualCompaction(params) {
   const { client, modelId, messages, metadata, reporter, startedAt } = params;
   const { runsDir, noSave, maxRunMs = 0, heartbeatMs, onHeartbeat } = params;
-  const { onDebug } = params;
+  const { onDebug, signal } = params;
 
   // messages holds the fresh system prompt plus any continued conversation.
   const hasHistory = messages.some((message) => message.role !== 'system');
@@ -1120,6 +1122,7 @@ async function runManualCompaction(params) {
     heartbeatMs,
     onHeartbeat,
     onDebug,
+    signal,
   });
 
   if (!compactResult.error) {

@@ -248,6 +248,7 @@ export async function runToolLoop(params) {
       heartbeatMs,
       onHeartbeat,
       onDebug,
+      signal,
     });
     if (compacted.compacted) {
       compactions++;
@@ -388,6 +389,7 @@ export async function runToolLoop(params) {
  * @param {number} [params.heartbeatMs]
  * @param {function} [params.onHeartbeat]
  * @param {function} [params.onDebug]
+ * @param {AbortSignal} [params.signal]
  * @returns {Promise<{ compacted: boolean, retries: number }>} Whether the
  *   conversation was compacted, and retries the summary chat call used
  */
@@ -395,7 +397,7 @@ async function maybeCompact(params) {
   const { client, modelId, messages, lastPromptTokens, usage, reporter } =
     params;
   const { contextWindow, compactThreshold, timeoutMs } = params;
-  const { heartbeatMs, onHeartbeat, onDebug } = params;
+  const { heartbeatMs, onHeartbeat, onDebug, signal } = params;
 
   if (!needsCompaction(lastPromptTokens, contextWindow, compactThreshold)) {
     return { compacted: false, retries: 0 };
@@ -413,6 +415,7 @@ async function maybeCompact(params) {
     heartbeatMs,
     onHeartbeat,
     onDebug,
+    signal,
   });
   usage.prompt += result.usage.prompt;
   usage.completion += result.usage.completion;

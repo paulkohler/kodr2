@@ -470,6 +470,24 @@ describe('compactMessages', () => {
     assert.equal(client.calls[0].onHeartbeat, onHeartbeat);
   });
 
+  it('forwards the cancellation signal to the summary chat call', async () => {
+    const client = scriptedClient([finalTurn('SUMMARY OF WORK')]);
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'task' },
+    ];
+    const controller = new AbortController();
+
+    await compactMessages({
+      client,
+      modelId: 'm',
+      messages,
+      signal: controller.signal,
+    });
+
+    assert.equal(client.calls[0].signal, controller.signal);
+  });
+
   it('leaves messages unchanged when summarization fails', async () => {
     const client = /** @type {import('../src/provider.mjs').Provider} */ (
       /** @type {any} */ ({

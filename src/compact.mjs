@@ -289,6 +289,7 @@ export function renderTranscript(
  * @param {number} [params.heartbeatMs] - Interval for onHeartbeat "still waiting" notices (0 disables)
  * @param {function} [params.onHeartbeat] - Called with elapsed ms on each heartbeat tick
  * @param {function} [params.onDebug] - Forwarded to the summary chat call (see specs/debug-log.yaml)
+ * @param {AbortSignal} [params.signal] - Cancellation signal forwarded to the summary chat call
  * @param {number} [params.maxMessageChars] - Per-message cap for the rendered transcript
  *   (also KODR_COMPACT_MESSAGE_CHARS; default 2000), so the summarize request stays
  *   smaller than the conversation that triggered compaction
@@ -299,7 +300,7 @@ export function renderTranscript(
  */
 export async function compactMessages(params) {
   const { client, modelId, messages, reporter, timeoutMs } = params;
-  const { heartbeatMs, onHeartbeat, onDebug } = params;
+  const { heartbeatMs, onHeartbeat, onDebug, signal } = params;
   const system = messages.find((message) => message.role === 'system') || null;
   const history = messages.filter((message) => message.role !== 'system');
 
@@ -333,6 +334,7 @@ export async function compactMessages(params) {
       heartbeatMs,
       onHeartbeat,
       onDebug,
+      signal,
     });
   } catch (err) {
     return {
