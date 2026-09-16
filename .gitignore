@@ -1,5 +1,6 @@
 node_modules/
 .kodr/
 eval/arena/jobs/
+eval/results/
 
 .DS_Store

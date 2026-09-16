@@ -35,6 +35,7 @@
     "pretest": "npm run assert:zero-deps",
     "test": "node --test test/*.test.mjs",
     "eval": "node --test eval/*.eval.mjs",
+    "eval:compaction": "node --test eval/compaction.eval.mjs",
     "arena": "node eval/arena/run.mjs",
     "inspect-run": "node scripts/inspect-run.mjs",
     "install-local": "node bin/install-local.mjs",
