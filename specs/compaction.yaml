@@ -40,6 +40,11 @@ inputs:
       Per-message character cap for the rendered transcript (also
       KODR_COMPACT_MESSAGE_CHARS; default 2000). Keeps the summarize request
       smaller than the conversation that triggered compaction.
+  maxRecentChars:
+    type: number
+    description: >
+      Character cap for a mechanically preserved rendering of the most recent
+      completed tool turn (also KODR_COMPACT_RECENT_CHARS; default 4000)
   timeoutMs:
     type: number
     description: Per-call timeout override forwarded to the summary chat call (e.g. the run's remaining maxRunMs budget)
@@ -56,7 +61,9 @@ inputs:
 outputs:
   messages:
     type: array
-    description: Compacted conversation — system message plus one summary message
+    description: >
+      Compacted conversation — system message plus one user message containing
+      the model summary and bounded recent tool state
   summary:
     type: string
     description: The dense summary text the model produced
@@ -93,6 +100,18 @@ constraints:
   - >
     The history is replaced by a single user message holding the summary,
     so no assistant tool_call is left without its matching tool result
+  - >
+    The most recent completed assistant tool-call turn and its results are
+    rendered mechanically into the compacted user message, capped by
+    maxRecentChars. This bounded state is authoritative over the generated
+    summary and tells the model not to repeat a completed call unless the task
+    requires a fresh read. It does not retain protocol-level assistant/tool
+    messages, so the compacted conversation stays well formed
+  - >
+    The summary prompt requires explicit Goal, Completed, Current state, and
+    Next action sections. Completed work must not be restated as the next
+    action, and the continuation wrapper tells the model to resume rather than
+    restart the original task
   - >
     Auto-compaction is checked between tool turns, after the turn's results
     are appended, using whichever is larger of the most recent request's
@@ -162,7 +181,10 @@ tests:
     - compactTaskChars uses an explicit option, then the env var, then the default
     - compactMessages bounds the summarize request so a huge message cannot overflow it
     - compactMessageChars uses an explicit option, then the env var, then the default
-    - compactMessages keeps the system message and replaces history with a summary
+    - compactRecentChars uses an explicit option, then the env var, then the default
+    - renderRecentToolState returns the last completed tool turn within its total cap
+    - renderRecentToolState ignores an assistant tool call without its result
+    - compactMessages keeps the system message and replaces history with a summary plus bounded recent tool state
     - compactMessages leaves messages unchanged when summarization fails
     - compactMessages is a no-op when there is no history to compact
     - compactMessages forwards timeoutMs to the summary chat call

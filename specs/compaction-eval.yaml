@@ -28,7 +28,8 @@ outputs:
     description: >
       Per-attempt model, loaded and configured context lengths, pass state,
       compaction count, tool turns, tokens, duration, stop reason, and timeout
-      state
+      state, plus a bounded reporter trajectory of tool calls, result shapes,
+      and compaction events for diagnosis
   summary:
     type: object
     description: Pass rate plus median duration, tokens, and compaction count
@@ -66,6 +67,11 @@ constraints:
     Results are written below the gitignored eval/results directory by default
     and the suite prints a compact aggregate summary.
   - >
+    The failure trajectory never stores full tool-result content. It records
+    tool names and arguments, result keys, error text, returned content length,
+    and compaction thresholds so a loop can be diagnosed without duplicating a
+    large file or command output into the report.
+  - >
     The eval does not load, unload, or resize the model; it records LM Studio's
     actual loaded context length separately from Kodr's configured 8K window.
 
@@ -75,6 +81,7 @@ tests:
     - median returns the middle value or the mean of the two middle values
     - summarizeAttempts reports pass rate and median metrics
     - runWithAbortBudget aborts at its budget and allows a short settlement grace
+    - evalTraceReporter records bounded tool-call, tool-result, and compaction events
   eval:
     - seeded-history workload compacts at least once and produces its artifact
     - large-tool-result workload compacts at least once and produces its artifact
