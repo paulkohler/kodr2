@@ -152,21 +152,27 @@ behavior:
   - Hooks for an event run sequentially in declared order.
   - The first failing blocking hook stops the sequence and triggers feedback.
   - A passing sequence (all exit 0) lets the agent stop normally.
-  - Stop hooks skip when the workspace was not touched (no files written, no
+  - >
+    Stop hooks skip when the workspace was not touched (no files written, no
     commands run), unless runWhenUnchanged is true — matching current verify.
-  - "--test <cmd>" appends a Stop hook (preserves the existing flag); explicit
+  - >
+    "--test <cmd>" appends a Stop hook (preserves the existing flag); explicit
     .kodr/hooks.json Stop hooks run after it.
-  - Tool hooks with a "match" run only when the regex matches the tool name; a
+  - >
+    Tool hooks with a "match" run only when the regex matches the tool name; a
     hook without "match" runs for every tool. An invalid match regex never
     matches (the hook is skipped).
-  - PreToolUse stops at the first denying hook; PostToolUse runs every matching
+  - >
+    PreToolUse stops at the first denying hook; PostToolUse runs every matching
     hook and concatenates the feedback of any that failed.
-  - SessionStart runs before the task prompt; successful stdout is injected as
+  - >
+    SessionStart runs before the task prompt; successful stdout is injected as
     context. SessionEnd runs after the transcript is saved, even on error.
 
 verify_migration:
   - The testCommand/verify/heal flow becomes a built-in Stop hook.
-  - verify() remains as the per-hook executor: it already returns the per-hook
+  - >
+    verify() remains as the per-hook executor: it already returns the per-hook
     result shape { passed, command, output, exitCode }. The verify spec stays
     "implemented"; only its when-to-run gating moved into this layer.
   - heal() is the feedback loop for blocking-hook failures, unchanged.
@@ -176,20 +182,25 @@ constraints:
   - Zero runtime dependencies; config is JSON parsed with JSON.parse.
   - Hooks run via the shared shell runner with the curated env (env spec).
   - cwd is the path-jailed workspace root.
-  - Per-hook timeout is overridable; default is the verify default and is capped
+  - >
+    Per-hook timeout is overridable; default is the verify default and is capped
     by the remaining maxRunMs budget (per CLAUDE.md: operational limits must be
     configurable).
-  - The initial Stop verification is additionally capped to hold back a heal
+  - >
+    The initial Stop verification is additionally capped to hold back a heal
     reserve fraction of the run budget (KODR_HEAL_RESERVE or the healReserve
     option, default 0.25, clamped to [0, 0.9]; 0 disables). This only applies
     when maxRunMs is set. Heal's own re-verifies use the full remaining budget.
-  - Stop hooks report heartbeat notices on an interval (KODR_HEARTBEAT_MS or
+  - >
+    Stop hooks report heartbeat notices on an interval (KODR_HEARTBEAT_MS or
     the heartbeatMs option, default 30,000ms; 0 disables), tagged with the
     hook's name; not shown when --quiet is set.
   - Output truncated at the verify output limit (overridable).
-  - No tri-state flags: runWhenUnchanged is a plain boolean.
+  - >
+    No tri-state flags: runWhenUnchanged is a plain boolean.
   - Errors at the config boundary are returned values, not thrown.
-  - Security: .kodr/hooks.json may be checked into a repo. Document that hooks
+  - >
+    Security: .kodr/hooks.json may be checked into a repo. Document that hooks
     run shell commands on the operator's machine; commands are the operator's
     responsibility, run with the curated env, never with the harness's full
     process.env.
@@ -204,7 +215,8 @@ tests:
     - multiple Stop hooks run in declared order
     - the first failing blocking hook stops the sequence
     - the full Stop sequence re-runs after a heal pass
-    - "--test" is appended as a Stop hook
+    - >
+      "--test" is appended as a Stop hook
     - runWhenUnchanged false skips when the workspace is untouched
     - runWhenUnchanged true runs even when the workspace is untouched
     - per-hook timeout is honored and capped by the remaining run budget

@@ -28,16 +28,21 @@ outputs:
       HEADROOM_FACTOR (2×) below the model's max
 
 constraints:
-  - Context info is read from LM Studio's /api/v0/models endpoint, which reports
+  - >
+    Context info is read from LM Studio's /api/v0/models endpoint, which reports
     state, loaded_context_length, and max_context_length per model
-  - hasContextHeadroom is true when max >= loaded * HEADROOM_FACTOR (2×), and
+  - >
+    hasContextHeadroom is true when max >= loaded * HEADROOM_FACTOR (2×), and
     false when either length is unknown or loaded is non-positive
-  - The headroom warning only fires on the probe path (no explicit
+  - >
+    The headroom warning only fires on the probe path (no explicit
     --context-window / KODR_CONTEXT_WINDOW), since an explicit setting is a
     deliberate choice
   - The warning is suppressed in quiet mode
-  - `kodr models` is a standalone subcommand that takes no prompt
-  - `kodr models` degrades gracefully: an unreachable or missing /api/v0/models
+  - >
+    `kodr models` is a standalone subcommand that takes no prompt
+  - >
+    `kodr models` degrades gracefully: an unreachable or missing /api/v0/models
     endpoint yields a clear "no models reported" message, not an error
   - Loaded models are marked; not-loaded models show only their max window
 

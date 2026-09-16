@@ -43,22 +43,29 @@ outputs:
 
 behavior:
   - view_image is only present in the tool registry when vision is enabled.
-  - Supported types: jpg/jpeg, png, gif, webp (by extension -> media type).
-  - The image is size-capped (KODR_MAX_IMAGE_BYTES, default 10MB) so one huge
+  - >
+    Supported types: jpg/jpeg, png, gif, webp (by extension -> media type).
+  - >
+    The image is size-capped (KODR_MAX_IMAGE_BYTES, default 10MB) so one huge
     file can't blow the request; an oversize or unreadable file returns an error.
-  - Paths are jailed exactly like read_file (resolveExistingPath); an escaping
+  - >
+    Paths are jailed exactly like read_file (resolveExistingPath); an escaping
     path returns an error, never image bytes.
-  - The tool message content is a compact JSON ack ({ viewing: <path> }), never
+  - >
+    The tool message content is a compact JSON ack ({ viewing: <path> }), never
     the base64, so the transcript and any re-send stay small.
   - The injected user message carries a text label plus the image_url data URI.
-  - renderTranscript (compaction) renders an image user message as a short
+  - >
+    renderTranscript (compaction) renders an image user message as a short
     "[image: <path>]" placeholder rather than trying to truncate array content.
 
 constraints:
   - Zero runtime dependencies; base64 via Buffer, no image libraries.
   - Off by default; enabling it adds exactly one tool and no other behavior.
-  - Model output is untrusted: the path is validated and jailed before any read.
-  - A missing-path error names the tool and its shape ("path is required --
+  - >
+    Model output is untrusted: the path is validated and jailed before any read.
+  - >
+    A missing-path error names the tool and its shape ("path is required --
     view_image needs { path }") rather than a bare assertion, like the other
     file tools.
 

@@ -86,12 +86,16 @@ outputs:
 constraints:
   - Off by default; opt in with --memory (or KODR_MEMORY). The drift risk below is real enough that this shouldn't be silently on until it's been used and trusted.
   - Runs once, after the tool loop's final outcome — never mid-loop, and never as part of the turn/budget the task itself was working against
-  - Skipped entirely (proposed: false) when the run's remaining budget after the reserve is exhausted, mirroring how healReserveFraction protects the heal pass — a retrospective is best-effort, not owed
-  - The retrospective model call is deadline-aware: timeoutMs is the remaining run budget, exactly like the compaction summary call (src/compact.mjs) — a request started late cannot itself outlive the run
+  - >
+    Skipped entirely (proposed: false) when the run's remaining budget after the reserve is exhausted, mirroring how healReserveFraction protects the heal pass — a retrospective is best-effort, not owed
+  - >
+    The retrospective model call is deadline-aware: timeoutMs is the remaining run budget, exactly like the compaction summary call (src/compact.mjs) — a request started late cannot itself outlive the run
   - Distillation reuses compact.mjs's renderTranscript rather than a second bespoke transcript renderer
-  - Never writes to MEMORY.md without a human decision in the loop:
+  - >
+    Never writes to MEMORY.md without a human decision in the loop:
     - Attended (TTY stdout, no --quiet/--json) — print the proposed notes and prompt "Keep these notes for future runs? [y/N]"; apply on yes, discard on no or no response
-    - Unattended (CI, --json, --quiet, or no TTY) — write the proposal to
+    - >
+      Unattended (CI, --json, --quiet, or no TTY) — write the proposal to
       `<runsDir>/<timestamp>.memory-proposal.md` — a flat file peer to the run
       transcript, matching this codebase's actual runsDir layout (run
       transcripts, incident records, and heartbeats are all flat files
@@ -148,7 +152,8 @@ constraints:
     notice, so a human notices and prunes instead of memory silently
     shrinking or growing unbounded with no signal either way.
   - A run with no meaningful tool activity (e.g. the model answered with no tool call at all) skips the retrospective — nothing to learn from
-  - A cancelled run skips the retrospective entirely, and an abort mid-call
+  - >
+    A cancelled run skips the retrospective entirely, and an abort mid-call
     returns { cancelled: true } rather than { error } — a deliberate Ctrl-C is
     not a failure. The harness gates on this too (specs/cancel.yaml); the check
     here is belt-and-braces for direct callers of the module.
@@ -177,11 +182,13 @@ constraints:
     faithful form: merge duplicates, drop entries later ones contradict
     (the later entry wins), drop session narrative, never invent or alter
     a lesson's meaning.
-  - Consolidation never applies without a human decision, same as the
+  - >
+    Consolidation never applies without a human decision, same as the
     retrospective — attended it prompts y/N before rewriting; unattended it
     writes a .memory-consolidation.md proposal to runsDir and leaves
     MEMORY.md untouched; --apply skips the prompt explicitly
-  - Before an apply rewrites MEMORY.md, the prior content is backed up to
+  - >
+    Before an apply rewrites MEMORY.md, the prior content is backed up to
     runsDir as a .memory-backup.md file (skipped under noSave, which
     promises no runsDir writes), so a bad consolidation is recoverable
   - >
@@ -189,16 +196,19 @@ constraints:
     that fed the model and the write — appendMemoryNotes is deliberately
     O_APPEND so concurrent runs can append mid-consolidation, and a blind
     rewrite would silently discard exactly such an entry.
-  - The model's "already tight" signal is the literal reply "NO CHANGES."
+  - >
+    The model's "already tight" signal is the literal reply "NO CHANGES."
     — treated like the retrospective's "No findings." (proposed but empty,
     nothing to confirm or write). A proposal byte-identical to the current
     content is treated the same way mechanically — observed live: a small
     model rewrites the file unchanged instead of honouring the sentinel,
     and a no-op must not consume a y/N prompt or a proposal file
-  - The consolidation reply has any think block stripped (via think.mjs)
+  - >
+    The consolidation reply has any think block stripped (via think.mjs)
     before it is treated as file content — a reasoning model's scratchpad
     must never be written into MEMORY.md
-  - The size notice points at kodr consolidate, so the signal names its
+  - >
+    The size notice points at kodr consolidate, so the signal names its
     remedy
 
 open_questions:

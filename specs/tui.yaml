@@ -29,57 +29,71 @@ outputs:
     description: Process exit code after the user quits the session
 
 constraints:
-  - Requires an interactive terminal -- both process.stdin.isTTY and
+  - >
+    Requires an interactive terminal -- both process.stdin.isTTY and
     process.stdout.isTTY must be true. --tui errors out (exit 1) otherwise, and
     is mutually exclusive with --json, --quiet, and --events.
-  - Full-screen: enters the alternate screen buffer (\x1b[?1049h) on start and
+  - >
+    Full-screen: enters the alternate screen buffer (\x1b[?1049h) on start and
     always leaves it (\x1b[?1049l) on exit, including on SIGINT, SIGTERM, and
     an uncaught error. The real cursor is hidden; the TUI draws its own
     reverse-video caret in the input box.
-  - Cleanup is idempotent and installed as the outermost teardown, so the
+  - >
+    Cleanup is idempotent and installed as the outermost teardown, so the
     alternate screen is left before incident.mjs's crash-stack write reaches
     stderr. Restores: show cursor, leave alt screen, setRawMode(false), remove
     listeners, and settle any pending command approval as denied.
-  - Layout, top to bottom: a one-line status header (model, phase, tokens,
+  - >
+    Layout, top to bottom: a one-line status header (model, phase, tokens,
     cost, elapsed, status), a scrollback pane, a separator, the input line,
     and a hint line. Scrollback is stored as logical (unwrapped) lines and
     wrapped to the current width at render time; ANSI escapes are treated as
     zero display width so wrapping and truncation count real columns.
-  - Rendering is throttled: streamed tokens accumulate and trigger at most one
+  - >
+    Rendering is throttled: streamed tokens accumulate and trigger at most one
     full-frame redraw per animation frame (~16ms), never one redraw per token.
-  - Terminal resize (process.stdout 'resize') recomputes dimensions and
+  - >
+    Terminal resize (process.stdout 'resize') recomputes dimensions and
     redraws.
-  - Input is handled in raw keypress mode (readline.emitKeypressEvents), not
+  - >
+    Input is handled in raw keypress mode (readline.emitKeypressEvents), not
     readline line-mode. The TUI owns the input buffer and cursor: printable
     insert, backspace, left/right/home/end, Enter to submit, and Tab to complete
     a partially-typed slash command (see specs/tui-slash-commands.yaml).
-  - stdin/stdout default to the process streams but are injectable
+  - >
+    stdin/stdout default to the process streams but are injectable
     (options.stdin/stdout) so the input loop, command dispatch, and render
     pipeline can be driven in-process by a test -- writing keystrokes in and
     reading rendered frames out -- without spawning a real PTY. Model-free
     commands (/help, autocomplete, Ctrl-C, /quit) exercise the whole shell with
     no network (test/tui-driver.test.mjs).
-  - Streamed assistant text is buffered and flushed into scrollback ahead of
+  - >
+    Streamed assistant text is buffered and flushed into scrollback ahead of
     the next discrete event (tool call/result, notice, verification, heal,
     summary, phase), so text emitted before a tool call is ordered above it.
-  - As assistant text flushes into scrollback it is rendered from simple inline
+  - >
+    As assistant text flushes into scrollback it is rendered from simple inline
     Markdown to ANSI: **bold**, *italic* / _italic_, `code`, `-`/`*` bullets,
     and `#` headings. Chrome lines (tool calls, notices, summaries) are already
     ANSI and are not Markdown-processed. Rendering is line-scoped and
     best-effort -- snake_case identifiers and prose stars are left untouched.
-  - Identical notices are shown once per session; a note repeated on a later
+  - >
+    Identical notices are shown once per session; a note repeated on a later
     turn (e.g. the context-window notice emitted at the start of every run) is
     not reprinted.
-  - Never runs two harness runs concurrently. A follow-up typed while a run is
+  - >
+    Never runs two harness runs concurrently. A follow-up typed while a run is
     active is queued (single slot, shown as "queued" in the header); when the
     active run finishes it starts the next with priorMessages set to the prior
     run's messages -- the same continuation the CLI's --continue uses.
-  - Command approval (opt-in via --approve-commands / options.approveCommands,
+  - >
+    Command approval (opt-in via --approve-commands / options.approveCommands,
     off by default so nothing changes otherwise): before a run_command tool
     call executes, run() calls the injected confirm(call); the TUI switches the
     input line to an approval prompt and the next y/n keypress resolves it.
     A denied command returns an error result to the model instead of running.
-  - Ctrl-C requires a confirming second press to quit, as insurance against an
+  - >
+    Ctrl-C requires a confirming second press to quit, as insurance against an
     accidental exit. A first press does not quit: while a run is active it
     interrupts it (like /stop -- settling any pending command approval as denied
     and aborting via the cancel path, specs/cancel.yaml), and either way it arms

@@ -101,19 +101,25 @@ outputs:
     description: "{ prompt, completion, cost } tokens and USD cost summed across every run in the set"
 
 constraints:
-  - loadRunRecords reads every "*.json" file directly in a runs directory (not "*-debug.jsonl"
+  - >
+    loadRunRecords reads every "*.json" file directly in a runs directory (not "*-debug.jsonl"
     sidecars from --debug, and not subdirectories) and parses each as a run record
-  - A run file that fails to parse (corrupt JSON, truncated write) is skipped, not fatal --
+  - >
+    A run file that fails to parse (corrupt JSON, truncated write) is skipped, not fatal --
     one bad file must not hide every other run's data
-  - computeStats returns { total: 0 } and no other fields when given an empty record set,
+  - >
+    computeStats returns { total: 0 } and no other fields when given an empty record set,
     rather than dividing by zero into NaN
-  - Rates needing a denominator that could be zero for this set (healSuccessRate,
+  - >
+    Rates needing a denominator that could be zero for this set (healSuccessRate,
     verifyPassRate) are null, not NaN or 0, when that denominator is zero -- 0 would
     misleadingly read as "heal always fails" rather than "heal never ran in this set"
-  - The set-wide review rates are summed back out of the per-reviewer buckets
+  - >
+    The set-wide review rates are summed back out of the per-reviewer buckets
     rather than counted alongside them, so the headline and the breakdown
     cannot drift apart
-  - CLI `kodr stats` resolves the runs directory the same way `kodr run` does (cwd +
+  - >
+    CLI `kodr stats` resolves the runs directory the same way `kodr run` does (cwd +
     --runs-dir / KODR_RUNS_DIR via harness.mjs's resolveRunsDir), so pointing it at the same
     workspace a run used just works
   - Never writes to the workspace or LM Studio; purely reads existing run records
@@ -124,7 +130,8 @@ tests:
     - loadRunRecords skips *-debug.jsonl sidecar files
     - loadRunRecords skips a file that fails to parse, without throwing
     - loadRunRecords returns an empty array for a missing or empty directory
-    - computeStats returns { total: 0 } for an empty record set
+    - >
+      computeStats returns { total: 0 } for an empty record set
     - computeStats counts runs per stoppedReason
     - computeStats computes noOpRate from noOpCompletion
     - computeStats computes healAttemptedRate and healSuccessRate

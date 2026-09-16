@@ -47,40 +47,52 @@ job_record:
     - stoppedReason
 
 behavior:
-  - For each task × variant × repeat: a fresh temp workspace, run setup, run
+  - >
+    For each task × variant × repeat: a fresh temp workspace, run setup, run
     Kodr headless with the variant's knobs, then run the task's verify.
-  - The task verify is the ground truth and runs regardless of whether the
+  - >
+    The task verify is the ground truth and runs regardless of whether the
     variant used an in-harness Stop gate, so variants are compared fairly.
-  - Variant knobs map to flags/env Kodr already exposes — useGate -> --test,
+  - >
+    Variant knobs map to flags/env Kodr already exposes — useGate -> --test,
     healTurns -> --heal-turns, env -> process env (e.g. KODR_HEAL_RESERVE). No
     test-only hooks into the harness.
-  - Kodr run records are written via --runs-dir to a jobs subdir, never into the
+  - >
+    Kodr run records are written via --runs-dir to a jobs subdir, never into the
     task workspace (depends on the runs-dir override).
   - Skips cleanly (exit 0) when the model server is unreachable.
-  - Filters: --task, --variant, --repeats, --jobs-dir for quick single cells.
-  - --model overrides variants.json's fixed model for the whole run (e.g. a
+  - >
+    Filters: --task, --variant, --repeats, --jobs-dir for quick single cells.
+  - >
+    --model overrides variants.json's fixed model for the whole run (e.g. a
     quick check against a different model without editing variants.json).
     Absent, the run uses variants.json's model as before.
 
 aggregation:
-  - Per variant: pass@k (per task, any repeat passing, averaged over tasks),
+  - >
+    Per variant: pass@k (per task, any repeat passing, averaged over tasks),
     mean tool-turns, mean tokens, heal count, abort count, run count.
-  - Aggregation is pure and dependency-free (eval/arena/report.mjs) so it is
+  - >
+    Aggregation is pure and dependency-free (eval/arena/report.mjs) so it is
     unit-testable without a model.
 
 constraints:
   - Zero runtime dependencies; config is JSON (no runtime YAML parser).
   - Not run by `npm test`; invoked via `npm run arena`.
   - Output (jobs/) is gitignored.
-  - The task schema is harness-agnostic so the same tasks could later feed a
+  - >
+    The task schema is harness-agnostic so the same tasks could later feed a
     cross-harness run (e.g. Terminal-Bench), Kodr vs other harnesses at one model.
 
 future:
-  - Feature-flag ablations that need new Kodr knobs (e.g. tool-call recovery
+  - >
+    Feature-flag ablations that need new Kodr knobs (e.g. tool-call recovery
     on/off) — add the flag, add the variant.
-  - A CI gate wrapper that fails on a pass@k regression or token-cost blowup
+  - >
+    A CI gate wrapper that fails on a pass@k regression or token-cost blowup
     for a fixed (task, model) pair.
-  - A Terminal-Bench / Harbor adapter that reuses these tasks for cross-harness
+  - >
+    A Terminal-Bench / Harbor adapter that reuses these tasks for cross-harness
     comparison (needs a node-in-container or single-executable Kodr build).
 
 tests:

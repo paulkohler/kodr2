@@ -44,36 +44,44 @@ outputs:
       truth for that set.
 
 constraints:
-  - The interface is total -- createNullReporter, createTerminalReporter, and
+  - >
+    The interface is total -- createNullReporter, createTerminalReporter, and
     createJsonReporter each expose every REPORTER_METHODS name as a function.
-  - The null reporter's every method is a no-op returning undefined; it is
+  - >
+    The null reporter's every method is a no-op returning undefined; it is
     selected by --quiet and by --json, and is the default a run-path function
     uses when called without a reporter.
-  - The terminal reporter reproduces the harness's historical output exactly --
+  - >
+    The terminal reporter reproduces the harness's historical output exactly --
     streamed model text (token) to stdout, every other producing method to
     stderr as the matching format.mjs string plus one trailing newline;
     turnEnd writes a single newline to stdout only when completed is true, and
     nothing otherwise; compaction writes the same string the old inline notice
     produced.
-  - phase and toolActivity produce no terminal bytes -- they had no historical
+  - >
+    phase and toolActivity produce no terminal bytes -- they had no historical
     terminal representation. phase is a new structured signal (build, verify,
     heal, review, memory, compact) that drives the TUI header and the JSON
     stream; toolActivity wires model.mjs's previously-unused onToolCall hook.
-  - The JSON reporter emits exactly one NDJSON object per event, tagged with an
+  - >
+    The JSON reporter emits exactly one NDJSON object per event, tagged with an
     `event` field. Streamed tokens are coalesced -- consecutive token() deltas
     accumulate and flush as a single { event: "assistant_text", text } line on
     the next non-token event -- since one line per token would be unusable.
-  - The reporter is constructed once at the harness boundary
+  - >
+    The reporter is constructed once at the harness boundary
     (options.reporter ?? (quiet ? null : terminal)) and threaded through the
     same call sites as heartbeatMs/onHeartbeat -- the main tool loop,
     compaction, heal, and the review pass -- but not the memory retrospective
     (src/memory.mjs), consistent with debug-log's scoping.
-  - --events selects the JSON reporter and does not imply --quiet; --json keeps
+  - >
+    --events selects the JSON reporter and does not imply --quiet; --json keeps
     its existing contract (null reporter for the run plus a single
     summarizeResult line to stdout at the end) and is not rebuilt on the event
     stream, since arena/Terminal-Bench adapters parse that summary object.
     --events and --json may be combined (event stream then final summary line).
-  - Byte-identity carve-out preserved for phase 1: the review pass's inner tool
+  - >
+    Byte-identity carve-out preserved for phase 1: the review pass's inner tool
     loop streams to the terminal regardless of --quiet (runReview never
     forwarded quiet), so runReview passes an explicit terminal reporter while
     runReviewPass's own notices honor the (possibly null) harness reporter --

@@ -41,23 +41,31 @@ outputs:
     description: False when any check's status is 'fail' -- drives the CLI's exit code
 
 constraints:
-  - Runs four checks, in this order -- Node.js version, LM Studio reachability, a
+  - >
+    Runs four checks, in this order -- Node.js version, LM Studio reachability, a
     loaded/resolvable model, git availability
-  - Node.js version below the package's engines requirement (22) is a fail; a
+  - >
+    Node.js version below the package's engines requirement (22) is a fail; a
     process already running on an unsupported version may behave unpredictably
     elsewhere, so this is reported even though the check itself trivially passed
-  - LM Studio unreachable (connection refused, timeout, DNS failure) is a fail;
+  - >
+    LM Studio unreachable (connection refused, timeout, DNS failure) is a fail;
     an ECONNREFUSED gets a specific "is LM Studio running?" hint rather than a
     bare Node error message
-  - The model check only runs when LM Studio was reachable -- skipped, not
+  - >
+    The model check only runs when LM Studio was reachable -- skipped, not
     failed, since there's nothing meaningful to report without a connection
-  - No models loaded in LM Studio is a warn, not a fail -- kodr can still be
+  - >
+    No models loaded in LM Studio is a warn, not a fail -- kodr can still be
     pointed at a model once one is loaded, so this isn't fatal to the tool itself
-  - git missing is a warn, not a fail -- only --raw-then-fix-commits and the
+  - >
+    git missing is a warn, not a fail -- only --raw-then-fix-commits and the
     workspace-is-a-repo check for that feature need it; plenty of kodr runs
     never touch git
-  - `ok` is true whenever no check is 'fail', even if some are 'warn'
-  - CLI `kodr doctor` prints a formatted report and exits 1 if any check failed,
+  - >
+    `ok` is true whenever no check is 'fail', even if some are 'warn'
+  - >
+    CLI `kodr doctor` prints a formatted report and exits 1 if any check failed,
     0 otherwise (warnings do not affect the exit code)
   - Never writes to the workspace or LM Studio; every check is read-only
 

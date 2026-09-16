@@ -37,24 +37,31 @@ outputs:
 
 constraints:
   - Enabled by --debug or KODR_DEBUG (env wins only when the option is not explicitly set)
-  - Off by default -- the raw request body is the full conversation history verbatim, and
+  - >
+    Off by default -- the raw request body is the full conversation history verbatim, and
     capturing it unconditionally would silently duplicate sensitive workspace content on disk
-  - The sidecar file is named "<startedAt-as-filename-timestamp>-debug.jsonl", parallel to the
+  - >
+    The sidecar file is named "<startedAt-as-filename-timestamp>-debug.jsonl", parallel to the
     run transcript's own "<finishedAt-as-filename-timestamp>.json" naming, so the two are
     associated by proximity even though one timestamp is start and the other is finish
-  - Every model.mjs chat() attempt appends one line, whether it succeeds, gets a 4xx/5xx, or
+  - >
+    Every model.mjs chat() attempt appends one line, whether it succeeds, gets a 4xx/5xx, or
     fails at the connection level -- a retried request produces multiple lines, one per attempt
-  - Each line captures the exact request body sent and the raw, unparsed response text received
+  - >
+    Each line captures the exact request body sent and the raw, unparsed response text received
     up to whatever point the request settled -- not the assembled { message, usage } result,
     which is already in the run transcript
-  - A write failure (disk full, permission denied) is swallowed, never surfaced to the model
+  - >
+    A write failure (disk full, permission denied) is swallowed, never surfaced to the model
     loop or the run's outcome -- debug capture is a diagnostic aid, not something a run should
     fail over
-  - Threaded through the same call sites as heartbeatMs/onHeartbeat: the main tool loop,
+  - >
+    Threaded through the same call sites as heartbeatMs/onHeartbeat: the main tool loop,
     compaction summaries, heal turns, and the review pass. Not threaded through the memory
     retrospective (src/memory.mjs), which doesn't yet forward heartbeatMs/onHeartbeat either --
     adding one new plumbing pattern there is out of scope for this feature
-  - noSave (KODR_NO_SAVE / --no-save) does not disable debug capture on its own -- --debug is
+  - >
+    noSave (KODR_NO_SAVE / --no-save) does not disable debug capture on its own -- --debug is
     itself an explicit request for on-disk output, unlike the incident/memory features that key
     off noSave for their own unattended-write behavior
 

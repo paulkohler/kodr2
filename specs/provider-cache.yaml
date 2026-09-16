@@ -48,25 +48,30 @@ outputs:
       enabled. Omitted entirely when disabled.
 
 constraints:
-  - Root-level cache_control is a real, documented mechanism ("automatic
+  - >
+    Root-level cache_control is a real, documented mechanism ("automatic
     caching"), not a misplaced attempt at per-message caching -- confirmed
     against both Anthropic's and OpenRouter's docs. src/model.mjs spreads
     extraBody onto the request body's root, which is exactly where this field
     belongs; provider-openrouter.mjs's extraBody.cache_control needs no
     further plumbing to work.
-  - On by default only for Anthropic-family model ids (isAnthropicModelId:
+  - >
+    On by default only for Anthropic-family model ids (isAnthropicModelId:
     routed id starts with "anthropic/"). Sending cache_control to a
     non-Anthropic backend is meaningless, so it's gated on model family --
     the same default-on-for-Anthropic-only rationale as ZDR and
     data-collection-denial elsewhere in this file.
-  - Precedence for openRouterCacheEnabled: an explicit --cache/--no-cache
+  - >
+    Precedence for openRouterCacheEnabled: an explicit --cache/--no-cache
     option, then KODR_CACHE (1/true or 0/false), then the Anthropic-family
     default. --cache forces it on even for a non-Anthropic model (an
     operator's explicit call); --no-cache forces it off even for an
     Anthropic model.
-  - Scope: OpenRouter-only. src/provider.mjs threads `cache` only into
+  - >
+    Scope: OpenRouter-only. src/provider.mjs threads `cache` only into
     createOpenRouterProvider; LM Studio and Ollama never see this option.
-  - Kodr does not set a `ttl` on the cache_control object, so it uses
+  - >
+    Kodr does not set a `ttl` on the cache_control object, so it uses
     Anthropic's automatic-caching default of a 5-minute TTL. A run whose
     turns are more than 5 minutes apart (a slow tool call, a long heal cycle)
     won't hit the cache on the following turn. A 1-hour TTL is available at
@@ -75,21 +80,30 @@ constraints:
 
 tests:
   unit:
-    - isAnthropicModelId: true for "anthropic/*" ids (including a ":batch"
+    - >
+      isAnthropicModelId: true for "anthropic/*" ids (including a ":batch"
       suffix), false for other providers' ids, false for an empty/undefined id
-    - openRouterCacheEnabled: defaults on for an anthropic/* model id, off for
+    - >
+      openRouterCacheEnabled: defaults on for an anthropic/* model id, off for
       a non-anthropic model id, with no explicit flag or env set
-    - openRouterCacheEnabled: explicit --cache (true) forces on regardless of
+    - >
+      openRouterCacheEnabled: explicit --cache (true) forces on regardless of
       model id
-    - openRouterCacheEnabled: explicit --no-cache (false) forces off even for
+    - >
+      openRouterCacheEnabled: explicit --no-cache (false) forces off even for
       an anthropic/* model id
-    - openRouterCacheEnabled: KODR_CACHE=1/true forces on and KODR_CACHE=0/false
+    - >
+      openRouterCacheEnabled: KODR_CACHE=1/true forces on and KODR_CACHE=0/false
       forces off when no explicit flag is passed
-    - createOpenRouterProvider: extraBody carries cache_control: { type:
+    - >
+      createOpenRouterProvider: extraBody carries cache_control: { type:
       'ephemeral' } at the root when caching is enabled
-    - createOpenRouterProvider: extraBody has no cache_control key when
+    - >
+      createOpenRouterProvider: extraBody has no cache_control key when
       caching is disabled or the model isn't Anthropic-family
-    - cli: --cache / --no-cache parse into args.cache (true/false), default
+    - >
+      cli: --cache / --no-cache parse into args.cache (true/false), default
       null so KODR_CACHE can still take effect
-    - createProvider: threads options.cache through to
+    - >
+      createProvider: threads options.cache through to
       createOpenRouterProvider; lmstudio/ollama factories ignore it

@@ -69,9 +69,11 @@ outputs:
 
 constraints:
   - The system message is preserved verbatim — never summarized or dropped
-  - Compaction is out of band: a separate summarize call whose result replaces
+  - >
+    Compaction is out of band: a separate summarize call whose result replaces
     only the history, leaving the system prompt and fresh tool definitions intact
-  - The summarize request is bounded so it stays smaller than the conversation
+  - >
+    The summarize request is bounded so it stays smaller than the conversation
     that triggered compaction: the first user message (the task/goal) is truncated
     to a larger task cap (default 8000, overridable via maxTaskChars /
     KODR_COMPACT_TASK_CHARS), and every other message — later user turns,
@@ -81,46 +83,58 @@ constraints:
     preserve the goal, but is still bounded so a pathologically large task prompt
     cannot alone push the summarize request back over the window (which would
     leave the run stuck over-window, unable to compact)
-  - Tool definitions are not part of the message history; they are supplied
+  - >
+    Tool definitions are not part of the message history; they are supplied
     fresh on every model call, so compaction always keeps full tool access
   - Only the non-system messages (the history) are compressed
-  - The history is replaced by a single user message holding the summary,
+  - >
+    The history is replaced by a single user message holding the summary,
     so no assistant tool_call is left without its matching tool result
-  - Auto-compaction is checked between tool turns, after the turn's results
+  - >
+    Auto-compaction is checked between tool turns, after the turn's results
     are appended, using whichever is larger of the most recent request's
     reported prompt-token count and a chars/token estimate of the
     conversation as it now stands. The reported count measures the request
     *before* the turn's tool results were appended, so alone it lags one
     turn behind the largest additions -- a huge tool result would ride out
     in the next request uncompacted and fail at the backend
-  - Auto-compaction is also checked once before the loop's first request,
+  - >
+    Auto-compaction is also checked once before the loop's first request,
     against a chars/token estimate of the seeded conversation -- a
     continuation or a goal-loop retry (see specs/goal.yaml) carries the
     entire prior transcript forward as priorMessages with no trimming in
     between, so it can already be oversized before this loop ever sends its
     own first request. Waiting for a turn to complete to check would mean
     that first (possibly oversized) request already went out uncompacted
-  - When the provider does not report prompt-token usage (e.g. Ollama's /v1
+  - >
+    When the provider does not report prompt-token usage (e.g. Ollama's /v1
     endpoint reports none), the turn falls back to a chars/token estimate of
     the message history (estimateTokens, ratio overridable) so compaction can
     still trigger instead of the context growing unbounded until the backend
     truncates or errors
-  - needsCompaction is true when promptTokens >= contextWindow * threshold,
+  - >
+    needsCompaction is true when promptTokens >= contextWindow * threshold,
     and always false when the context window is 0 or unknown
   - The summary model call adds its token usage, and any retries it used, to the run total
   - The summary model call is capped to the run's remaining maxRunMs budget, not a fresh full-length timeout, so late compaction can't outlive the run deadline
-  - A failed or empty summary leaves the conversation unchanged (best effort);
+  - >
+    A failed or empty summary leaves the conversation unchanged (best effort);
     the run continues rather than aborting
-  - "/compact" compacts the prior conversation on demand; with no prior
+  - >
+    "/compact" compacts the prior conversation on demand; with no prior
     conversation it reports there is nothing to compact
-  - The context window is resolved on startup: an explicit option or
+  - >
+    The context window is resolved on startup: an explicit option or
     KODR_CONTEXT_WINDOW wins; otherwise the model's loaded context length is
     probed from LM Studio's /api/v0/models endpoint; otherwise the default is used
-  - Probing falls back silently to the default when /api/v0/models is absent or
+  - >
+    Probing falls back silently to the default when /api/v0/models is absent or
     reports no loaded context length
-  - The resolved context window is recorded in run metadata and the number of
+  - >
+    The resolved context window is recorded in run metadata and the number of
     compactions in the run record
-  - renderTranscript collapses an assistant turn (its tool calls plus the tool
+  - >
+    renderTranscript collapses an assistant turn (its tool calls plus the tool
     results answering them) to one rendered instance plus a repeat count when
     it is byte-identical to the immediately preceding turn -- e.g. the same
     failing call retried unchanged. Errors are not dropped outright: the one

@@ -17,7 +17,8 @@ outputs:
 
 constraints:
   - Loads from .kodr/runs/ directory
-  - "last" picks the most recent run by filename sort
+  - >
+    "last" picks the most recent run by filename sort
   - System messages from prior run are stripped (fresh system prompt assembled)
   - Falls back to null if no prior run found
 

@@ -40,24 +40,29 @@ outputs:
       not stoppedReason on its own.
 
 constraints:
-  - The model client (src/model.mjs) accepts a per-call signal on chat(). When it
+  - >
+    The model client (src/model.mjs) accepts a per-call signal on chat(). When it
     fires, streamRequest destroys the underlying request socket -- the same
     teardown the hard timeout already performs -- and the call rejects with a
     tagged abortError (isAbortError true, code ABORT_ERR). The settled guard makes
     the socket's subsequent error event a no-op, so the rejection stays the tagged
     abort rather than a stray ECONNRESET.
-  - An abort is terminal, never retried: streamRequestWithRetry does not treat
+  - >
+    An abort is terminal, never retried: streamRequestWithRetry does not treat
     abortError as retryable (it is neither a 5xx nor a retryable connection error),
     and a signal already aborted makes every further attempt reject at once.
-  - A signal already aborted before the request is sent rejects immediately and the
+  - >
+    A signal already aborted before the request is sent rejects immediately and the
     request never goes out (the destroyed socket is never written).
-  - The tool loop (src/tool-loop.mjs) checks signal.aborted at the top of each turn
+  - >
+    The tool loop (src/tool-loop.mjs) checks signal.aborted at the top of each turn
     -- so a cancel that landed during a tool call stops the loop before the next
     (paid) model request -- and maps an abortError thrown by chat() to a clean
     stoppedReason "cancelled" without rethrowing. Because chat() throws before its
     assistant message is pushed, the conversation stays well-formed (no dangling
     tool_calls), which matters for ACP multi-turn continuation via priorMessages.
-  - heal (src/heal.mjs) forwards the signal to its tool loop and, when the loop
+  - >
+    heal (src/heal.mjs) forwards the signal to its tool loop and, when the loop
     comes back cancelled (or the signal is aborted), returns immediately rather
     than spending the (possibly long) verify command on a run the user aborted.
   - >
@@ -87,18 +92,22 @@ constraints:
     models with a 2-minute default timeout and nothing watching the signal, so
     a cancel landing mid-swap would otherwise wait out that whole sequence
     before the tool loop could notice it.
-  - A phase skipped for cancellation records why, rather than being left as the
+  - >
+    A phase skipped for cancellation records why, rather than being left as the
     same undefined a disabled feature shows -- reviewSkippedForCancel and
     memorySkippedForCancel, so --json output distinguishes "off" from
     "cancelled before it ran".
-  - The review pass forwards the signal into its own tool loop
+  - >
+    The review pass forwards the signal into its own tool loop
     (specs/review.yaml). A cancelled attempt returns a skip, never a FAIL
     verdict -- fail-closed verdict parsing must not let an abort block a commit
     under --fail-on-review.
-  - The memory retrospective and consolidation forward the signal to their chat
+  - >
+    The memory retrospective and consolidation forward the signal to their chat
     calls and return { cancelled: true } rather than { error } on an abort, so
     a deliberate Ctrl-C is not reported to the operator as a failure.
-  - kodr consolidate installs the same SIGINT canceller as a run and exits
+  - >
+    kodr consolidate installs the same SIGINT canceller as a run and exits
     non-zero when cancelled.
   - >
     The checklist loop reads runGoal's own `reason` to detect a cancelled
@@ -113,11 +122,13 @@ constraints:
     cancel. The signal stops the harness from starting anything further (heal,
     review, memory), but the running test command finishes on its own. Killing
     child processes would mean threading the signal through shell.mjs's spawn.
-  - The CLI installs a SIGINT handler (createSigintCanceller) only around the
+  - >
+    The CLI installs a SIGINT handler (createSigintCanceller) only around the
     foreground run(): the first Ctrl-C aborts the run's controller and prints a
     notice; a second force-quits (exit 130) in case the graceful unwind hangs. The
     handler is removed in a finally so it never outlives the run.
-  - The ACP front-end creates a fresh AbortController per session/prompt, stores it
+  - >
+    The ACP front-end creates a fresh AbortController per session/prompt, stores it
     on the session, and clears it in a finally. session/cancel aborts that
     controller (and sets the cancelled flag), so a cancel interrupts the in-flight
     model request; a session/cancel arriving after the prompt already settled finds
@@ -153,4 +164,5 @@ tests:
     - forwards the cancellation signal to the judge tool loop
     - skips the model swap and the review when already cancelled
     - skips the review when the cancel lands during the model swap
-    - a GOAL: item cancelled between attempts stops the loop instead of parking
+    - >
+      a GOAL: item cancelled between attempts stops the loop instead of parking

@@ -230,7 +230,8 @@ constraints:
     being lazy on a trivial diff, and parking good work overnight is the
     expensive direction to fail in. Revisit if reviewGroundedRate says
     otherwise.
-  - The signal is forwarded into each attempt's tool loop, and the harness will
+  - >
+    The signal is forwarded into each attempt's tool loop, and the harness will
     not start a review pass at all once the run is cancelled -- including a
     cancel that landed during verify, where stoppedReason is still "complete"
     (specs/cancel.yaml). A cancelled attempt takes the skip path below, so an
@@ -343,14 +344,17 @@ tests:
     - shouldFailProcess does not fail on a passing review when failOnReview is set
     - shouldFailProcess does not fail on a skipped review even when failOnReview is set
     - parseArgs parses --fail-on-review as a boolean flag, off by default
-    - returns verdict "pass" for a review ending in VERDICT: PASS
-    - returns verdict "fail" for a review ending in VERDICT: FAIL
+    - >
+      returns verdict "pass" for a review ending in VERDICT: PASS
+    - >
+      returns verdict "fail" for a review ending in VERDICT: FAIL
     - strips the verdict line out of findings
     - nudges once for a missing verdict line, then fails closed if it is still absent
     - ignores a verdict the reviewer wrote inside its own think block
     - reports an ungrounded pass as passed, with grounded false
     - a skipped review carries no verdict, verdictFound, or passed field
-    - the review system prompt requires a trailing VERDICT: PASS or VERDICT: FAIL line
+    - >
+      the review system prompt requires a trailing VERDICT: PASS or VERDICT: FAIL line
     - reviewBlocks is false for an absent review, a skipped review, and one skipped for an incomplete build
     - reviewBlocks is false for a review that crashed
     - a cut-off review is skipped, not failed, when the tool loop runs out of budget
@@ -369,13 +373,15 @@ tests:
     - reviewNotice names the verdict and how much the reviewer looked at
     - reviewNotice says when a verdict line was missing entirely
     - reviewNotice flags an ungrounded verdict
-    - returns skipped: true when filesChanged is empty, without calling the model
+    - >
+      returns skipped: true when filesChanged is empty, without calling the model
     - runs a read-only tool loop and returns findings from the final turn
     - system prompt states the read-only tool set, completion semantics, grounding rules, and reply format
     - restricts the tool registry so write_file/edit_file/run_command are unavailable
     - marks a review grounded when the first attempt meets minToolCalls
     - retries once with a nudge when the first attempt is under minToolCalls
-    - marks grounded: false when the retry is still under minToolCalls, but still returns its findings
+    - >
+      marks grounded: false when the retry is still under minToolCalls, but still returns its findings
     - does not retry when minToolCalls is 0
     - combines usage across both attempts when a retry happens
     - combines chat-call retries across both attempts when a nudge retry happens
@@ -386,5 +392,6 @@ tests:
     - reviewDiffTimeoutMs resolves option, then KODR_REVIEW_DIFF_TIMEOUT_MS, then the default
     - runReviewPass returns { skipped, error } rather than throwing when the model switch fails
     - runReviewPass returns { skipped, error } rather than throwing when the review itself fails
-    - run() sets result.review to { skipped: true, reason } when reviewModel is set but the build's stoppedReason isn't 'complete'
+    - >
+      run() sets result.review to { skipped: true, reason } when reviewModel is set but the build's stoppedReason isn't 'complete'
     - summarizeResult includes the review field (null when absent) so --json output distinguishes "no review model configured" from "configured but skipped"

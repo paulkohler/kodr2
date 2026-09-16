@@ -58,19 +58,24 @@ approach: >
 
 scope:
   in:
-    - examples/loop.sh and examples/phased-loop.sh — the ratchet, the retry
+    - >
+      examples/loop.sh and examples/phased-loop.sh — the ratchet, the retry
       loop, the park path, checklist marking, commit ordering, RESET_PATHS.
-    - The startup preconditions both scripts enforce before spending a model
+    - >
+      The startup preconditions both scripts enforce before spending a model
       call - kodr and jq on PATH, the checklist present, a git repo, and at
       least one commit in it. The last is not fussiness: the park path is
       destructive, and with nothing tracked it destroys the checklist.
-    - The scripts' consumption contract with `kodr --json` — which fields they
+    - >
+      The scripts' consumption contract with `kodr --json` — which fields they
       read and how they combine them into a green/not-green decision.
   out:
-    - Kodr itself. `kodr run` and `kodr goal` have their own specs and tests;
+    - >
+      Kodr itself. `kodr run` and `kodr goal` have their own specs and tests;
       this spec never asserts on model behaviour, only on what the shell does
       with a given result.
-    - Whether these scripts should graduate from examples/ into a first-class
+    - >
+      Whether these scripts should graduate from examples/ into a first-class
       `kodr loop` command (goal.yaml's own future section proposes exactly
       that). Testing them where they live is a prerequisite either way, and
       does not prejudge it.
@@ -129,10 +134,13 @@ tests:
     - green requires completed AND not noOpCompletion AND verified != false
     - a no-op completion (completed true, filesChanged empty) is not green and does not commit
     # --- phased-loop's GOAL: branch ---
-    - a "GOAL: " line routes to `kodr goal` with --max-attempts GOAL_MAX_ATTEMPTS, not `kodr run`
+    - >
+      a "GOAL: " line routes to `kodr goal` with --max-attempts GOAL_MAX_ATTEMPTS, not `kodr run`
     - a plain line routes to `kodr run` with --memory --memory-auto-apply
-    - a GOAL: item gets no outer retry loop - one kodr goal invocation, then green or park
-    - a GOAL: item's green requires met AND filesChanged non-empty AND verified != false
+    - >
+      a GOAL: item gets no outer retry loop - one kodr goal invocation, then green or park
+    - >
+      a GOAL: item's green requires met AND filesChanged non-empty AND verified != false
     - the park note records the goal's attempts and reason
     # --- regression: the five bugs from 2adb55d ---
     - "bug 1: the script's own log file survives a later task's park (locally ignored, never reset)"
@@ -182,10 +190,12 @@ tests:
 deliverables:
   - specs/loop-scripts.yaml (this file)
   - test/loop-scripts.test.mjs
-  - test/loop-fixtures.mjs - temp-repo setup/teardown and the scripted-response
+  - >
+    test/loop-fixtures.mjs - temp-repo setup/teardown and the scripted-response
     builder, a plain helper module like test/capture-reporter.mjs so
     `node --test test/*.test.mjs` does not treat it as a test file
-  - test/fixtures/loop-bin/kodr - the scripted stub, reading its response
+  - >
+    test/fixtures/loop-bin/kodr - the scripted stub, reading its response
     sequence and recording each invocation's argv
   - test/fixtures/loop-bin/sleep - records its argument, returns immediately
   - eval/loop-contract.eval.mjs - the stub-drift guard
