@@ -1,0 +1,45 @@
+name: spec-check
+status: accepted
+description: >
+  Keep feature specs on the shared top-level schema and reject ambiguous YAML
+  sequence formatting before it can silently become an unparsable contract.
+
+inputs:
+  file:
+    type: string
+    required: true
+    description: Spec filename used in diagnostics
+  text:
+    type: string
+    required: true
+    description: UTF-8 YAML source to inspect
+
+outputs:
+  warnings:
+    type: array
+    description: Human-readable schema and formatting diagnostics
+
+constraints:
+  - >
+    Every spec has top-level name, status, and description keys, and status is
+    one of proposed, accepted, implemented, or deprecated.
+  - >
+    A sequence string that wraps onto later source lines uses an explicit
+    folded or literal block scalar instead of YAML plain-scalar continuation.
+  - >
+    A plain sequence string that begins with a partial quote or backtick, or
+    contains a colon followed by a space, is rejected because those forms can
+    be parsed as YAML syntax rather than prose.
+  - >
+    Sequence mappings such as `- name: value`, fully quoted one-line strings,
+    and content inside an existing block scalar are not flagged.
+  - The checker stays zero-dependency and remains advisory unless --strict is set.
+
+tests:
+  unit:
+    - accepts a one-line sequence string
+    - accepts folded and literal sequence strings
+    - accepts a sequence mapping and a fully quoted string
+    - warns on an implicitly wrapped sequence string
+    - warns on unsafe colon, partial-quote, and backtick sequence strings
+    - ignores list-like source text inside an existing block scalar
