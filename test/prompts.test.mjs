@@ -29,4 +29,15 @@ describe('loadPrompt', () => {
   it('throws on an unknown prompt name', () => {
     assert.throws(() => loadPrompt('no-such-prompt'), /prompt file missing/);
   });
+
+  it('requires compaction summaries to separate completed work from the next action', () => {
+    const prompt = loadPrompt('compact');
+
+    assert.match(prompt, /Goal:/);
+    assert.match(prompt, /Completed:/);
+    assert.match(prompt, /Current state:/);
+    assert.match(prompt, /Next action:/);
+    assert.match(prompt, /Never put a completed action in Next action/);
+    assert.match(prompt, /repeat a successful tool call/);
+  });
 });
