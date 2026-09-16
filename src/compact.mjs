@@ -13,6 +13,7 @@ export const COMPACTION_THRESHOLD = 0.8;
 export const DEFAULT_CONTEXT_WINDOW = 8192;
 export const DEFAULT_COMPACT_MESSAGE_CHARS = 2000;
 export const DEFAULT_COMPACT_TASK_CHARS = 8000;
+export const DEFAULT_COMPACT_RECENT_CHARS = 4000;
 export const CHARS_PER_TOKEN = 4;
 
 /**
@@ -98,6 +99,25 @@ export function compactTaskChars(option) {
     return fromEnv;
   }
   return DEFAULT_COMPACT_TASK_CHARS;
+}
+
+/**
+ * Total character cap for mechanically retained recent tool state.
+ * @param {number} [option]
+ * @returns {number}
+ */
+export function compactRecentChars(option) {
+  if (Number.isInteger(option) && option > 0) {
+    return option;
+  }
+  const fromEnv = Number.parseInt(
+    process.env.KODR_COMPACT_RECENT_CHARS || '',
+    10,
+  );
+  if (Number.isInteger(fromEnv) && fromEnv > 0) {
+    return fromEnv;
+  }
+  return DEFAULT_COMPACT_RECENT_CHARS;
 }
 
 const SUMMARY_SYSTEM = loadPrompt('compact');
@@ -276,6 +296,63 @@ export function renderTranscript(
 }
 
 /**
+ * Render the most recent completed assistant tool turn and its results. This
+ * state is retained mechanically beside the generated summary, so a summary
+ * that overemphasizes the original task cannot erase the latest completed
+ * action. The returned text has one total cap, independent of call count.
+ * @param {Array} messages
+ * @param {number} [maxChars]
+ * @returns {string}
+ */
+export function renderRecentToolState(
+  messages,
+  maxChars = compactRecentChars(),
+) {
+  let end = -1;
+  for (let index = messages.length - 1; index >= 0; index--) {
+    if (messages[index].role === 'tool') {
+      end = index;
+      break;
+    }
+  }
+  if (end === -1) {
+    return '';
+  }
+
+  let start = end;
+  while (start >= 0 && messages[start].role === 'tool') {
+    start--;
+  }
+  const assistant = messages[start];
+  const calls = assistant?.tool_calls || [];
+  if (assistant?.role !== 'assistant' || calls.length === 0) {
+    return '';
+  }
+
+  const results = messages.slice(start + 1, end + 1);
+  if (!toolTurnComplete(calls, results)) {
+    return '';
+  }
+
+  return truncateTotal(
+    renderTranscript(messages.slice(start, end + 1), maxChars, maxChars),
+    maxChars,
+  );
+}
+
+function toolTurnComplete(calls, results) {
+  if (results.length < calls.length) {
+    return false;
+  }
+  const callIds = calls.map((call) => call.id).filter(Boolean);
+  if (callIds.length !== calls.length) {
+    return true;
+  }
+  const resultIds = new Set(results.map((result) => result.tool_call_id));
+  return callIds.every((id) => resultIds.has(id));
+}
+
+/**
  * Compact a conversation: keep the system message, summarize the history into
  * one message, and return the new conversation. On failure the original
  * messages are returned unchanged with an `error`.
@@ -296,6 +373,9 @@ export function renderTranscript(
  * @param {number} [params.maxTaskChars] - Cap for the first user (task) message
  *   (also KODR_COMPACT_TASK_CHARS; default 8000), a larger bound than other
  *   messages but still bounded so a huge task prompt can't overflow the request
+ * @param {number} [params.maxRecentChars] - Total cap for the mechanically
+ *   retained most recent completed tool turn (also KODR_COMPACT_RECENT_CHARS;
+ *   default 4000)
  * @returns {Promise<{ messages: Array, summary: string, usage: { prompt: number, completion: number, cost: number }, retries: number, error?: string }>}
  */
 export async function compactMessages(params) {
@@ -357,22 +437,32 @@ export async function compactMessages(params) {
     };
   }
 
+  const recentState = renderRecentToolState(
+    history,
+    compactRecentChars(params.maxRecentChars),
+  );
   return {
-    messages: buildCompacted(system, summary),
+    messages: buildCompacted(system, summary, recentState),
     summary,
     usage: response.usage || zeroUsage(),
     retries: response.retries || 0,
   };
 }
 
-function buildCompacted(system, summary) {
+function buildCompacted(system, summary, recentState) {
   const compacted = [];
   if (system) {
     compacted.push(system);
   }
+  let content = `<session-summary>\n${summary}\n</session-summary>`;
+  if (recentState) {
+    content += `\n\n<recent-tool-state>\n${recentState}\n</recent-tool-state>`;
+  }
+  content +=
+    '\n\nThe detailed history was compacted. The mechanically retained recent tool state is authoritative over the generated summary. Continue from the current next action; do not restart the original task or repeat completed tool calls unless a fresh result is required.';
   compacted.push({
     role: 'user',
-    content: `<session-summary>\n${summary}\n</session-summary>\n\nThe detailed history of this session was compacted to save context. The summary above is the current state. Continue the task from here.`,
+    content,
   });
   return compacted;
 }
@@ -382,6 +472,17 @@ function truncate(text, maxChars) {
     return text;
   }
   return `${text.slice(0, maxChars)}… [truncated]`;
+}
+
+function truncateTotal(text, maxChars) {
+  if (text.length <= maxChars) {
+    return text;
+  }
+  const suffix = '… [truncated]';
+  if (maxChars <= suffix.length) {
+    return text.slice(0, maxChars);
+  }
+  return `${text.slice(0, maxChars - suffix.length)}${suffix}`;
 }
 
 /**

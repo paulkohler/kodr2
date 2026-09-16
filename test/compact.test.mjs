@@ -6,13 +6,16 @@ import {
   COMPACTION_THRESHOLD,
   compactMessageChars,
   compactMessages,
+  compactRecentChars,
   compactTaskChars,
   configuredContextWindow,
   DEFAULT_COMPACT_MESSAGE_CHARS,
+  DEFAULT_COMPACT_RECENT_CHARS,
   DEFAULT_COMPACT_TASK_CHARS,
   estimateTokens,
   isCompactCommand,
   needsCompaction,
+  renderRecentToolState,
   renderTranscript,
 } from '../src/compact.mjs';
 import { runToolLoop } from '../src/tool-loop.mjs';
@@ -378,14 +381,98 @@ describe('compactTaskChars', () => {
   });
 });
 
+describe('compactRecentChars', () => {
+  const original = process.env.KODR_COMPACT_RECENT_CHARS;
+  afterEach(() => {
+    if (original === undefined) {
+      delete process.env.KODR_COMPACT_RECENT_CHARS;
+    } else {
+      process.env.KODR_COMPACT_RECENT_CHARS = original;
+    }
+  });
+
+  it('uses an explicit option, then the env var, then the default', () => {
+    delete process.env.KODR_COMPACT_RECENT_CHARS;
+    assert.equal(compactRecentChars(900), 900);
+    assert.equal(compactRecentChars(undefined), DEFAULT_COMPACT_RECENT_CHARS);
+    process.env.KODR_COMPACT_RECENT_CHARS = '1200';
+    assert.equal(compactRecentChars(undefined), 1200);
+    assert.equal(compactRecentChars(900), 900);
+  });
+});
+
+describe('renderRecentToolState', () => {
+  it('keeps only the most recent completed tool turn within the total cap', () => {
+    const text = renderRecentToolState(
+      [
+        {
+          role: 'assistant',
+          tool_calls: [
+            {
+              id: 'old',
+              function: { name: 'read_file', arguments: '{"path":"old"}' },
+            },
+          ],
+        },
+        { role: 'tool', tool_call_id: 'old', content: 'OLD RESULT' },
+        {
+          role: 'assistant',
+          tool_calls: [
+            {
+              id: 'new',
+              function: { name: 'read_file', arguments: '{"path":"new"}' },
+            },
+          ],
+        },
+        {
+          role: 'tool',
+          tool_call_id: 'new',
+          content: `NEW RESULT ${'x'.repeat(500)}`,
+        },
+      ],
+      120,
+    );
+
+    assert.match(text, /read_file/);
+    assert.match(text, /new/);
+    assert.match(text, /NEW RESULT/);
+    assert.doesNotMatch(text, /OLD RESULT/);
+    assert.ok(text.length <= 120);
+  });
+
+  it('ignores a tool call whose results are incomplete', () => {
+    const text = renderRecentToolState([
+      {
+        role: 'assistant',
+        tool_calls: [
+          { id: 'one', function: { name: 'read_file', arguments: '{}' } },
+          { id: 'two', function: { name: 'read_file', arguments: '{}' } },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'one', content: 'first' },
+    ]);
+
+    assert.equal(text, '');
+  });
+});
+
 describe('compactMessages', () => {
   it('keeps the system message and replaces history with a summary', async () => {
     const client = scriptedClient([finalTurn('SUMMARY OF WORK')]);
     const messages = [
       { role: 'system', content: 'system prompt' },
       { role: 'user', content: 'task' },
-      { role: 'assistant', content: 'doing it' },
-      { role: 'tool', content: 'result' },
+      {
+        role: 'assistant',
+        content: 'doing it',
+        tool_calls: [
+          {
+            id: 'call_1',
+            function: { name: 'read_file', arguments: '{"path":"a.mjs"}' },
+          },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'call_1', content: 'result' },
     ];
 
     const result = await compactMessages({
@@ -404,6 +491,8 @@ describe('compactMessages', () => {
     assert.equal(result.messages[1].role, 'user');
     assert.match(result.messages[1].content, /SUMMARY OF WORK/);
     assert.match(result.messages[1].content, /<session-summary>/);
+    assert.match(result.messages[1].content, /<recent-tool-state>/);
+    assert.match(result.messages[1].content, /result/);
 
     // The summary request never leaks the original system prompt.
     const sent = client.calls[0].messages;
