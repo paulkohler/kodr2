@@ -69,7 +69,8 @@ constraints:
   - Never throws — non-zero exit, signal, timeout, and buffer overflow all map to a non-zero exitCode
   - A numeric process exit code is preserved; anything else maps to 1
   - Output is truncated per stream and marked with a trailing [truncated]
-  - onHeartbeat fires only while heartbeatMs > 0 and a callback is provided;
+  - >
+    onHeartbeat fires only while heartbeatMs > 0 and a callback is provided;
     the interval is cleared as soon as the command finishes
   - >
     A timeout kills every process the command spawned, not just the

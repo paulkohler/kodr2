@@ -78,7 +78,8 @@ constraints:
   - >
     contextWindow is only checked when provided (0 or omitted skips the
     context-length check, matching a caller that doesn't care)
-  - Never throws — every failure mode (missing lms binary, a non-zero exit,
+  - >
+    Never throws — every failure mode (missing lms binary, a non-zero exit,
     unparseable --json output, a loaded-but-mismatched model) returns
     { error } instead
   - >

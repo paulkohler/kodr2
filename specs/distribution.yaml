@@ -9,9 +9,11 @@ constraints:
   - Local settings, tests, evals, and development specifications are excluded
   - Installed kodr executable supports help and version output
   - CLI failures return a non-zero exit code
-  - A local install script writes an executable shim invoking this checkout's
+  - >
+    A local install script writes an executable shim invoking this checkout's
     bin/kodr.mjs, for running kodr without an npm/global install
-  - Local install shim destination directory and name are overridable
+  - >
+    Local install shim destination directory and name are overridable
     (default ~/.local/bin/kodr)
 
 tests:

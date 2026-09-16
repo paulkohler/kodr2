@@ -34,10 +34,12 @@ constraints:
   - load_skill returns on the first name match without reading every skill
   - Skill paths are path-jailed within the workspace root
   - A workspace with no skills produces no available-skills prompt section
-  - The load_skill tool itself is only offered when the workspace has skills
+  - >
+    The load_skill tool itself is only offered when the workspace has skills
     (registry option, same gating pattern as view_image behind vision) -- in a
     skill-less workspace the model could only call it to get an error
-  - The harness discovers skills once and shares the result between the
+  - >
+    The harness discovers skills once and shares the result between the
     system prompt's listing and the registry's gating, so the two cannot
     disagree about what exists
 

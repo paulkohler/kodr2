@@ -113,10 +113,12 @@ tests:
     - isGitRepo returns true inside a real git work tree
     - isGitRepo returns false outside a git work tree
     - commitFiles commits exactly the given files and returns the new commit sha
-    - commitFiles returns { committed: false, reason } when files is empty
+    - >
+      commitFiles returns { committed: false, reason } when files is empty
     - commitFiles returns { committed false, reason } when the given files produce no actual diff
     - commitFiles never runs git add -A -- only the files it was given
-    - commitFiles returns { committed: false, error } without throwing when git commit fails (e.g. a rejected hook)
+    - >
+      commitFiles returns { committed: false, error } without throwing when git commit fails (e.g. a rejected hook)
     - commitFiles correctly stages a file whose path looks like a git flag or contains spaces
     - commitTimeoutMs resolves option, then KODR_COMMIT_TIMEOUT_MS, then the default
     - commitFiles does not pass --no-verify to git commit

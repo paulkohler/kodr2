@@ -292,12 +292,14 @@ constraints:
   - >
     Every operational limit is configurable, per AGENTS.md — attempts, backoff,
     the three loop budgets, and the per-task ceilings that pass through to run().
-  - Zero runtime dependencies. No ternaries in branch logic; errors at module
+  - >
+    Zero runtime dependencies. No ternaries in branch logic; errors at module
     boundaries are returned values.
 
 tests:
   unit:
-    - a GOAL: item cancelled between attempts stops the loop instead of parking
+    - >
+      a GOAL: item cancelled between attempts stops the loop instead of parking
     - taskIsGreen ignores a failed review unless failOnReview is set
     - goalIsGreen ignores a failed review unless failOnReview is set
     - a task whose review verdict is FAIL is not green and is not committed
@@ -360,11 +362,13 @@ deliverables:
   - src/loop-git.mjs — the ratchet's git surface, each operation a returned value
   - src/loop-record.mjs — the loop record writer
   - test/loop.test.mjs — loop control with every collaborator injected
-  - test/loop-git.test.mjs — the git surface against real temp repos, reusing
+  - >
+    test/loop-git.test.mjs — the git surface against real temp repos, reusing
     test/loop-fixtures.mjs
   - CLI wiring for `kodr loop`, its flags, --json, and the help text
   - eval/loop.eval.mjs
-  - docs — examples/loop.md and examples/phased-loop.md gain a note that the
+  - >
+    docs — examples/loop.md and examples/phased-loop.md gain a note that the
     scripts are now the shell equivalent of a built-in command
 
 future:

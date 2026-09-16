@@ -42,7 +42,8 @@ constraints:
   - Output truncated at 20,000 characters
   - Executes via the shared shell runner (see shell spec)
   - Runs with a minimal curated environment (see run_command spec)
-  - Invoked as the per-hook executor for Stop hooks (see hooks spec); the
+  - >
+    Invoked as the per-hook executor for Stop hooks (see hooks spec); the
     when-to-run gating (testCommand present, workspace touched, runWhenUnchanged)
     now lives in the hooks layer, not here
 

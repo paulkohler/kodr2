@@ -69,26 +69,31 @@ constraints:
   - Supports http and https base URLs (transport selected by URL protocol)
   - Accumulates tool call deltas across chunks
   - Generates synthetic tool_call IDs when server omits them
-  - Resolves tool calls into a dense array even when a provider streams deltas
+  - >
+    Resolves tool calls into a dense array even when a provider streams deltas
     with a gap in `index` (0 then 2), so a for..of over message.tool_calls
     never yields an undefined entry that would crash the tool loop
   - KODR_MODEL configures the model when no model option is provided
   - Explicit model option takes precedence over KODR_MODEL
   - HTTP errors surface as thrown exceptions
-  - A 2xx response with no SSE framing (a non-streaming JSON body or a
+  - >
+    A 2xx response with no SSE framing (a non-streaming JSON body or a
     200-wrapped error) is rejected as a "Non-SSE response" error rather than
     assembled into an empty message, which the tool loop would otherwise report
     as a successful no-op completion. A real event stream (>=1 `data:` line,
     even one that only sends `[DONE]`) is unaffected
   - Timeout applies to the full request lifecycle, even when streaming chunks keep arriving
   - A request timeout is thrown as an Error tagged with code 'ETIMEDOUT' (recognized by isTimeoutError), so a caller can distinguish a timeout from any other failure without matching on the message text -- e.g. to treat a timeout caused by the run's own remaining-budget cap as a clean budget-exceeded stop rather than a hard error
-  - chat() treats the client's configured timeout as a hard per-request ceiling: a per-call timeoutMs can only shorten a request below it, never lengthen it. So a caller tracking a wall-clock budget (e.g. the harness's maxRunMs) caps each request to the time actually remaining, while the client timeout still bounds any single request regardless of the budget
+  - >
+    chat() treats the client's configured timeout as a hard per-request ceiling: a per-call timeoutMs can only shorten a request below it, never lengthen it. So a caller tracking a wall-clock budget (e.g. the harness's maxRunMs) caps each request to the time actually remaining, while the client timeout still bounds any single request regardless of the budget
   - chat() retries a 5xx response, or an ECONNRESET/EPIPE connection error, up to maxRetries times (default 1) before surfacing the error; a 4xx, ECONNREFUSED, or a timeout is never retried
   - Each retry reuses the same request body and timeout; a run's remaining budget is not recomputed per attempt, so callers with a tight maxRunMs and a high maxRetries could in the worst case spend roughly (maxRetries + 1) x timeout on one chat() call -- the default of 1 keeps that bounded to 2x
-  - chat() accepts optional heartbeatMs/onHeartbeat: while a request is in flight, onHeartbeat(elapsedMs) fires on that interval until the request settles (0 or omitted disables it). A large prompt can spend minutes in prefill before the first streamed token, which is otherwise indistinguishable from a hung request to anything watching for output; each retry attempt restarts its own heartbeat timer from zero
+  - >
+    chat() accepts optional heartbeatMs/onHeartbeat: while a request is in flight, onHeartbeat(elapsedMs) fires on that interval until the request settles (0 or omitted disables it). A large prompt can spend minutes in prefill before the first streamed token, which is otherwise indistinguishable from a hung request to anything watching for output; each retry attempt restarts its own heartbeat timer from zero
   - chat() reports how many retries it used as a `retries` field on the resolved result (0 when the first attempt succeeded), so a flaky-backend pattern is visible in the run record instead of only in live stderr
   - When chat() ultimately throws (retryable attempts exhausted, or a non-retryable error), the thrown Error also carries a `retries` field with the number of retries actually attempted, so callers recording telemetry on failure don't lose that count
-  - chat() accepts an optional onDebug callback (see specs/debug-log.yaml): fires once per HTTP attempt with { url, requestBody, rawResponse, error? } -- the exact request sent and the raw, unparsed response text, before SSE parsing or message assembly. A retried request fires onDebug once per attempt
+  - >
+    chat() accepts an optional onDebug callback (see specs/debug-log.yaml): fires once per HTTP attempt with { url, requestBody, rawResponse, error? } -- the exact request sent and the raw, unparsed response text, before SSE parsing or message assembly. A retried request fires onDebug once per attempt
   - headers are merged into every request (chat, models, richModels); extraBody is merged into every chat request body, after the built-in fields (model/messages/stream/stream_options) so a caller can add fields but not override them
   - the streaming assembler accumulates delta.reasoning and delta.reasoning_content into one reasoning string (OpenRouter uses the first name, DeepSeek/vLLM/LM Studio's reasoning parser the second), and delta.reasoning_details into an array, exposing both on the resolved message when present
   - >
@@ -105,7 +110,8 @@ constraints:
     only place that fixes all of them at once. The text is not discarded and
     the tokens still stream live to the terminal via onToken; only the
     resolved message's content field is affected
-  - the streaming assembler reads chunk.usage independently of whether that chunk also carries a delta -- some backends (observed: OpenRouter) attach usage to the final content-bearing chunk rather than a separate delta-less one, and usage must not be silently dropped depending on which shape a given backend uses
+  - >
+    the streaming assembler reads chunk.usage independently of whether that chunk also carries a delta -- some backends (observed: OpenRouter) attach usage to the final content-bearing chunk rather than a separate delta-less one, and usage must not be silently dropped depending on which shape a given backend uses
   - the streaming assembler reads chunk.usage.cost verbatim into usage.cost when present and finite; usage.cost defaults to 0 (not null) when absent, since a provider that never reports cost (LM Studio) genuinely costs nothing, not an unknown amount
   - every place usage is accumulated across multiple chat() calls in a single logical operation (tool-loop.mjs's turn loop, compaction, heal turns, review attempts, the memory retrospective, harness.mjs's review/heal/memory merges into the final run result) sums cost the same way prompt/completion are summed, so a run's total usage.cost is the real total spend across every call the run made, not just the last one
 
@@ -135,7 +141,8 @@ tests:
     - long streaming requests time out even when chunks arrive
     - a per-call timeoutMs tighter than the client default is honored
     - omitting timeoutMs falls back to the client default
-    - the client timeout is a hard ceiling: a per-call timeoutMs larger than it cannot exceed it
+    - >
+      the client timeout is a hard ceiling: a per-call timeoutMs larger than it cannot exceed it
     - isRetryableServerError is true for a 5xx error
     - isRetryableServerError is false for a 4xx error
     - isRetryableServerError is false for a non-HTTP error (e.g. a timeout)
@@ -148,7 +155,8 @@ tests:
     - an ECONNREFUSED from chat is never retried
     - chat gives up after maxRetries and throws the last 5xx error
     - maxRetries 0 disables retrying
-    - a successful chat result reports retries: 0 when the first attempt succeeded
+    - >
+      a successful chat result reports retries: 0 when the first attempt succeeded
     - a successful chat result reports the number of retries used after a retried 5xx
     - the error thrown after exhausting maxRetries carries a retries field
     - CLI --model-retries is parsed and defaults to 1

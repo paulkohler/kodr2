@@ -37,19 +37,25 @@ outputs:
     description: Same run result shape run() always returns; replay is a thin wrapper, not a new run() mode
 
 constraints:
-  - Resolves ref with the exact same "last"/path logic as --continue (reuses cli.mjs's
+  - >
+    Resolves ref with the exact same "last"/path logic as --continue (reuses cli.mjs's
     loadPriorRun), so a stale/missing run file or corrupt JSON fails the same way for both
-  - Replays with an empty conversation -- unlike --continue, no prior messages are carried
+  - >
+    Replays with an empty conversation -- unlike --continue, no prior messages are carried
     over, so the replayed run's system prompt and workspace listing are assembled fresh
-  - Reuses the original run's prompt, cwd, baseUrl, model, testCommand, maxHealTurns,
+  - >
+    Reuses the original run's prompt, cwd, baseUrl, model, testCommand, maxHealTurns,
     maxRunMs, maxToolTurns, envPassthrough, and contextWindow from its recorded metadata
-  - An explicit --base-url or --model on the replay command overrides the recorded value;
+  - >
+    An explicit --base-url or --model on the replay command overrides the recorded value;
     every other option is not overridable from the replay command itself today -- rerun with
     `kodr run` directly for anything more than "replay exactly what happened, or swap the model"
-  - Fails with a usage message and no run attempted when no ref is given, or when the
+  - >
+    Fails with a usage message and no run attempted when no ref is given, or when the
     referenced run record has no recorded prompt (e.g. a /compact management-command record)
   - Never writes to the referenced run record; only ever reads it
-  - CLI exit code, --json summary, and --debug/--no-save behave exactly as they do for `kodr run`,
+  - >
+    CLI exit code, --json summary, and --debug/--no-save behave exactly as they do for `kodr run`,
     since replay calls the same run() function with the same options shape
 
 tests:
