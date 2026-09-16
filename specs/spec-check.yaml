@@ -1,5 +1,5 @@
 name: spec-check
-status: accepted
+status: implemented
 description: >
   Keep feature specs on the shared top-level schema and reject ambiguous YAML
   sequence formatting before it can silently become an unparsable contract.
