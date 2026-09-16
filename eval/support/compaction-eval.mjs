@@ -2,6 +2,73 @@
  * Deterministic support functions for the live compaction eval.
  */
 
+import { createNullReporter } from '../../src/reporter.mjs';
+
+export const DEFAULT_TRACE_EVENTS = 200;
+export const DEFAULT_TRACE_FIELD_CHARS = 1000;
+
+/**
+ * Create a silent reporter that retains a bounded diagnostic trajectory.
+ * Full tool-result content is never retained.
+ * @param {{ maxEvents?: number, maxFieldChars?: number }} [options]
+ * @returns {{ reporter: import('../../src/reporter.mjs').Reporter, events: Array<object> }}
+ */
+export function createEvalTraceReporter(options = {}) {
+  const maxEvents = options.maxEvents || DEFAULT_TRACE_EVENTS;
+  const maxFieldChars = options.maxFieldChars || DEFAULT_TRACE_FIELD_CHARS;
+  const events = [];
+  const reporter = createNullReporter();
+
+  const append = (event) => {
+    events.push(event);
+    if (events.length > maxEvents) {
+      events.shift();
+    }
+  };
+
+  reporter.toolCall = ({ name, args }) => {
+    append({
+      event: 'tool.call',
+      name,
+      args: boundedJson(args, maxFieldChars),
+    });
+  };
+  reporter.toolResult = ({ name, result }) => {
+    const content = Reflect.get(result, 'content');
+    const error = Reflect.get(result, 'error');
+    let contentChars = null;
+    if (typeof content === 'string') {
+      contentChars = content.length;
+    }
+    append({
+      event: 'tool.result',
+      name,
+      keys: Object.keys(result).sort(),
+      error: boundedText(error, maxFieldChars),
+      contentChars,
+    });
+  };
+  reporter.compaction = ({ promptTokens, limit }) => {
+    append({ event: 'compaction', promptTokens, limit });
+  };
+
+  return { reporter, events };
+}
+
+function boundedJson(value, maxChars) {
+  return boundedText(JSON.stringify(value), maxChars);
+}
+
+function boundedText(value, maxChars) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  if (value.length <= maxChars) {
+    return value;
+  }
+  return `${value.slice(0, maxChars)}… [truncated]`;
+}
+
 /**
  * Parse a positive integer from an environment-variable value.
  * @param {string|undefined} value

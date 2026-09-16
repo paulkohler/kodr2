@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  createEvalTraceReporter,
   median,
   positiveIntEnv,
   runWithAbortBudget,
@@ -9,6 +10,52 @@ import {
 } from '../eval/support/compaction-eval.mjs';
 
 describe('compaction eval support', () => {
+  it('records bounded tool and compaction diagnostics without result content', () => {
+    const { reporter, events } = createEvalTraceReporter({
+      maxEvents: 4,
+      maxFieldChars: 20,
+    });
+
+    reporter.toolCall({
+      name: 'read_file',
+      args: { path: `large-${'x'.repeat(30)}.txt` },
+    });
+    reporter.toolResult({
+      name: 'read_file',
+      result: { content: 'secret'.repeat(100), truncated: true },
+    });
+    reporter.compaction({ promptTokens: 7000, limit: 6554 });
+
+    assert.equal(events.length, 3);
+    assert.match(Reflect.get(events[0], 'args'), /truncated/);
+    assert.deepEqual(events[1], {
+      event: 'tool.result',
+      name: 'read_file',
+      keys: ['content', 'truncated'],
+      error: null,
+      contentChars: 600,
+    });
+    assert.equal(JSON.stringify(events).includes('secretsecret'), false);
+    assert.deepEqual(events[2], {
+      event: 'compaction',
+      promptTokens: 7000,
+      limit: 6554,
+    });
+  });
+
+  it('keeps the newest events when the trace reaches its cap', () => {
+    const { reporter, events } = createEvalTraceReporter({ maxEvents: 2 });
+
+    reporter.compaction({ promptTokens: 1, limit: 10 });
+    reporter.compaction({ promptTokens: 2, limit: 10 });
+    reporter.compaction({ promptTokens: 3, limit: 10 });
+
+    assert.deepEqual(
+      events.map((event) => Reflect.get(event, 'promptTokens')),
+      [2, 3],
+    );
+  });
+
   it('accepts positive integer environment values', () => {
     assert.equal(positiveIntEnv('3', 1), 3);
     assert.equal(positiveIntEnv(undefined, 2), 2);

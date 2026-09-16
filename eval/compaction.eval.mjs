@@ -18,6 +18,7 @@ import { after, before, describe, it } from 'node:test';
 import { run } from '../src/harness.mjs';
 import { createProvider } from '../src/provider.mjs';
 import {
+  createEvalTraceReporter,
   positiveIntEnv,
   runWithAbortBudget,
   summarizeAttempts,
@@ -196,6 +197,7 @@ describe('8K compaction eval', {
 
 async function runWorkload(workload, repeat) {
   const cwd = await mkdtemp(join(tmpdir(), 'kodr-compaction-eval-'));
+  const trace = createEvalTraceReporter();
   const startedAt = Date.now();
   let measured;
   let result;
@@ -214,6 +216,7 @@ async function runWorkload(workload, repeat) {
           baseUrl: LM_STUDIO_URL,
           model: modelId,
           quiet: true,
+          reporter: trace.reporter,
           noSave: true,
           contextWindow: CONTEXT_WINDOW,
           priorMessages: workload.priorMessages,
@@ -262,6 +265,7 @@ async function runWorkload(workload, repeat) {
       error: failure?.message || result?.error?.message || null,
       filesChanged: result?.filesChanged || [],
       response: result?.response || null,
+      trajectory: trace.events,
     });
     await rm(cwd, { recursive: true, force: true });
   }
