@@ -1,0 +1,82 @@
+name: compaction-eval
+status: accepted
+description: >
+  Exercise Kodr's real model-driven compaction path at an 8,192-token window.
+  This is a focused product eval, separate from the harness arena and from
+  Terminal-Bench-style task benchmarking.
+
+inputs:
+  baseUrl:
+    type: string
+    description: LM Studio OpenAI-compatible endpoint
+  contextWindow:
+    type: number
+    description: Fixed at 8192 tokens for every workload
+  repeats:
+    type: number
+    description: Positive KODR_EVAL_REPEATS value, default 1
+  budgetMs:
+    type: number
+    description: Per-attempt abort budget, configurable with KODR_COMPACTION_EVAL_BUDGET_MS
+  resultsDir:
+    type: string
+    description: Output directory, configurable with KODR_EVAL_RESULTS_DIR
+
+outputs:
+  attempts:
+    type: array
+    description: >
+      Per-attempt model, loaded and configured context lengths, pass state,
+      compaction count, tool turns, tokens, duration, stop reason, and timeout
+      state
+  summary:
+    type: object
+    description: Pass rate plus median duration, tokens, and compaction count
+
+workloads:
+  - >
+    Seeded history starts above the threshold, compacts before the first model
+    request, and still produces the requested artifact.
+  - >
+    A large read_file result crosses the threshold between tool turns and the
+    model still extracts the marker into a requested artifact.
+  - >
+    A large pasted task crosses the threshold before the first request; the
+    bounded task transcript preserves the instruction and marker.
+  - >
+    Two staged large file reads cause at least two compactions while preserving
+    the next step and final artifact across both summaries.
+
+constraints:
+  - The suite runs only against a real LM Studio model and skips cleanly when unavailable.
+  - >
+    Every attempt uses contextWindow 8192; it never uses the pathological
+    contextWindow 1 trigger.
+  - >
+    Every attempt owns an AbortController. At its budget the controller aborts;
+    the run must settle within a configurable grace period with no live model
+    request left behind.
+  - >
+    Correctness is asserted from workspace artifacts, not from the model's
+    prose response.
+  - >
+    Repeats create fresh workspaces and report pass rate rather than treating a
+    single nondeterministic sample as a model-quality conclusion.
+  - >
+    Results are written below the gitignored eval/results directory by default
+    and the suite prints a compact aggregate summary.
+  - >
+    The eval does not load, unload, or resize the model; it records LM Studio's
+    actual loaded context length separately from Kodr's configured 8K window.
+
+tests:
+  unit:
+    - positiveIntEnv accepts a positive integer and otherwise uses its fallback
+    - median returns the middle value or the mean of the two middle values
+    - summarizeAttempts reports pass rate and median metrics
+    - runWithAbortBudget aborts at its budget and allows a short settlement grace
+  eval:
+    - seeded-history workload compacts at least once and produces its artifact
+    - large-tool-result workload compacts at least once and produces its artifact
+    - large-pasted-task workload compacts at least once and produces its artifact
+    - repeated-compaction workload compacts at least twice and produces its artifact

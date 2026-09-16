@@ -49,6 +49,9 @@ inputs:
   onHeartbeat:
     type: function
     description: Called with elapsed ms on each heartbeat tick, forwarded to the summary chat call
+  signal:
+    type: object
+    description: AbortSignal forwarded to the summary chat call
 
 outputs:
   messages:
@@ -118,6 +121,10 @@ constraints:
   - The summary model call adds its token usage, and any retries it used, to the run total
   - The summary model call is capped to the run's remaining maxRunMs budget, not a fresh full-length timeout, so late compaction can't outlive the run deadline
   - >
+    The summary model call receives the run's AbortSignal, so an eval timeout,
+    Ctrl-C, or ACP cancellation destroys an in-flight compaction request rather
+    than leaving model work alive after the run has stopped
+  - >
     A failed or empty summary leaves the conversation unchanged (best effort);
     the run continues rather than aborting
   - >
@@ -160,6 +167,7 @@ tests:
     - compactMessages is a no-op when there is no history to compact
     - compactMessages forwards timeoutMs to the summary chat call
     - compactMessages forwards heartbeatMs and onHeartbeat to the summary chat call
+    - compactMessages forwards the cancellation signal to the summary chat call
     - estimateTokens approximates prompt tokens from content and tool-call length
     - estimateTokens counts reasoning text alongside content and tool calls
     - tool loop compacts in place when a turn crosses the threshold
@@ -177,5 +185,4 @@ tests:
     - pickLoadedContextLength selects the model's loaded length, else null
     - client probes loaded context length from /api/v0/models
   eval:
-    - a long multi-turn session compacts and still completes the task
-    - a session whose bulk is a large pasted blob compacts and still completes
+    - see specs/compaction-eval.yaml
