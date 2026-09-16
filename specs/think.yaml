@@ -1,5 +1,5 @@
 name: think
-status: proposed
+status: implemented
 description: >
   Split a reasoning model's chain-of-thought out of its visible reply. Local
   reasoning models (deepseek-r1, phi-4-reasoning-plus, qwen3 in thinking mode)

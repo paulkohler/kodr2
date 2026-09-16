@@ -1,5 +1,5 @@
 name: harness-arena
-status: proposed
+status: implemented
 description: >
   A benchmark that holds the model fixed and varies the harness, to measure what
   Kodr's features contribute. The transpose of a model leaderboard: instead of

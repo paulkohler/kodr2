@@ -1,5 +1,5 @@
 name: verdict
-status: proposed
+status: implemented
 description: >
   Parse a model's final reply into a pass/fail verdict. Two features need this
   and they use different words for the same thing: the goal judge ends with

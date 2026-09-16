@@ -1,5 +1,5 @@
 name: provider-cache
-status: accepted
+status: implemented
 description: >
   When using --provider openrouter against an Anthropic-family model, Kodr
   enables Anthropic's prompt-caching by default, cutting prefill cost on every
