@@ -1,5 +1,5 @@
 name: compaction-eval
-status: accepted
+status: implemented
 description: >
   Exercise Kodr's real model-driven compaction path at an 8,192-token window.
   This is a focused product eval, separate from the harness arena and from
