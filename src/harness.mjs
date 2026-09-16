@@ -1314,7 +1314,6 @@ function resolveReviewClient(params) {
 export async function runReviewPass(params) {
   const {
     cwd,
-    client,
     reviewModel,
     reviewContextWindow,
     buildContextWindow,

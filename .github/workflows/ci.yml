@@ -21,6 +21,7 @@ jobs:
       - uses: biomejs/setup-biome@v2
       - run: npm install
       - run: npm run format:check
+      - run: npm run lint
       - run: npm run check
       # TypeScript and @types/node are developer tools, not dependencies (see
       # AGENTS.md's zero-dependency guard), so CI installs them the same way a

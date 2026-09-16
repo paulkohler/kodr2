@@ -16,7 +16,7 @@ export const REVIEW_LABELS = { pass: 'PASS', fail: 'FAIL' };
 
 const MARKER = 'VERDICT';
 
-function escape(value) {
+function escapeRegex(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
@@ -25,7 +25,7 @@ function escape(value) {
 // "NOT  MET", still parses.
 function labelAlternation(labels) {
   return [labels.fail, labels.pass]
-    .map((label) => escape(label).replace(/\s+/g, '\\s+'))
+    .map((label) => escapeRegex(label).replace(/\s+/g, '\\s+'))
     .join('|');
 }
 

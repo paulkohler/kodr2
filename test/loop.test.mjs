@@ -376,7 +376,7 @@ describe('runLoop', () => {
     let calls = 0;
     const result = await runLoop({
       checklist,
-      buildTask: async (text, continuation) => {
+      buildTask: async (_text, continuation) => {
         calls += 1;
         continuations.push(continuation);
         return fakeRunResult({ stoppedReason: 'tool-limit' });

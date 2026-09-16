@@ -59,10 +59,14 @@ export function createAcpReporter(send, turnState = { toolCallId: null }) {
     if (!turnState.toolCallId) {
       return;
     }
+    let status = 'completed';
+    if (result?.error) {
+      status = 'failed';
+    }
     send({
       sessionUpdate: 'tool_call_update',
       toolCallId: turnState.toolCallId,
-      status: result && result.error ? 'failed' : 'completed',
+      status,
       rawOutput: result,
     });
   };

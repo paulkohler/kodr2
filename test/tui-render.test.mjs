@@ -22,6 +22,7 @@ const REVERSE = '\x1b[7m';
 const BOLD = '\x1b[1m';
 const ITALIC = '\x1b[3m';
 const CYAN = '\x1b[36m';
+const ANSI_SGR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
 
 describe('displayWidth', () => {
   it('ignores ANSI escape sequences', () => {
@@ -38,7 +39,7 @@ describe('wrapAnsi', () => {
       assert.ok(displayWidth(piece) <= 3);
     }
     // The color escape stays attached; stripping escapes recovers the text.
-    assert.equal(pieces.join('').replace(/\x1b\[[0-9;]*m/g, ''), 'abcdef');
+    assert.equal(pieces.join('').replace(ANSI_SGR, ''), 'abcdef');
     assert.ok(pieces[0].includes(RED));
   });
 

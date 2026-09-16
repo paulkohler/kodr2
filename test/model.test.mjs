@@ -110,7 +110,7 @@ describe('assembleResponse', () => {
     ]);
 
     assert.equal(result.message.tool_calls.length, 2);
-    assert.ok(result.message.tool_calls.every((tc) => tc && tc.function));
+    assert.ok(result.message.tool_calls.every((tc) => tc?.function));
     assert.deepEqual(
       result.message.tool_calls.map((tc) => tc.function.name),
       ['read_file', 'list_files'],

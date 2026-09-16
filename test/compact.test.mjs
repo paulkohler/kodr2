@@ -824,7 +824,7 @@ describe('runToolLoop compaction', () => {
     const client = /** @type {import('../src/provider.mjs').Provider} */ (
       /** @type {any} */ ({
         calls: [],
-        async chat(params) {
+        async chat(_params) {
           chatCalls++;
           // First call: a tool call that crosses the threshold.
           if (chatCalls === 1) {

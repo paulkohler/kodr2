@@ -572,7 +572,9 @@ function streamRequest(url, body, timeout, callbacks, headers = {}, signal) {
     }
 
     function finish(fn, value) {
-      if (settled) return;
+      if (settled) {
+        return;
+      }
       settled = true;
       clearTimeout(hardTimer);
       if (heartbeatTimer) {
@@ -702,7 +704,9 @@ function jsonRequest(url, timeout, headers = {}) {
     let settled = false;
     let req;
     const hardTimer = setTimeout(() => {
-      if (settled) return;
+      if (settled) {
+        return;
+      }
       settled = true;
       if (req) {
         req.destroy();
@@ -711,7 +715,9 @@ function jsonRequest(url, timeout, headers = {}) {
     }, timeout);
 
     function finish(fn, value) {
-      if (settled) return;
+      if (settled) {
+        return;
+      }
       settled = true;
       clearTimeout(hardTimer);
       fn(value);
@@ -751,7 +757,9 @@ function jsonRequest(url, timeout, headers = {}) {
     });
 
     req.on('error', (err) => {
-      if (settled) return;
+      if (settled) {
+        return;
+      }
       finish(reject, err);
     });
     req.end();

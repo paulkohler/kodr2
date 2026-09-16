@@ -219,7 +219,7 @@ async function requestPermission(ctx) {
  * @returns {boolean}
  */
 function isAllowed(result) {
-  const outcome = result && result.outcome;
+  const outcome = result?.outcome;
   if (!outcome || outcome.outcome !== 'selected') {
     return false;
   }
