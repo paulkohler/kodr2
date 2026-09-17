@@ -123,7 +123,7 @@ const workloads = [
     setup: async (cwd) => {
       await writeFile(
         join(cwd, 'stage-one.txt'),
-        `Use read_file to read stage-two.txt and follow its first-line instruction exactly. Do not create the final artifact yet.\n${largeText('stage-one-context')}`,
+        `Use read_file to read stage-two.txt. Only after reading it, follow its first-line instruction exactly.\n${largeText('stage-one-context')}`,
       );
       await writeFile(
         join(cwd, 'stage-two.txt'),
