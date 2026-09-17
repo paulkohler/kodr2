@@ -200,6 +200,7 @@ tests:
     - tool loop forwards heartbeatMs and onHeartbeat to the compaction summary call
     - tool loop does not compact when below the threshold
     - tool loop compacts a conversation seeded already over threshold, before the first turn
+    - tool loop preserves the newest completed tool state across two consecutive compactions
     - renderTranscript collapses a repeated identical failing call to one instance plus a count
     - renderTranscript does not collapse two different tool calls or results
     - isCompactCommand recognizes "/compact"
