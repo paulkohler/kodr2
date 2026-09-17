@@ -33,7 +33,7 @@ function scriptedClient(responses) {
     /** @type {any} */ ({
       calls,
       async chat(params) {
-        calls.push(params);
+        calls.push({ ...params, messages: structuredClone(params.messages) });
         const response = responses[Math.min(i, responses.length - 1)];
         i++;
         return response;
@@ -806,6 +806,51 @@ describe('runToolLoop compaction', () => {
     assert.equal(loop.compactions, 1);
     assert.equal(client.calls.length, 2);
     assert.match(messages[1].content, /COMPACTED SUMMARY/);
+  });
+
+  it('preserves the newest completed tool state across two consecutive compactions', async () => {
+    const tools = /** @type {import('../src/tools/index.mjs').ToolRegistry} */ (
+      /** @type {any} */ ({
+        definitions: () => [],
+        dispatch: async (_name, args) => ({
+          content: `${args.path}-result ${'x'.repeat(4000)}`,
+        }),
+      })
+    );
+    const client = scriptedClient([
+      toolCallTurn('read_file', { path: 'stage-one.txt' }, 10),
+      finalTurn('SUMMARY ONE', 5),
+      toolCallTurn('read_file', { path: 'stage-two.txt' }, 10),
+      finalTurn('SUMMARY TWO', 5),
+      finalTurn('all done', 5),
+    ]);
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'follow both stages' },
+    ];
+
+    const loop = await runToolLoop({
+      client,
+      modelId: 'm',
+      messages,
+      tools,
+      contextWindow: 1000,
+    });
+
+    assert.equal(loop.completed, true);
+    assert.equal(loop.compactions, 2);
+
+    const afterFirstCompaction = client.calls[2].messages[1].content;
+    assert.match(afterFirstCompaction, /SUMMARY ONE/);
+    assert.match(afterFirstCompaction, /stage-one\.txt/);
+    assert.match(afterFirstCompaction, /stage-one\.txt-result/);
+    assert.doesNotMatch(afterFirstCompaction, /stage-two\.txt/);
+
+    const afterSecondCompaction = client.calls[4].messages[1].content;
+    assert.match(afterSecondCompaction, /SUMMARY TWO/);
+    assert.match(afterSecondCompaction, /stage-two\.txt/);
+    assert.match(afterSecondCompaction, /stage-two\.txt-result/);
+    assert.doesNotMatch(afterSecondCompaction, /stage-one\.txt/);
   });
 
   it("adds the compaction summary call's retries to the run total", async () => {
