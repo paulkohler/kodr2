@@ -12,6 +12,26 @@ import { localBackend } from './backend.mjs';
 export const DEFAULT_SNAPSHOT_CAP = 1000;
 
 /**
+ * Default timeout for model-issued commands. Resolved from an explicit
+ * registry option, then KODR_COMMAND_TIMEOUT_MS, then the shell default.
+ * @param {number|null|undefined} option
+ * @returns {number}
+ */
+export function resolveCommandTimeoutMs(option) {
+  if (Number.isInteger(option) && option > 0) {
+    return option;
+  }
+  const fromEnv = Number.parseInt(
+    process.env.KODR_COMMAND_TIMEOUT_MS || '',
+    10,
+  );
+  if (Number.isInteger(fromEnv) && fromEnv > 0) {
+    return fromEnv;
+  }
+  return DEFAULT_TIMEOUT;
+}
+
+/**
  * Max files the changed-file snapshot walks before stopping. The snapshot is
  * bounded so a huge tree can't make every run_command call walk the whole
  * workspace twice -- but the cap is overridable (per AGENTS.md: operational

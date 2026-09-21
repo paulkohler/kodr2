@@ -9,6 +9,11 @@ inputs:
     type: string
     required: true
     description: Shell command to execute
+  commandTimeoutMs:
+    type: number
+    description: >
+      Default timeout for model-issued commands (default 600,000ms; positive
+      CLI --command-timeout-ms or KODR_COMMAND_TIMEOUT_MS override)
 
 outputs:
   stdout:
@@ -29,7 +34,10 @@ outputs:
 
 constraints:
   - Commands run via /bin/sh -c (the shared shell runner, see shell spec)
-  - 10 minute timeout by default (configurable)
+  - >
+    Commands time out after 10 minutes by default. A positive
+    --command-timeout-ms overrides it for CLI-driven runs; otherwise a positive
+    KODR_COMMAND_TIMEOUT_MS applies. An explicit option wins over the environment
   - >
     The tool description's timeout sentence is rendered from the resolved
     timeout via a describe(context) hook the registry prefers over the static
@@ -61,6 +69,8 @@ tests:
   unit:
     - executes a simple command and returns output
     - captures non-zero exit codes
+    - command timeout resolves explicit option, then KODR_COMMAND_TIMEOUT_MS, then 10 minutes
+    - CLI parses --command-timeout-ms and preserves null when omitted so the environment remains reachable
     - tracks files changed by shell commands
     - snapshot cap is overridable via option and KODR_SNAPSHOT_CAP
     - honors the cap for files nested in subdirectories

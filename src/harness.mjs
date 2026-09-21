@@ -70,6 +70,7 @@ import {
   runToolLoop,
 } from './tool-loop.mjs';
 import { createToolRegistry } from './tools/index.mjs';
+import { resolveCommandTimeoutMs } from './tools/run-command.mjs';
 
 // Re-exported for callers (and tests) that imported them from the harness.
 export {
@@ -156,6 +157,8 @@ export {
  * @param {number} [options.requestTimeoutMs] - Hard per-request timeout ceiling,
  *   independent of maxRunMs, so a stalled backend fails one request instead of
  *   hanging (default 10 minutes; positive only, also KODR_REQUEST_TIMEOUT_MS)
+ * @param {number} [options.commandTimeoutMs] - Timeout for each model-issued
+ *   run_command (default 10 minutes; positive only, also KODR_COMMAND_TIMEOUT_MS)
  * @param {boolean} [options.quiet] - Suppress terminal output
  * @param {import('./reporter.mjs').Reporter} [options.reporter] - Output channel
  *   (see specs/reporter.yaml). Defaults to a terminal reporter, or a null
@@ -254,6 +257,7 @@ export async function run(prompt, options) {
   // Resolved once and threaded into every phase that can spend money, so the
   // ceiling bounds the run rather than each phase separately.
   const costCeilingUsd = maxCostUsd(options.maxCostUsd);
+  const commandTimeoutMs = resolveCommandTimeoutMs(options.commandTimeoutMs);
   const runsDir = resolveRunsDir(cwd, options.runsDir);
   const rawThenFixCommits = rawThenFixCommitsEnabled(options.rawThenFixCommits);
   const noSave = isSaveDisabled(options.noSave);
@@ -356,6 +360,7 @@ export async function run(prompt, options) {
     testCommand: testCommand || null,
     maxHealTurns,
     maxRunMs,
+    commandTimeoutMs,
     maxCostUsd: costCeilingUsd,
     maxToolTurns,
     envPassthrough,
@@ -370,6 +375,7 @@ export async function run(prompt, options) {
   const skills = await discoverSkills(cwd);
   const tools = createToolRegistry(cwd, {
     envPassthrough,
+    commandTimeoutMs,
     startedAt,
     maxRunMs,
     skills: skills.length > 0,

@@ -19,7 +19,10 @@ import listFilesTool from '../src/tools/list-files.mjs';
 import searchTool from '../src/tools/search.mjs';
 import runCommandTool from '../src/tools/run-command.mjs';
 import { isPackageManagerCommand } from '../src/tools/run-command.mjs';
-import { commandTimeout } from '../src/tools/run-command.mjs';
+import {
+  commandTimeout,
+  resolveCommandTimeoutMs,
+} from '../src/tools/run-command.mjs';
 import {
   DEFAULT_SNAPSHOT_CAP,
   snapshotCap,
@@ -760,6 +763,27 @@ describe('run_command', () => {
     });
     assert.ok(timeout > 0);
     assert.ok(timeout <= 100);
+  });
+
+  it('resolves command timeout from option, then KODR_COMMAND_TIMEOUT_MS, then the default', () => {
+    const original = process.env.KODR_COMMAND_TIMEOUT_MS;
+    try {
+      delete process.env.KODR_COMMAND_TIMEOUT_MS;
+      assert.equal(resolveCommandTimeoutMs(undefined), 600_000);
+
+      process.env.KODR_COMMAND_TIMEOUT_MS = '90000';
+      assert.equal(resolveCommandTimeoutMs(undefined), 90_000);
+      assert.equal(resolveCommandTimeoutMs(12_000), 12_000);
+
+      process.env.KODR_COMMAND_TIMEOUT_MS = 'invalid';
+      assert.equal(resolveCommandTimeoutMs(undefined), 600_000);
+    } finally {
+      if (original === undefined) {
+        delete process.env.KODR_COMMAND_TIMEOUT_MS;
+      } else {
+        process.env.KODR_COMMAND_TIMEOUT_MS = original;
+      }
+    }
   });
 
   it('snapshot cap is overridable via option and KODR_SNAPSHOT_CAP', () => {

@@ -45,11 +45,14 @@ constraints:
     over, so the replayed run's system prompt and workspace listing are assembled fresh
   - >
     Reuses the original run's prompt, cwd, baseUrl, model, testCommand, maxHealTurns,
-    maxRunMs, maxToolTurns, envPassthrough, and contextWindow from its recorded metadata
+    maxRunMs, commandTimeoutMs, maxToolTurns, envPassthrough, and contextWindow
+    from its recorded metadata
   - >
-    An explicit --base-url or --model on the replay command overrides the recorded value;
-    every other option is not overridable from the replay command itself today -- rerun with
-    `kodr run` directly for anything more than "replay exactly what happened, or swap the model"
+    An explicit --base-url, --model, or --command-timeout-ms on the replay
+    command overrides the recorded value; every other option is not overridable
+    from the replay command itself today -- rerun with `kodr run` directly for
+    anything more than "replay exactly what happened, swap the model, or shorten
+    a stuck command"
   - >
     Fails with a usage message and no run attempted when no ref is given, or when the
     referenced run record has no recorded prompt (e.g. a /compact management-command record)

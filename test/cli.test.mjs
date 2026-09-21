@@ -229,6 +229,15 @@ describe('parseArgs', () => {
     assert.equal(parseArgs(['run', 'hi']).requestTimeoutMs, null);
   });
 
+  it('parses --command-timeout-ms, defaulting to null so the env var still applies', () => {
+    assert.equal(
+      parseArgs(['run', 'hi', '--command-timeout-ms', '90000'])
+        .commandTimeoutMs,
+      90_000,
+    );
+    assert.equal(parseArgs(['run', 'hi']).commandTimeoutMs, null);
+  });
+
   it('parses --heartbeat-ms flag', () => {
     const args = parseArgs(['run', 'hi', '--heartbeat-ms', '5000']);
     assert.equal(args.heartbeatMs, 5000);
@@ -681,6 +690,14 @@ describe('buildRunOptions', () => {
     // the expensive ones -- unbounded.
     const args = parseArgs(['loop', '--max-cost-usd', '1.5']);
     assert.equal(buildRunOptions(args, '/tmp/ws', false).maxCostUsd, 1.5);
+  });
+
+  it('passes the command timeout through to every run it drives', () => {
+    const args = parseArgs(['loop', '--command-timeout-ms', '90000']);
+    assert.equal(
+      buildRunOptions(args, '/tmp/ws', false).commandTimeoutMs,
+      90_000,
+    );
   });
 
   it('passes --cache through to every run it drives', () => {

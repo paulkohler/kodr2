@@ -7,7 +7,7 @@ import editFile from './edit-file.mjs';
 import listFiles from './list-files.mjs';
 import loadSkill from './load-skill.mjs';
 import readFile from './read-file.mjs';
-import runCommand from './run-command.mjs';
+import runCommand, { resolveCommandTimeoutMs } from './run-command.mjs';
 import search from './search.mjs';
 import viewImage from './view-image.mjs';
 import writeFile from './write-file.mjs';
@@ -104,7 +104,7 @@ export function createToolRegistry(cwd, options = {}) {
   const context = {
     cwd,
     envPassthrough: options.envPassthrough ?? [],
-    commandTimeoutMs: options.commandTimeoutMs,
+    commandTimeoutMs: resolveCommandTimeoutMs(options.commandTimeoutMs),
     snapshotCap: options.snapshotCap,
     startedAt: options.startedAt,
     maxRunMs: options.maxRunMs ?? 0,

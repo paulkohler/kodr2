@@ -82,6 +82,7 @@ import { MAX_TOOL_TURNS } from './tool-loop.mjs';
  * @property {number} maxToolTurns
  * @property {number|null} maxRepeatToolErrors
  * @property {number|null} requestTimeoutMs
+ * @property {number|null} commandTimeoutMs
  * @property {number} maxAttempts
  * @property {string|null} tasksFile
  * @property {number|null} goalMaxAttempts
@@ -242,6 +243,14 @@ export async function main(argv) {
     process.exitCode = 1;
     return;
   }
+  if (
+    args.commandTimeoutMs !== null &&
+    (!Number.isInteger(args.commandTimeoutMs) || args.commandTimeoutMs < 1)
+  ) {
+    process.stderr.write('--command-timeout-ms must be a positive integer.\n');
+    process.exitCode = 1;
+    return;
+  }
   if (!Number.isInteger(args.heartbeatMs) || args.heartbeatMs < 0) {
     process.stderr.write('--heartbeat-ms must be a non-negative integer.\n');
     process.exitCode = 1;
@@ -336,6 +345,7 @@ export async function main(argv) {
     maxToolTurns: args.maxToolTurns,
     maxRepeatToolErrors: args.maxRepeatToolErrors,
     requestTimeoutMs: args.requestTimeoutMs,
+    commandTimeoutMs: args.commandTimeoutMs,
     heartbeatMs: args.heartbeatMs,
     incidentHeartbeatMs: args.incidentHeartbeatMs,
     maxRetries: args.modelRetries,
@@ -601,6 +611,7 @@ export function buildRunOptions(args, cwd, quiet) {
     maxToolTurns: args.maxToolTurns,
     maxRepeatToolErrors: args.maxRepeatToolErrors,
     requestTimeoutMs: args.requestTimeoutMs,
+    commandTimeoutMs: args.commandTimeoutMs,
     heartbeatMs: args.heartbeatMs,
     incidentHeartbeatMs: args.incidentHeartbeatMs,
     maxRetries: args.modelRetries,
@@ -689,6 +700,9 @@ export function parseArgs(argv) {
     // null so KODR_REQUEST_TIMEOUT_MS still reaches the resolver when the flag
     // isn't passed (same reasoning as maxRepeatToolErrors above).
     requestTimeoutMs: null,
+    // null so KODR_COMMAND_TIMEOUT_MS remains reachable when the CLI flag is
+    // omitted; the registry resolves option -> env -> shell default.
+    commandTimeoutMs: null,
     // null so KODR_GOAL_MAX_ATTEMPTS / KODR_LOOP_MAX_ATTEMPTS still reach
     // goalMaxAttempts()/loopMaxAttempts() when the flag isn't passed -- both
     // resolvers already fall through option -> env -> DEFAULT_MAX_ATTEMPTS
@@ -913,6 +927,11 @@ export function parseArgs(argv) {
     }
     if (arg === '--request-timeout-ms' && argv[i + 1]) {
       args.requestTimeoutMs = parseInt(argv[++i], 10);
+      i++;
+      continue;
+    }
+    if (arg === '--command-timeout-ms' && argv[i + 1]) {
+      args.commandTimeoutMs = parseInt(argv[++i], 10);
       i++;
       continue;
     }
@@ -1175,6 +1194,8 @@ Options:
   --request-timeout-ms <n>        Hard per-request timeout ceiling, independent of --max-run-ms,
                                   so a stalled backend fails one request instead of hanging
                                   (default: 600000 = 10 min, or KODR_REQUEST_TIMEOUT_MS)
+  --command-timeout-ms <n>        Timeout for each model-issued run_command
+                                  (default: 600000 = 10 min, or KODR_COMMAND_TIMEOUT_MS)
   --max-attempts <n>              For 'kodr goal': cap on build+judge iterations (default: 3,
                                   or KODR_GOAL_MAX_ATTEMPTS). For 'kodr loop': outer retries per
                                   plain task before parking (default: 3, or KODR_LOOP_MAX_ATTEMPTS)
@@ -1476,6 +1497,7 @@ export async function runReplay(args) {
     testCommand: prior.metadata.testCommand || undefined,
     maxHealTurns: prior.metadata.maxHealTurns,
     maxRunMs: prior.metadata.maxRunMs,
+    commandTimeoutMs: args.commandTimeoutMs ?? prior.metadata.commandTimeoutMs,
     maxToolTurns: prior.metadata.maxToolTurns,
     envPassthrough: prior.metadata.envPassthrough,
     contextWindow: prior.metadata.contextWindow,
@@ -1905,6 +1927,7 @@ export async function runAcpCommand(args) {
     maxToolTurns: args.maxToolTurns,
     maxRepeatToolErrors: args.maxRepeatToolErrors,
     requestTimeoutMs: args.requestTimeoutMs,
+    commandTimeoutMs: args.commandTimeoutMs,
     heartbeatMs: args.heartbeatMs,
     incidentHeartbeatMs: args.incidentHeartbeatMs,
     maxRetries: args.modelRetries,
