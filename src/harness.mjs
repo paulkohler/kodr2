@@ -3,6 +3,7 @@
  * context → model + tools → verify → heal
  */
 
+import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { commitFiles, commitTimeoutMs, isGitRepo } from './commit.mjs';
 import {
@@ -1087,7 +1088,7 @@ export function stopVerifyBudgetMs(startedAt, maxRunMs, reserveFraction) {
  * @param {import('./provider.mjs').Provider} params.client
  * @param {string} params.modelId
  * @param {Array} params.messages
- * @param {object} params.metadata
+ * @param {RunMetadata} params.metadata
  * @param {import('./reporter.mjs').Reporter} params.reporter
  * @param {Date} params.startedAt
  * @param {string} [params.runsDir]
@@ -1097,7 +1098,7 @@ export function stopVerifyBudgetMs(startedAt, maxRunMs, reserveFraction) {
  * @param {function} [params.onHeartbeat]
  * @param {function} [params.onDebug]
  * @param {AbortSignal} [params.signal]
- * @returns {Promise<object>} Run result
+ * @returns {Promise<RunResult>} Run result
  */
 async function runManualCompaction(params) {
   const { client, modelId, messages, metadata, reporter, startedAt } = params;
@@ -1577,21 +1578,34 @@ export function rawThenFixCommitsEnabled(option) {
   return env === '1' || env === 'true';
 }
 
-async function saveRun(runsDir, result, startedAt) {
+/**
+ * Persist one run without letting a same-millisecond completion overwrite it.
+ * @param {string} runsDir
+ * @param {RunResult} result
+ * @param {Date} startedAt
+ * @param {Date} [finishedAt]
+ * @returns {Promise<string>} Path written
+ */
+export async function saveRun(
+  runsDir,
+  result,
+  startedAt,
+  finishedAt = new Date(),
+) {
   const { mkdir, writeFile } = await import('node:fs/promises');
 
   await mkdir(runsDir, { recursive: true });
 
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const file = join(runsDir, `${timestamp}.json`);
+  const timestamp = finishedAt.toISOString().replace(/[:.]/g, '-');
+  const file = join(runsDir, `${timestamp}-${randomUUID().slice(0, 8)}.json`);
 
-  const finishedAt = new Date();
   const data = createRunRecord(result, {
     finishedAt: finishedAt.toISOString(),
     durationMs: finishedAt.getTime() - startedAt.getTime(),
   });
 
   await writeFile(file, JSON.stringify(data, null, 2), 'utf8');
+  return file;
 }
 
 export function createRunRecord(result, finish = {}) {

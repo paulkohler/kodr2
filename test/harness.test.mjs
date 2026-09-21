@@ -25,6 +25,7 @@ import {
   run,
   runCancelled,
   runReviewPass,
+  saveRun,
   stopVerifyBudgetMs,
   toLocalIso,
 } from '../src/harness.mjs';
@@ -160,6 +161,35 @@ describe('createRunRecord', () => {
       record.timestampLocal,
       /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2}$/,
     );
+  });
+});
+
+describe('saveRun', () => {
+  it('writes distinct records for runs finishing in the same millisecond', async () => {
+    const runsDir = await mkdtemp(join(tmpdir(), 'kodr-save-run-'));
+    const startedAt = new Date('2026-01-01T00:00:00.000Z');
+    const finishedAt = new Date('2026-01-01T00:00:01.000Z');
+    const result = {
+      filesChanged: [],
+      toolTurns: 0,
+      usage: { prompt: 0, completion: 0, cost: 0 },
+      messages: [],
+    };
+
+    try {
+      await Promise.all([
+        saveRun(runsDir, result, startedAt, finishedAt),
+        saveRun(runsDir, result, startedAt, finishedAt),
+      ]);
+
+      const files = await readdir(runsDir);
+      assert.equal(files.length, 2);
+      for (const file of files) {
+        assert.match(file, /^2026-01-01T00-00-01-000Z-[0-9a-f]{8}\.json$/);
+      }
+    } finally {
+      await rm(runsDir, { recursive: true, force: true });
+    }
   });
 });
 

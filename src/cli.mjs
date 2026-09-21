@@ -61,6 +61,9 @@ import { failOnReviewEnabled, reviewBlocks } from './review.mjs';
 import { computeStats, loadRunRecords } from './stats.mjs';
 import { MAX_TOOL_TURNS } from './tool-loop.mjs';
 
+const RUN_RECORD_FILENAME =
+  /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z(?:-[0-9a-f]{8})?\.json$/i;
+
 /**
  * @typedef {object} CliArgs
  * @property {string|null} command
@@ -1984,9 +1987,7 @@ export async function loadPriorRun(cwd, ref, runsDir) {
   if (ref === 'last') {
     const runDir = runsDir || join(cwd, '.kodr', 'runs');
     try {
-      const files = (await readdir(runDir))
-        .filter((f) => f.endsWith('.json'))
-        .sort();
+      const files = (await readdir(runDir)).filter(isRunRecordFilename).sort();
       if (files.length === 0) {
         return null;
       }
@@ -2009,13 +2010,24 @@ export async function loadPriorRun(cwd, ref, runsDir) {
 
 function withoutSystemMessages(data) {
   if (!Array.isArray(data.messages)) {
-    return data;
+    return null;
   }
   const messages = data.messages.filter((message) => message.role !== 'system');
   return {
     ...data,
     messages: sanitizePriorMessages(messages),
   };
+}
+
+/**
+ * Generated run records have always been timestamp-first; newer ones add a
+ * short UUID suffix. Positive matching keeps incidents, heartbeats, and other
+ * JSON sidecars out of `--continue last` without relying on sort quirks.
+ * @param {string} name
+ * @returns {boolean}
+ */
+export function isRunRecordFilename(name) {
+  return RUN_RECORD_FILENAME.test(name);
 }
 
 /**

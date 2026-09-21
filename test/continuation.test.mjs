@@ -20,8 +20,11 @@ describe('loadPriorRun', () => {
   it('loads the latest run and strips system messages', async () => {
     const runDir = join(tmpDir, '.kodr', 'runs');
     await mkdir(runDir, { recursive: true });
-    await writeRun(join(runDir, '2026-01.json'), 'old');
-    await writeRun(join(runDir, '2026-02.json'), 'new');
+    await writeRun(join(runDir, '2026-01-01T00-00-00-000Z.json'), 'old');
+    await writeRun(
+      join(runDir, '2026-02-01T00-00-00-000Z-1234abcd.json'),
+      'new',
+    );
 
     const result = await loadPriorRun(tmpDir, 'last');
     assert.deepEqual(result.messages, [{ role: 'user', content: 'new' }]);
@@ -35,6 +38,48 @@ describe('loadPriorRun', () => {
 
   it('returns null when no run exists', async () => {
     assert.equal(await loadPriorRun(tmpDir, 'last'), null);
+  });
+
+  it('ignores newer incident and heartbeat records when resolving last', async () => {
+    const runDir = join(tmpDir, '.kodr', 'runs');
+    await mkdir(runDir, { recursive: true });
+    await writeRun(join(runDir, '2026-01-01T00-00-00-000Z.json'), 'real run');
+    await writeFile(
+      join(runDir, '2026-12-01T00-00-00-000Z-deadbeef.incident.json'),
+      JSON.stringify({ type: 'uncaughtException' }),
+    );
+    await writeFile(
+      join(runDir, '.heartbeat-123.json'),
+      JSON.stringify({ pid: 123 }),
+    );
+
+    const result = await loadPriorRun(tmpDir, 'last');
+
+    assert.equal(result.messages[0].content, 'real run');
+  });
+
+  it('returns null when only non-run JSON records exist', async () => {
+    const runDir = join(tmpDir, '.kodr', 'runs');
+    await mkdir(runDir, { recursive: true });
+    await writeFile(
+      join(runDir, '2026-12-01T00-00-00-000Z-deadbeef.incident.json'),
+      JSON.stringify({ type: 'uncaughtException' }),
+    );
+    await writeFile(
+      join(runDir, '.heartbeat-123.json'),
+      JSON.stringify({ pid: 123 }),
+    );
+
+    assert.equal(await loadPriorRun(tmpDir, 'last'), null);
+  });
+
+  it('returns null for an explicit JSON record with no messages array', async () => {
+    await writeFile(
+      join(tmpDir, 'incident.json'),
+      JSON.stringify({ type: 'uncaughtException' }),
+    );
+
+    assert.equal(await loadPriorRun(tmpDir, 'incident.json'), null);
   });
 
   it('drops a dangling trailing assistant tool call', async () => {

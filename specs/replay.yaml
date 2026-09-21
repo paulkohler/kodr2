@@ -39,7 +39,8 @@ outputs:
 constraints:
   - >
     Resolves ref with the exact same "last"/path logic as --continue (reuses cli.mjs's
-    loadPriorRun), so a stale/missing run file or corrupt JSON fails the same way for both
+    loadPriorRun), so incident/heartbeat filtering and a stale, missing, corrupt,
+    or non-run JSON file fail the same way for both
   - >
     Replays with an empty conversation -- unlike --continue, no prior messages are carried
     over, so the replayed run's system prompt and workspace listing are assembled fresh

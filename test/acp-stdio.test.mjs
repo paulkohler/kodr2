@@ -101,7 +101,7 @@ describe('kodr acp stdio transport', () => {
     try {
       await mkdir(join(ws, '.kodr', 'runs'), { recursive: true });
       await writeFile(
-        join(ws, '.kodr', 'runs', '2025-01-01T00-00-00.json'),
+        join(ws, '.kodr', 'runs', '2025-01-01T00-00-00-000Z.json'),
         JSON.stringify({
           messages: [
             { role: 'user', content: 'earlier' },

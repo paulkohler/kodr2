@@ -198,6 +198,11 @@ constraints:
     per the operational-limits rule. Denied calls (approval/PreToolUse) are the
     operator's choice, not a malformed model call, so they are excluded.
   - Run transcript saved to .kodr/runs/ after every run; the location is overridable (--runs-dir / KODR_RUNS_DIR) and saving can be disabled (--no-save / KODR_NO_SAVE) so a benchmark/container run keeps the task workspace clean
+  - >
+    Run transcript filenames are timestamp-first with an eight-character UUID
+    suffix. The suffix prevents two runs finishing in the same millisecond from
+    silently overwriting each other while preserving chronological lexical sort;
+    legacy timestamp-only records remain readable
   - Run transcript saved even when model requests fail after run metadata is available
   - A model request that fails mid-loop preserves the usage, tool turns, compactions, and retries accumulated in earlier turns on the saved record (they are carried on the thrown error), rather than being booked as toolTurns 0 / cost 0 -- so a run that did real paid work before failing reports it accurately
   - Run transcript includes model, prompt, cwd, baseUrl, test command, env passthrough, start time, finish time, and duration
@@ -277,6 +282,7 @@ tests:
     - heal forwards heartbeatMs and onHeartbeat to the model client's chat call
     - compaction forwards heartbeatMs and onHeartbeat to the summary chat call
     - run records include metadata and duration
+    - two run saves with the same finish timestamp create distinct files
     - run records include the tool schemas offered to the model, null when none were offered
     - run records persist the review verdict, grounded flag, and findings
     - run records leave review null when no review pass ran

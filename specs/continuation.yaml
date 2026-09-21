@@ -18,7 +18,14 @@ outputs:
 constraints:
   - Loads from .kodr/runs/ directory
   - >
-    "last" picks the most recent run by filename sort
+    "last" picks the most recent generated run record by filename sort,
+    accepting both legacy timestamp-only names and timestamp-plus-UUID names.
+    Incident records and heartbeat files are not candidates even though they
+    also live in the runs directory and use JSON
+  - >
+    A selected file must contain a messages array. A directory containing only
+    non-run JSON, or an explicit ref to a record without messages, resolves to
+    null rather than silently seeding a fresh conversation
   - System messages from prior run are stripped (fresh system prompt assembled)
   - >
     A trailing assistant tool_calls message is retained only when immediately
@@ -33,6 +40,9 @@ tests:
     - loads most recent run with "last" ref
     - loads specific run by file path
     - returns null when no runs exist
+    - ignores a newer incident record and heartbeat when resolving "last"
+    - returns null when the directory contains only non-run JSON records
+    - returns null for an explicit record with no messages array
     - strips system messages from loaded transcript
     - drops a dangling trailing assistant tool call
     - drops an incomplete multi-call group together with its partial results
