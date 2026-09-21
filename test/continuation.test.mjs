@@ -36,14 +36,66 @@ describe('loadPriorRun', () => {
   it('returns null when no run exists', async () => {
     assert.equal(await loadPriorRun(tmpDir, 'last'), null);
   });
+
+  it('drops a dangling trailing assistant tool call', async () => {
+    const path = join(tmpDir, 'dangling.json');
+    await writeRecord(path, [
+      { role: 'user', content: 'do work' },
+      assistantCalls('call-1'),
+    ]);
+
+    const result = await loadPriorRun(tmpDir, 'dangling.json');
+
+    assert.deepEqual(result.messages, [{ role: 'user', content: 'do work' }]);
+  });
+
+  it('drops an incomplete multi-call group with its partial results', async () => {
+    const path = join(tmpDir, 'partial.json');
+    await writeRecord(path, [
+      { role: 'user', content: 'do work' },
+      assistantCalls('call-1', 'call-2'),
+      { role: 'tool', tool_call_id: 'call-1', content: '{"ok":true}' },
+    ]);
+
+    const result = await loadPriorRun(tmpDir, 'partial.json');
+
+    assert.deepEqual(result.messages, [{ role: 'user', content: 'do work' }]);
+  });
+
+  it('preserves a complete assistant tool-call group and its results', async () => {
+    const path = join(tmpDir, 'complete.json');
+    const messages = [
+      { role: 'user', content: 'do work' },
+      assistantCalls('call-1', 'call-2'),
+      { role: 'tool', tool_call_id: 'call-1', content: '{"ok":true}' },
+      { role: 'tool', tool_call_id: 'call-2', content: '{"ok":true}' },
+    ];
+    await writeRecord(path, messages);
+
+    const result = await loadPriorRun(tmpDir, 'complete.json');
+
+    assert.deepEqual(result.messages, messages);
+  });
 });
 
 async function writeRun(path, content) {
-  const data = {
-    messages: [
-      { role: 'system', content: 'stale' },
-      { role: 'user', content },
-    ],
+  await writeRecord(path, [
+    { role: 'system', content: 'stale' },
+    { role: 'user', content },
+  ]);
+}
+
+async function writeRecord(path, messages) {
+  await writeFile(path, JSON.stringify({ messages }));
+}
+
+function assistantCalls(...ids) {
+  return {
+    role: 'assistant',
+    content: '',
+    tool_calls: ids.map((id) => ({
+      id,
+      function: { name: 'read_file', arguments: '{"path":"a.txt"}' },
+    })),
   };
-  await writeFile(path, JSON.stringify(data));
 }

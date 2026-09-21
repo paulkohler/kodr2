@@ -20,6 +20,12 @@ constraints:
   - >
     "last" picks the most recent run by filename sort
   - System messages from prior run are stripped (fresh system prompt assembled)
+  - >
+    A trailing assistant tool_calls message is retained only when immediately
+    followed by tool results covering every call id. An incomplete call group,
+    including any partial results from a multi-call message, is dropped before
+    continuation so an old interrupted transcript cannot make the provider
+    reject the conversation shape
   - Falls back to null if no prior run found
 
 tests:
@@ -28,3 +34,6 @@ tests:
     - loads specific run by file path
     - returns null when no runs exist
     - strips system messages from loaded transcript
+    - drops a dangling trailing assistant tool call
+    - drops an incomplete multi-call group together with its partial results
+    - preserves a complete assistant tool-call group and all matching results

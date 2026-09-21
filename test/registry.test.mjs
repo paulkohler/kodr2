@@ -82,6 +82,26 @@ describe('createToolRegistry', () => {
     assert.equal(result.content, 'hello');
   });
 
+  it('turns a throwing tool implementation into a recoverable error result', async () => {
+    await writeFile(join(tmpDir, 'test.txt'), 'hello');
+    const backend = {
+      readTextFile() {
+        throw new Error('stub backend exploded');
+      },
+      async writeTextFile() {
+        return {};
+      },
+      async runCommand() {
+        return { stdout: '', stderr: '', exitCode: 0 };
+      },
+    };
+    const registry = createToolRegistry(tmpDir, { backend });
+
+    const result = await registry.dispatch('read_file', { path: 'test.txt' });
+
+    assert.deepEqual(result, { error: 'stub backend exploded' });
+  });
+
   it('returns error for unknown tools', async () => {
     const registry = createToolRegistry(tmpDir);
     const result = /** @type {any} */ (

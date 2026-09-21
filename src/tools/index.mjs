@@ -175,7 +175,11 @@ export function createToolRegistry(cwd, options = {}) {
       if (!isPlainObject(args)) {
         return { error: 'tool arguments must be a JSON object' };
       }
-      return tool.execute(args, context);
+      try {
+        return await tool.execute(args, context);
+      } catch (err) {
+        return { error: toolErrorMessage(err) };
+      }
     },
 
     /**
@@ -209,4 +213,17 @@ function isPlainObject(value) {
     return false;
   }
   return !Array.isArray(value);
+}
+
+/**
+ * Tool implementations are module boundaries and must report failures as
+ * values. Keep the registry total even when a tool violates that contract.
+ * @param {unknown} err
+ * @returns {string}
+ */
+function toolErrorMessage(err) {
+  if (err instanceof Error && err.message) {
+    return err.message;
+  }
+  return String(err || 'tool execution failed');
 }

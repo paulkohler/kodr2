@@ -2011,8 +2011,54 @@ function withoutSystemMessages(data) {
   if (!Array.isArray(data.messages)) {
     return data;
   }
+  const messages = data.messages.filter((message) => message.role !== 'system');
   return {
     ...data,
-    messages: data.messages.filter((message) => message.role !== 'system'),
+    messages: sanitizePriorMessages(messages),
   };
+}
+
+/**
+ * Remove an interrupted native tool-call suffix from a saved conversation.
+ * A provider expects every assistant tool call to have a matching tool result;
+ * an older run could violate that shape when a tool implementation threw.
+ * @param {Array<any>} messages
+ * @returns {Array<any>}
+ */
+export function sanitizePriorMessages(messages) {
+  for (let index = 0; index < messages.length; index++) {
+    const message = messages[index];
+    if (message?.role !== 'assistant' || !Array.isArray(message.tool_calls)) {
+      continue;
+    }
+    if (message.tool_calls.length === 0) {
+      continue;
+    }
+
+    const callIds = message.tool_calls.map((call) => call?.id);
+    const expected = new Set(callIds);
+    if (
+      callIds.some((id) => typeof id !== 'string' || id.length === 0) ||
+      expected.size !== callIds.length
+    ) {
+      return messages.slice(0, index);
+    }
+    const found = new Set();
+    let invalidResult = false;
+    let resultIndex = index + 1;
+    while (messages[resultIndex]?.role === 'tool') {
+      const toolCallId = messages[resultIndex].tool_call_id;
+      if (!expected.has(toolCallId) || found.has(toolCallId)) {
+        invalidResult = true;
+      } else {
+        found.add(toolCallId);
+      }
+      resultIndex++;
+    }
+    if (invalidResult || found.size !== expected.size) {
+      return messages.slice(0, index);
+    }
+    index = resultIndex - 1;
+  }
+  return messages;
 }
