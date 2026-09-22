@@ -23,16 +23,18 @@ cd /path/to/your/project
 
 ```markdown
 <!-- TASKS.md -->
-- [ ] Add Company (name, domain) and Contact (name, email, company_id) with
-      full CRUD. Validate input with clear 400s for missing fields and
-      malformed email. Add tests per route.
+- [ ] Add Company (name, domain) CRUD routes with input validation and tests.
+- [ ] Add Contact (name, email, company_id) CRUD routes with validation and tests.
 - [ ] GOAL: every endpoint has an owner check and the README documents all of them
 ```
 
 ```bash
 git add -A && git commit -m "checklist"   # the loop needs a baseline to reset to
-nohup kodr loop --test "npm test" >loop.out 2>&1 & disown
+nohup kodr loop --test "npm test" >../kodr-loop.out 2>&1 & disown
 ```
+
+The example writes the log outside the workspace so task cleanup cannot remove it.
+Choose a unique log path if you run multiple loops.
 
 Commit the checklist first — a park runs `git reset --hard` + `git clean -fd`,
 and with nothing tracked yet that deletes every untracked file, the checklist
@@ -100,10 +102,10 @@ the verdict, so one file answers "which tasks did the reviewer block?"
 
 Two things matter more here than anywhere. The model-load cost, since a loop
 pays it per attempt — see
-[Keeping both models resident](usage.md#keeping-both-models-resident). And
+[Keeping both models resident](review.md#keeping-both-models-resident). And
 the reviewer's willingness to open files, since an unattended loop has nobody
 to notice it isn't: check `grounded` in `kodr stats` before letting a verdict
-park anything. See [Choosing a reviewer](usage.md#choosing-a-reviewer).
+park anything. See [Choosing a reviewer](review.md#choosing-a-reviewer).
 
 ## Flags
 
@@ -184,7 +186,7 @@ it reproduces.
   `--test` is the primary answer, and `--review-model … --fail-on-review` is
   the second one: a reviewer reading that diff has every chance of catching
   it, and it also covers what a thin test suite passes over. See
-  [§10 of the usage guide](usage.md#10-a-second-pair-of-eyes----review-model).
+  [Code review](review.md).
 - **A no-op "complete" still parks.** A model can call no tools at all, or
   reply as if it finished without touching a file — some providers'
   tool-calling is unreliable enough that this happens (seen live: a model

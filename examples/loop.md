@@ -1,10 +1,9 @@
 # Looping Kodr over a backlog
 
-Kodr is a one-shot harness — one `kodr run` is one task. To make it work
-*continuously*, you wrap it in an outer loop. Kodr deliberately doesn't build the
-loop in (zero runtime deps, one job done well); instead it exposes the seams a
-loop needs, and the loop is an ordinary shell script. [`loop.sh`](./loop.sh) is a
-runnable one.
+One `kodr run` handles one task. For a backlog, start with the built-in
+[`kodr loop`](../docs/loop.md) command. This page documents
+[`loop.sh`](./loop.sh), the alternative shell-script driver, for developers
+who want to read and customize the orchestration themselves.
 
 The same ratchet also ships as a first-class subcommand, `kodr loop`
 (specs/loop.yaml) — no `jq`/bash >= 4.4 dependency, a `.kodr/loops/`
