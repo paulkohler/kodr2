@@ -117,11 +117,37 @@ function providerDisplayName(providerName) {
   return 'LM Studio';
 }
 
-function describeConnectionError(err, displayName) {
-  if (err.code === 'ECONNREFUSED') {
-    return `connection refused -- is ${displayName} running?`;
+/** Describe connection failures, including Node's nested/aggregate errors. */
+export function describeConnectionError(err, displayName) {
+  const reason = connectionErrorReason(err);
+  if (displayName === 'OpenRouter') {
+    return `${reason} -- check the API URL, network connection, and API key.`;
   }
-  return err.message;
+  return `${reason} -- is ${displayName} running? Start its API server and check the host and port above (or set --base-url).`;
+}
+
+function connectionErrorReason(err) {
+  const pending = [err];
+  const seen = new Set();
+  let message = '';
+  while (pending.length > 0) {
+    const error = pending.shift();
+    if (!error || seen.has(error)) {
+      continue;
+    }
+    seen.add(error);
+    if (error.code === 'ECONNREFUSED') {
+      return 'connection refused';
+    }
+    if (!message && typeof error.message === 'string') {
+      message = error.message.trim();
+    }
+    pending.push(error.cause);
+    if (Array.isArray(error.errors)) {
+      pending.push(...error.errors);
+    }
+  }
+  return message || 'connection failed';
 }
 
 async function checkModel(client) {
@@ -130,12 +156,17 @@ async function checkModel(client) {
     return {
       name: 'model',
       status: 'warn',
-      detail: 'no models available from the provider',
+      detail:
+        'no models available from the provider -- load a tool-capable model and rerun doctor',
     };
   }
   try {
     const modelId = await client.resolveModel();
-    return { name: 'model', status: 'ok', detail: modelId };
+    return {
+      name: 'model',
+      status: 'ok',
+      detail: `${modelId} (tool calling not tested)`,
+    };
   } catch (err) {
     return { name: 'model', status: 'warn', detail: err.message };
   }

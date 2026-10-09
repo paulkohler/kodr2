@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { afterEach, describe, it } from 'node:test';
 
-import { checkNodeVersion, runDoctorChecks } from '../src/doctor.mjs';
+import {
+  checkNodeVersion,
+  describeConnectionError,
+  runDoctorChecks,
+} from '../src/doctor.mjs';
 
 const servers = [];
 
@@ -104,6 +108,7 @@ describe('runDoctorChecks', () => {
     const report = await runDoctorChecks({ baseUrl, gitCheckFn: okGitCheck });
     const model = report.checks.find((c) => c.name === 'model');
     assert.equal(model.status, 'warn');
+    assert.match(model.detail, /load a tool-capable model and rerun doctor/);
     assert.equal(report.ok, true);
   });
 
@@ -116,7 +121,7 @@ describe('runDoctorChecks', () => {
     const report = await runDoctorChecks({ baseUrl, gitCheckFn: okGitCheck });
     const model = report.checks.find((c) => c.name === 'model');
     assert.equal(model.status, 'ok');
-    assert.equal(model.detail, 'qwen/coder');
+    assert.equal(model.detail, 'qwen/coder (tool calling not tested)');
   });
 
   it('reports which provider it checked', async () => {
@@ -213,5 +218,41 @@ describe('runDoctorChecks', () => {
       gitCheckFn: missingGitCheck,
     });
     assert.equal(withFail.ok, false);
+  });
+});
+
+describe('connection diagnostics', () => {
+  it('gives an actionable fallback for an empty aggregate error', () => {
+    const detail = describeConnectionError(new AggregateError([]), 'LM Studio');
+    assert.match(detail, /connection failed/);
+    assert.match(detail, /Start its API server/);
+    assert.match(detail, /host and port/);
+    assert.match(detail, /--base-url/);
+  });
+
+  it('recognizes connection refusal in nested aggregate errors', () => {
+    const refused = Object.assign(new Error('connect failed'), {
+      code: 'ECONNREFUSED',
+    });
+    const error = new Error('fetch failed', {
+      cause: new AggregateError([refused]),
+    });
+    const detail = describeConnectionError(error, 'LM Studio');
+    assert.match(detail, /connection refused -- is LM Studio running\?/);
+  });
+
+  it('preserves useful server errors and gives hosted provider guidance', () => {
+    const detail = describeConnectionError(new Error('HTTP 401'), 'OpenRouter');
+    assert.match(detail, /HTTP 401/);
+    assert.match(detail, /API URL, network connection, and API key/);
+    assert.doesNotMatch(detail, /Start its API server/);
+  });
+
+  it('handles cyclic causes without losing the original error', () => {
+    const error = new Error('request timed out', { cause: undefined });
+    error.cause = error;
+    const detail = describeConnectionError(error, 'Ollama');
+    assert.match(detail, /request timed out/);
+    assert.match(detail, /is Ollama running\?/);
   });
 });
