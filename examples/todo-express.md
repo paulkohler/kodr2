@@ -13,18 +13,19 @@ the workspace grow.
 
 ## Setup
 
-Pick the model once with an environment variable so the run commands below stay
-terse, and work in a throwaway directory:
+With `kodr` installed and a tool-capable model loaded in LM Studio, create a
+throwaway directory outside the Kodr checkout:
 
 ```bash
-export KODR_MODEL=google/gemma-4-26b-a4b
-mkdir -p /Users/paul/src/kodr2-testing
-cd /Users/paul/src/kodr2-testing
+mkdir kodr-todo-demo
+cd kodr-todo-demo
+kodr doctor
 ```
 
-`export KODR_MODEL=...` is equivalent to passing `--model google/gemma-4-26b-a4b`
-on every call; `--model` would win if you set both. With the export in place,
-each `kodr` invocation is just the prompt.
+Kodr selects a model automatically by default. To choose one explicitly, run
+`kodr models`, then optionally set `export KODR_MODEL=your-model-id` using an
+ID from that list. A `--model` option overrides the environment variable.
+You do not need the specific model used in the captured run above.
 
 ## Turn 1 — scaffold the app
 

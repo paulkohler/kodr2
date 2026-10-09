@@ -1,0 +1,24 @@
+name: first-run quickstart
+status: implemented
+description: >
+  Give a first-time GitHub visitor a self-contained coding task that runs
+  directly from a clone with Node.js 22+ and a tool-capable LM Studio model.
+
+constraints:
+  - The README explains the agent and leads with a copyable clone-and-run demo.
+  - No npm installation, build, global executable, or external demo dependencies are required.
+  - The demo workspace is examples/quickstart, selected explicitly with --cwd.
+  - The demo contains a deliberately broken slugify function and fixed node:test tests.
+  - The task asks the model to fix the function without changing the tests.
+  - Expected success is all demo tests passing and an inspectable function diff.
+  - The README explains doctor checks connectivity and model selection, not tool calling.
+  - Installation for use on other projects follows the demo.
+  - The Express walkthrough uses a relative directory and optional model selection.
+
+tests:
+  manual:
+    - The shipped demo tests fail on the deliberately broken function.
+    - The same tests pass with a correct implementation in a temporary copy.
+    - The documented doctor and direct CLI help commands run without npm installation.
+  eval:
+    - With LM Studio available, the documented task fixes the demo and passes its unchanged tests.

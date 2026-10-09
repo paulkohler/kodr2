@@ -8,20 +8,42 @@ LM Studio, Ollama, and OpenRouter. Node.js 22+, zero runtime dependencies.
 
 ## Quick start
 
-You need **Node.js 22+** and a model that supports tool calling. For the
+You need **Node.js 22+**, **Git**, and a model that supports tool calling. For the
 default setup, load a tool-capable model in **LM Studio** and start its local
 API server on port **1234**. Using Ollama or OpenRouter instead?
 See [provider setup](docs/providers.md).
 
-Install Kodr:
+Try the included bug-fixing demo directly from a clone. No npm install or
+build step is needed:
+
+```bash
+git clone https://github.com/paulkohler/kodr2.git
+cd kodr2
+node bin/kodr.mjs doctor
+node bin/kodr.mjs "Fix the bug in slugify.mjs without changing the tests" --cwd examples/quickstart --test "node --test"
+git diff -- examples/quickstart
+```
+
+The demo turns titles into URL slugs: `Hello, World!` should become
+`hello-world`. Its function is deliberately broken. Kodr reads the files,
+edits the function, and runs the six provided tests. **Success means all six
+tests pass and the diff shows the function fixed with the tests unchanged.**
+You can check the tests yourself with `node --test examples/quickstart/slugify.test.mjs`.
+See the [demo guide](examples/quickstart/README.md) to inspect the initial
+failure or reset it for another try.
+
+`doctor` checks connectivity and model selection; it does not test tool
+calling. If it cannot connect, start LM Studio's API server and check port
+1234. For another address, pass `--base-url http://HOST:PORT/v1` to both
+commands. If it selects the wrong model, use `node bin/kodr.mjs models`
+and pass `--model MODEL_ID` to both commands.
+
+## Use it on your project
+
+Install the `kodr` command, then switch to the project you want to change:
 
 ```bash
 npm install -g github:paulkohler/kodr2
-```
-
-Then switch to the project you want to work on:
-
-```bash
 cd /path/to/your/project
 kodr doctor
 kodr "fix the failing test" --test "npm test"
@@ -39,7 +61,8 @@ For per-command approval while working interactively:
 kodr tui --approve-commands --test "npm test"
 ```
 
-Prefer running from a clone? See [installation from source](docs/usage.md#install-from-source).
+To keep using your clone, run `node bin/kodr.mjs "your task" --cwd /path/to/your/project`
+from the Kodr directory, or [install a command for your clone](docs/usage.md#install-from-source).
 
 ## Keep working
 

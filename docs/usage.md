@@ -14,13 +14,17 @@ For all commands and flags, run `kodr --help`.
 
 ## Install from source
 
-As an alternative to the npm installation in the README:
+The [quick start](../README.md#quick-start) runs directly from a clone without
+installation. To also put that clone's `kodr` command on your PATH:
 
 ```bash
 git clone https://github.com/paulkohler/kodr2.git
 cd kodr2
 npm run install-local
 ```
+
+If you already cloned the repository for the demo, just run
+`npm run install-local` from that checkout.
 
 This writes a shim to `~/.local/bin/kodr`; ensure `~/.local/bin` is on your
 `PATH`. The shim uses this checkout, so keep it in place. No `npm install`
