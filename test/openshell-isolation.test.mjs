@@ -222,6 +222,28 @@ describe('kodr-shell round trip', () => {
   });
 });
 
+describe('kodr-shell policy file', () => {
+  it('actually writes the policy to a real temp file', () => {
+    // This is the regression guard for a shipped bug: the policy was written
+    // with `mktemp .../kodr-shell-policy.XXXXXX.yaml`, and BSD/macOS mktemp
+    // requires the Xs at the END of the template, so every real run died with
+    // "mkstemp failed ... File exists". 24 dry-run tests missed it because
+    // dry-run short-circuited the write. Dry-run now goes through the same
+    // path, so this test covers it.
+    const { out, code } = dryRun(['run', 'x']);
+    assert.equal(code, 0);
+    assert.doesNotMatch(out, /mkstemp failed|mktemp:/);
+    const match = out.match(/--- generated policy \(([^)]+)\) ---/);
+    assert.ok(match, 'dry-run should name the policy file it wrote');
+    assert.match(match[1], /\/policy\.yaml$/, 'keeps a .yaml name');
+    // the path it names is the one handed to --policy
+    assert.ok(
+      out.includes(`--policy ${match[1]}`),
+      'the generated file is the one passed to sandbox create',
+    );
+  });
+});
+
 describe('kodr-shell dry-run is inert', () => {
   it('prints the policy and the commands while invoking nothing', () => {
     // KODR_SHELL_OPENSHELL is a path that does not exist, so a real

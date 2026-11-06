@@ -150,16 +150,22 @@ POLICY
   fi
 }
 
+# mktemp -d, not mktemp with a template: BSD/macOS mktemp requires the Xs at
+# the end of the template, so `kodr-shell-policy.XXXXXX.yaml` fails outright
+# with "mkstemp failed ... File exists". A directory keeps the .yaml name.
+# Dry-run writes the file through this same path rather than short-circuiting
+# it, so the dry-run tests actually exercise the write -- skipping it here is
+# what let that mktemp bug ship past 24 green tests.
+policy_dir=""
 policy_file="$POLICY_OVERRIDE"
 if [ -z "$policy_file" ]; then
+  policy_dir="$(mktemp -d "${TMPDIR:-/tmp}/kodr-shell.XXXXXX")"
+  policy_file="$policy_dir/policy.yaml"
+  generate_policy >"$policy_file"
   if [ "$DRYRUN" = 1 ]; then
-    policy_file="${TMPDIR:-/tmp}/kodr-shell-policy.yaml"
     echo "--- generated policy ($policy_file) ---"
-    generate_policy
+    cat "$policy_file"
     echo "--- end policy ---"
-  else
-    policy_file="$(mktemp "${TMPDIR:-/tmp}/kodr-shell-policy.XXXXXX.yaml")"
-    generate_policy >"$policy_file"
   fi
 fi
 
@@ -173,6 +179,7 @@ emit() {
 }
 
 cleanup() {
+  if [ -n "$policy_dir" ]; then rm -rf "$policy_dir"; fi
   if [ "$DRYRUN" = 1 ] || [ "$KEEP" = 1 ]; then return; fi
   "$OPENSHELL" sandbox delete "$SANDBOX_NAME" >/dev/null 2>&1 || true
 }
