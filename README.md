@@ -91,6 +91,7 @@ up. Read the [backlog guide](docs/loop.md) before an unattended run.
 | Tune limits, inspect runs, or manage memory | [Run management](docs/runs.md) |
 | Work through a backlog | [Unattended loops](docs/loop.md) |
 | Connect Kodr to an editor | [Editor integration](docs/acp.md) |
+| Sandbox an unattended run | [OpenShell isolation](docs/openshell-isolation.md) |
 | Follow a complete example | [Build a TODO API](examples/todo-express.md) |
 
 Run `kodr --help` for the complete command and flag reference.

@@ -1,5 +1,5 @@
 name: openshell isolation wrapper
-status: accepted
+status: implemented
 description: >
   A scripts/kodr-shell.sh wrapper that runs a local Kodr checkout inside an
   NVIDIA OpenShell sandbox. Kodr's run_command tool runs arbitrary /bin/sh -c
@@ -283,6 +283,19 @@ constraints:
     asymmetry that upload nests under DEST/<basename> while download writes
     the contents straight into the local path
   - >
+    The policy is generated per run rather than shipped as a fixture, so it
+    cannot disagree with the injected base URL: overriding the host alias or
+    the port has to move the allowed endpoint too, or egress is denied in a way
+    that reads exactly like a bad base URL. KODR_SHELL_POLICY overrides it with
+    a file for hand-tuning
+  - >
+    The image pins a node tag carrying the fix for CVE-2026-111497, the
+    out-of-bounds write in Brotli's decoder reachable through node:zlib. Kodr's
+    own code never decompresses anything -- there is no zlib, brotli or http2
+    anywhere in the repo, and node:http sends no Accept-Encoding -- but
+    run_command spawns a shell and a model-run script might, so the sandbox
+    should not be the weakest Node on the machine
+  - >
     The sandbox image must contain procps. shell.mjs shells out to
     `ps -Ao pid,ppid` to find a timed-out command's descendants; without it
     the orphan kill degrades to signalling only the direct /bin/sh child and a
@@ -335,29 +348,37 @@ constraints:
 
 deliverables:
   - scripts/kodr-shell.sh
+  - docker/openshell/Dockerfile
   - specs/openshell-isolation.yaml
   - test/openshell-isolation.test.mjs
   - docs/openshell-isolation.md
 
 tests:
   unit:
-    - dry-run injects lmstudio base-url at host.openshell.internal:1234 by default
-    - dry-run injects ollama base-url at :11434 when --provider ollama
-    - dry-run does not inject --base-url when the caller passes one
-    - dry-run does not inject --base-url for --provider openrouter
-    - dry-run uploads the Kodr checkout and never emits an install step
-    - uploaded paths are computed as DEST/basename, matching --upload semantics
+    - injects the lmstudio base-url at the host alias by default
+    - injects the ollama port when --provider ollama
+    - accepts --provider=ollama in equals form too
+    - does not inject a base-url when the caller passes one
+    - never injects a base-url for openrouter
     - the generated policy carries exactly one network rule in locked mode
-    - the generated policy's rule names the node path under binaries
-    - the node path defaults to /usr/local/bin/node and is overridable
-    - open mode additionally allows the provider's public host
-    - dry-run attaches a provider record by name and forwards no secret value
-    - the workspace and the checkout both resolve under the sandbox root
-    - dry-run omits --no-keep when KODR_SHELL_KEEP=1 and emits a download when KODR_SHELL_DOWNLOAD=1
-    - dry-run injects --cwd for the workspace unless the caller passes --cwd
-    - dry-run forwards the prompt and passthrough args unchanged
-    - KODR_SHELL_* overrides reach the assembled commands (sandbox, host, ports, node path, timeout)
-    - dry-run prints the policy and commands and invokes neither openshell nor docker
+    - the policy scopes its rule to the node binary
+    - the node path defaults to /usr/local/bin/node and honours an override
+    - the allowed endpoint moves with the host and port overrides
+    - open mode adds the provider's public host
+    - the workspace stays writable through include_workdir
+    - uploads the checkout and the workspace, and never installs anything
+    - both uploads pass --no-git-ignore so .git survives for the loop
+    - sandbox paths are computed as root/basename, matching upload semantics
+    - injects --cwd unless the caller passes one
+    - forwards the prompt and passthrough args unchanged
+    - passes the git identity as environment, not a config write
+    - attaches a provider record by name, forwarding no secret value
+    - emits a docker build only when asked
+    - holds the sandbox open with a configurable keepalive
+    - emits a download when keeping the sandbox
+    - refuses a download that would be deleted with the sandbox
+    - emits no download by default
+    - dry-run prints the policy and commands while invoking nothing
   eval:
     - kodr doctor passes inside the sandbox against the host model server
     - a locked run completes a read/edit/verify task in the sandbox workspace
