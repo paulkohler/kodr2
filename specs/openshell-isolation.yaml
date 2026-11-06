@@ -57,7 +57,14 @@ validation: >
   identical URL was still refused, and Landlock still denied /usr and
   /var/tmp while /tmp stayed writable. The per-binary guarantee therefore
   survives the 0.0 -> 0.1 jump; the mechanism behind it does not, see the
-  egress constraint.
+  egress constraint. The round trip and `kodr loop` were then validated on
+  0.1.7 against a git fixture: a four-task checklist ran unattended to
+  backlog-empty, every task marked `- [x] `, and the download returned a
+  repo whose `git log` carried four `kodr: ` commits over the baseline with
+  a clean `git status`, clean `git fsck` and a passing suite. Clean
+  termination was observed on all three exits (backlog-empty, budget,
+  parked). That run also surfaced BACKLOG #8, a host-side park-path bug
+  unrelated to the sandbox.
 
 inputs:
   args:
@@ -228,12 +235,17 @@ constraints:
     is on by default, which is correct here -- node_modules/ is gitignored and
     not needed
   - >
-    Only /sandbox and /tmp are writable under the default filesystem policy,
-    so both the Kodr checkout and the task workspace must live under
-    /sandbox. Writes to /usr, /etc, /root, /var/tmp and the run-as user's own
-    home are denied; /var/tmp is mode 1777 and the home directory is owned by
-    that user, so these are Landlock denials and no amount of chmod changes
-    them
+    The writable set is the workdir plus /tmp, and which paths those are
+    depends on the policy, so never hardcode them. 0.1.7's default grants
+    read_write only /tmp and /dev/null and relies on include_workdir for the
+    workspace, where 0.0.56's named /sandbox outright; 0.1.7 also added /bin
+    to read_only and dropped the process: block, so the run-as user is the
+    image's own rather than a policy-pinned `sandbox`. That last difference
+    moves HOME: under the 0.0.56 policy the home directory was Landlock-denied
+    and bash complained about .profile on every exec, while under 0.1.7's it is
+    the writable workdir and git can write a global config there. Writes to
+    /usr, /etc and /var/tmp are denied either way, and /var/tmp is mode 1777,
+    so these are Landlock denials no chmod can lift
   - >
     `--no-keep` deletes the sandbox when the command exits, which destroys
     the workspace and every edit in it. The wrapper defaults to it for
@@ -254,6 +266,22 @@ constraints:
     failure appears only at create time as "docker sandboxes require
     launch-scoped gateway authentication" -- fail with that hint rather than
     retrying
+  - >
+    git needs an identity before the loop's first commit or the whole run ends
+    `commit-failed` with "Author identity unknown" after doing the work.
+    GIT_AUTHOR_*/GIT_COMMITTER_* in the caller's environment do not reach it,
+    because the shell runner replaces the child environment with the curated
+    allowlist (see shell spec) -- the wrapper therefore runs `git config
+    --global` inside the sandbox, which lands in the writable workdir, and a
+    repo-local [user] block in .git/config works too
+  - >
+    `--upload` cannot be combined with a trailing create command on 0.1.7
+    ("--upload cannot be used with [COMMAND]"), so the wrapper creates the
+    sandbox with a keepalive command, waits for Ready, then uploads with the
+    separate `sandbox upload` subcommand. Upload needs --no-git-ignore or .git
+    is silently dropped and `kodr loop` has no history to reset to; note the
+    asymmetry that upload nests under DEST/<basename> while download writes
+    the contents straight into the local path
   - >
     The sandbox image must contain procps. shell.mjs shells out to
     `ps -Ao pid,ppid` to find a timed-out command's descendants; without it
@@ -338,3 +366,5 @@ tests:
     - a model-issued write outside the sandbox root is denied by Landlock and the run continues
     - the heal loop stops on no-progress rather than exhausting its budget against a denied path
     - edits made in the sandbox come back intact through the download step
+    - commits made in the sandbox come back with history intact and a clean status
+    - a loop checklist runs unattended to backlog-empty with every task marked
