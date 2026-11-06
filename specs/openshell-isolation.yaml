@@ -1,0 +1,237 @@
+name: openshell isolation wrapper
+status: proposed
+description: >
+  A scripts/kodr-shell.sh wrapper that runs a local Kodr checkout inside an
+  NVIDIA OpenShell sandbox. Kodr's run_command tool runs arbitrary /bin/sh -c
+  commands with only cd targets jailed (see tool-run-command spec), and
+  nothing at all constrains outbound network, so a bad model turn can read any
+  path your user can read and POST it anywhere. The docker-isolation wrapper
+  caps the filesystem half of that with a single writable mount and an
+  iptables port allowlist. This wrapper is the tier above it, for the case
+  that one does not cover: several unattended runs at once, or a real
+  OPENROUTER_API_KEY in play. OpenShell's supervisor matches egress rules
+  against the *calling binary* read from trusted /proc data, so node reaching
+  the model endpoint and a model-issued curl reaching the same port are
+  different decisions -- iptables cannot tell them apart. Credentials live in
+  an OpenShell provider record and are injected by the supervisor into
+  approved requests only, so no key enters the sandbox at all. Like
+  docker-isolation this is an external wrapper, not a Kodr feature:
+  PROPOSAL.md dropped Docker/OpenShell sandboxing from the harness itself and
+  that still holds -- nothing under src/ learns it is sandboxed.
+
+approach: >
+  Two designs were available for reaching the model. OpenShell exposes
+  https://inference.local inside every sandbox, which strips the caller's
+  credential and injects the configured provider's -- tempting, because then
+  no key is in the sandbox *and* no egress rule is needed. It is rejected
+  here: inference.local pins one provider and one model per gateway, serves
+  only the configured provider's supported path patterns, and proxies no model
+  discovery. Kodr would lose `kodr models`, doctor's connection check,
+  --model switching, and LM Studio's /api/v0/models extension that
+  contextInfo and richModels read state, loaded_context_length and
+  max_context_length from (see provider spec) -- a large amount of the
+  provider surface traded away to avoid one allow rule. So: direct egress to
+  the host model server, scoped to the node binary, with the key (when there
+  is one) in a provider record. The wrapper also stays a shell script
+  assembling `openshell` CLI calls rather than a src/ module, because every
+  policy decision belongs to the supervisor; a Kodr module that reasoned
+  about its own confinement would be a second, weaker policy engine inside
+  the thing being confined.
+
+inputs:
+  args:
+    type: array
+    required: false
+    description: >
+      Everything after the wrapper's own --shell-* flags, forwarded verbatim
+      to kodr (e.g. run "prompt" --model m). Empty args start Kodr's TUI.
+  KODR_SHELL_SANDBOX:
+    type: string
+    required: false
+    description: Sandbox name to create and exec into (default kodr-shell)
+  KODR_SHELL_HOST:
+    type: string
+    required: false
+    description: Host alias the sandbox uses to reach the LLM (default host.openshell.internal)
+  KODR_SHELL_LMSTUDIO_PORT:
+    type: string
+    required: false
+    description: Host LM Studio port for base-url injection and the allow rule (default 1234)
+  KODR_SHELL_OLLAMA_PORT:
+    type: string
+    required: false
+    description: Host Ollama port for base-url injection and the allow rule (default 11434)
+  KODR_SHELL_NODE:
+    type: string
+    required: false
+    description: >
+      Absolute path of the node binary inside the sandbox, used as the
+      --binary scope on the egress rule (default /usr/bin/node)
+  KODR_SHELL_WORKSPACE:
+    type: string
+    required: false
+    description: Working directory inside the sandbox (default /workspace)
+  KODR_SHELL_SRC:
+    type: string
+    required: false
+    description: Upload destination for the Kodr checkout (default /opt/kodr)
+  KODR_SHELL_NETWORK:
+    type: string
+    required: false
+    description: >
+      locked (default) allows only the host LLM endpoint; open additionally
+      allows the provider's public host (required for openrouter)
+  KODR_SHELL_PROVIDER_RECORD:
+    type: string
+    required: false
+    description: >
+      Name of an existing `openshell provider` record to attach for
+      credential injection; unset means no credentials reach the run
+  KODR_SHELL_BIND:
+    type: string
+    required: false
+    description: >
+      When 1, bind-mount the host CWD instead of upload/download. Explicitly
+      insecure (see constraints) and prints what it gives up
+  KODR_SHELL_POLICY_WAIT_MS:
+    type: number
+    required: false
+    description: Timeout for `openshell policy ... --wait` (default 60,000, OpenShell's own)
+  KODR_SHELL_DRYRUN:
+    type: string
+    required: false
+    description: When 1, print the assembled openshell commands and run nothing
+
+outputs:
+  exitCode:
+    type: number
+    description: Kodr's exit code from `openshell sandbox exec`, forwarded unchanged
+  commands:
+    type: array
+    description: In dry-run, the assembled openshell invocations, in order
+  downloaded:
+    type: array
+    description: Paths pulled back from the sandbox workspace to the host CWD
+
+constraints:
+  - >
+    The wrapper is a thin, deterministic assembler over the `openshell` CLI
+    and makes no policy decision itself -- it writes rules, the supervisor
+    enforces them
+  - >
+    The Kodr checkout is uploaded with `openshell sandbox upload` and run from
+    there; no npm install step, ever. Kodr's zero-dependency rule is what
+    makes this safe -- every other agent in OpenShell's own guides needs a
+    package install, which means punching registry egress through a
+    default-deny fence before the agent has even started. Adding a runtime
+    dependency to Kodr would cost this property, not just the zero-deps guard
+  - >
+    Exactly one egress allow rule in locked mode, scoped with --binary to the
+    node path, for the host model endpoint. The per-binary scope is the whole
+    reason to reach for OpenShell over docker-isolation's iptables allowlist,
+    so a rule that omits --binary is a bug, not a simplification
+  - >
+    Credentials are attached as an `openshell provider` record, never via
+    `--env` and never by forwarding host variables. docker-isolation's
+    KODR_BOX_ENV_PASS puts OPENROUTER_API_KEY inside the container, where any
+    model turn that can read process.env and reach one allowed endpoint can
+    exfiltrate it; a provider record keeps the value on the supervisor side
+    and injects it only into approved requests
+  - >
+    inference.local is deliberately unused -- see approach. --base-url points
+    at the host model server
+  - >
+    --base-url is injected only for lmstudio and ollama, never for
+    openrouter, and never over an explicit --base-url the caller passed. Kodr
+    already supports this shape unchanged (examples/terminal-bench.md reaches
+    a host LM Studio at host.docker.internal:1234), so only the alias differs
+  - >
+    The host alias is host.openshell.internal, never localhost or 127.0.0.1 --
+    inside the sandbox those are the sandbox
+  - >
+    The host model server must listen on 0.0.0.0, not loopback: LM Studio's
+    "Serve on Local Network", or OLLAMA_HOST=0.0.0.0 for Ollama. A
+    loopback-only server is simply unreachable and looks like a Kodr
+    connection fault, so the wrapper checks reachability before creating the
+    sandbox and says which switch is off
+  - >
+    The allow rule must cover the address the alias actually resolves to
+    inside the sandbox. A reported OpenShell failure class is the alias
+    resolving to an IPv6 ULA while the generated policy admits only IPv4
+    private ranges; enforcement is correct and the policy is wrong, but it
+    surfaces as a 403 policy_denied that reads exactly like a bad base URL.
+    `kodr doctor` inside the sandbox is the first diagnostic, not the last
+  - >
+    The workspace is uploaded and downloaded by default rather than
+    bind-mounted. NVIDIA's own driver docs warn that bind mounts can negate
+    OpenShell controls including workspace isolation and filesystem policy --
+    which is the entire thing being bought here. KODR_SHELL_BIND=1 remains
+    available because the copy round-trip is genuinely worse for iterating on
+    a live repo, but it prints the controls it disables and is never the
+    default
+  - >
+    Because the default workspace is a copy, git operations run against that
+    copy: commit.mjs and loop-git.mjs work normally but land commits inside
+    the sandbox, and the download step is what brings them and .kodr/runs
+    back. A run abandoned without a download loses its transcript
+  - >
+    The sandbox image must contain procps. shell.mjs shells out to
+    `ps -Ao pid,ppid` to find a timed-out command's descendants; without it
+    the orphan kill degrades to signalling only the direct /bin/sh child and a
+    grandchild outlives the "timed out" command -- the exact hang the shell
+    spec's timeout constraint exists to prevent
+  - >
+    Landlock and policy denials arrive as ordinary non-zero exit codes and
+    EACCES text, which Kodr's returned-not-thrown module contract absorbs
+    without crashing. The heal loop can still burn turns retrying a path
+    policy will never permit; no-progress detection (see heal spec) is the
+    backstop, and an eval should confirm it fires rather than exhausting the
+    budget
+  - >
+    Sandbox name, host alias, ports, node path, workspace, network posture,
+    provider record and the policy --wait timeout are all overridable by
+    KODR_SHELL_* variables -- no fixed operational limit the caller cannot
+    change
+  - >
+    Dry-run prints every assembled openshell invocation and runs none of
+    them; the provider record is referenced by name, so no secret value is
+    echoed
+  - >
+    On macOS the sandbox runs inside a Linux VM via Docker or host
+    virtualization, so the Landlock and seccomp controls apply there and not
+    to the host OS. The boundary is still real; it is just one level further
+    out than on Linux
+  - >
+    OpenShell is on the 0.1.x line with a fast-moving policy engine, so the
+    wrapper pins nothing and asserts nothing about flag spellings beyond what
+    it assembles -- a CLI change should break the dry-run tests loudly rather
+    than silently produce a sandbox with no rules
+
+deliverables:
+  - scripts/kodr-shell.sh
+  - specs/openshell-isolation.yaml
+  - test/openshell-isolation.test.mjs
+  - docs/openshell-isolation.md
+
+tests:
+  unit:
+    - dry-run injects lmstudio base-url at host.openshell.internal:1234 by default
+    - dry-run injects ollama base-url at :11434 when --provider ollama
+    - dry-run does not inject --base-url when the caller passes one
+    - dry-run does not inject --base-url for --provider openrouter
+    - dry-run uploads the Kodr checkout and never emits an install step
+    - locked mode emits exactly one allow rule, carrying --binary for the node path
+    - open mode additionally allows the provider's public host
+    - dry-run attaches a provider record by name and forwards no secret value
+    - dry-run forwards no host environment variables as --env
+    - dry-run injects --cwd for the workspace unless the caller passes --cwd
+    - dry-run forwards the prompt and passthrough args unchanged
+    - KODR_SHELL_BIND=1 swaps upload/download for a bind mount and warns
+    - KODR_SHELL_* overrides reach the assembled commands (sandbox, host, ports, node path, wait timeout)
+    - dry-run prints the commands and invokes neither openshell nor docker
+  eval:
+    - a locked run reaches the host model server and completes a task in the sandbox workspace
+    - a model-issued curl to a non-allowed host is denied while the same run's model calls succeed
+    - a model-issued write outside the workspace is denied by Landlock and the run continues
+    - the heal loop stops on no-progress rather than exhausting its budget against a denied path
+    - commits made in the sandbox come back intact through the download step
