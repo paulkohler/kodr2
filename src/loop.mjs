@@ -208,10 +208,14 @@ export function classifyTask(task) {
 }
 
 /**
- * The first unchecked `- [ ] ` line in the checklist, sans the marker. Null
- * when the backlog is done or the file doesn't exist.
+ * The first unchecked `- [ ] ` line in the checklist, with the line index it
+ * came from. Null when the backlog is done or the file doesn't exist. The
+ * index is what makes the later mark safe: marking by re-scanning for "the
+ * first unchecked line" silently moves the mark when something else ticks a
+ * line mid-attempt, which a capable model does to its own work after reading
+ * the `kodr: ` convention out of git log (BACKLOG #8).
  * @param {string} tasksFile
- * @returns {Promise<string|null>}
+ * @returns {Promise<{ text: string, line: number }|null>}
  */
 export async function readNextTask(tasksFile) {
   let content;
@@ -220,33 +224,39 @@ export async function readNextTask(tasksFile) {
   } catch {
     return null;
   }
-  const line = content.split('\n').find((l) => /^- \[ \] /.test(l));
-  if (!line) {
+  const lines = content.split('\n');
+  const line = lines.findIndex((l) => /^- \[ \] /.test(l));
+  if (line === -1) {
     return null;
   }
-  return line.replace(/^- \[ \] /, '');
+  return { text: lines[line].replace(/^- \[ \] /, ''), line };
 }
 
 /**
- * Flip the first unchecked line's marker to `mark` ('x' = done, '!' =
- * parked). Mirrors the shell scripts' `mark_first` -- "first" is unambiguous
- * within one iteration, since readNextTask always hands back the first
- * unchecked line.
+ * Flip one specific checklist line's marker to `mark` ('x' = done, '!' =
+ * parked). Refuses a line that is out of range or no longer unchecked rather
+ * than marking the wrong task: a mismatch means the file moved under the
+ * loop, and the honest response is to stop and let the operator look.
  * @param {string} tasksFile
+ * @param {number} line - Line index from readNextTask
  * @param {string} mark
- * @returns {Promise<void>}
+ * @returns {Promise<{ ok: boolean, error?: string }>}
  */
-export async function markFirstTask(tasksFile, mark) {
+export async function markTaskAt(tasksFile, line, mark) {
   const content = await readFile(tasksFile, 'utf8');
-  let done = false;
-  const lines = content.split('\n').map((line) => {
-    if (!done && /^- \[ \] /.test(line)) {
-      done = true;
-      return line.replace(/^- \[ \] /, `- [${mark}] `);
-    }
-    return line;
-  });
+  const lines = content.split('\n');
+  if (!Number.isInteger(line) || line < 0 || line >= lines.length) {
+    return { ok: false, error: `checklist has no line at index ${line}` };
+  }
+  if (!/^- \[ \] /.test(lines[line])) {
+    return {
+      ok: false,
+      error: `checklist line ${line + 1} is no longer unchecked -- refusing to mark a different task`,
+    };
+  }
+  lines[line] = lines[line].replace(/^- \[ \] /, `- [${mark}] `);
   await writeFile(tasksFile, lines.join('\n'));
+  return { ok: true };
 }
 
 /**
@@ -481,10 +491,10 @@ function goalWasCancelled(goalResult) {
  * set, or a failed git commit -- the loop never continues past a git
  * failure on the assumption that it worked.
  * @param {object} params
- * @param {{ nextTask: () => Promise<string|null>, markTask: (mark: string) => Promise<void> }} params.checklist
+ * @param {{ nextTask: () => Promise<string|null>, markTask: (mark: string) => Promise<{ok: boolean, error?: string}|void> }} params.checklist
  * @param {(text: string, continuation: object|null) => Promise<import('./harness.mjs').RunResult>} params.buildTask
  * @param {(goalText: string) => Promise<import('./goal.mjs').GoalResult>} params.buildGoal
- * @param {{ commitGreen: (message: string) => Promise<{ok: boolean, sha?: string, error?: string, reason?: string}>, park: (resetPaths: string[]) => Promise<{ok: boolean, error?: string, wiped?: string[], refused?: string[]}> }} params.git
+ * @param {{ commitGreen: (message: string) => Promise<{ok: boolean, sha?: string, error?: string, reason?: string}>, park: (resetPaths: string[], resetTo?: string|null) => Promise<{ok: boolean, error?: string, wiped?: string[], refused?: string[]}>, headSha?: () => Promise<string|null> }} params.git
  * @param {{ now: () => number, wait: (ms: number) => Promise<void> }} [params.clock]
  * @param {string[]} [params.resetPaths]
  * @param {number} [params.maxAttempts]
@@ -587,6 +597,12 @@ export async function runLoop(params) {
 
     tasksAttempted += 1;
     const taskStart = clock.now();
+    // HEAD before the attempt touches anything. A park resets to this sha
+    // rather than to whatever HEAD became, because the model may have
+    // committed its own work mid-attempt -- a bare `git reset --hard` keeps
+    // that commit and parks a task whose work is still in history
+    // (BACKLOG #8).
+    const baseSha = git.headSha ? await git.headSha() : null;
     const { kind, text } = classifyTask(task);
     reporter.phase(`loop task ${tasksAttempted} (${kind}): ${task}`);
 
@@ -655,7 +671,13 @@ export async function runLoop(params) {
     }
 
     if (isGreen) {
-      await checklist.markTask('x');
+      const markResult = await checklist.markTask('x');
+      if (markResult && !markResult.ok) {
+        entry.error = markResult.error;
+        record.tasks.push(entry);
+        await emit('mark-failed');
+        return finish('mark-failed');
+      }
       const commitResult = await git.commitGreen(`kodr: ${task}`);
       if (!commitResult.ok && commitResult.error) {
         entry.error = commitResult.error;
@@ -677,7 +699,7 @@ export async function runLoop(params) {
       continue;
     }
 
-    const parkResult = await git.park(resetPaths);
+    const parkResult = await git.park(resetPaths, baseSha);
     if (!parkResult.ok) {
       entry.error = parkResult.error;
       record.tasks.push(entry);
@@ -688,7 +710,13 @@ export async function runLoop(params) {
       reporter.notice(`resetPaths: refusing to wipe '${refused}'`);
     }
 
-    await checklist.markTask('!');
+    const parkMark = await checklist.markTask('!');
+    if (parkMark && !parkMark.ok) {
+      entry.error = parkMark.error;
+      record.tasks.push(entry);
+      await emit('mark-failed');
+      return finish('mark-failed');
+    }
     const parkCommit = await git.commitGreen(`kodr: park ${task}`);
     if (!parkCommit.ok && parkCommit.error) {
       entry.error = parkCommit.error;

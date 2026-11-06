@@ -171,7 +171,10 @@ outputs:
       stoppedReason, which can read "complete" on a cancelled goal — see
       specs/cancel.yaml), "commit-failed" (a git commit
       failed — the workspace may be inconsistent and the loop stops rather
-      than continue on a false assumption), or "error" (a startup precondition
+      than continue on a false assumption), "mark-failed" (the checklist line
+      this iteration took is gone or no longer unchecked, so marking it would
+      mark a different task — the loop stops instead of guessing), or "error"
+      (a startup precondition
       failed, or an uncaught error propagated out of runLoop — the CLI's own
       catch, not a value runLoop returns itself).
   tasks:
@@ -237,6 +240,23 @@ constraints:
     friends auto-discover files regardless of tracking), then resetPaths, then
     mark '!', then commit the mark. clean never gets -x: gitignored state is
     resetPaths's job alone.
+  - >
+    The reset targets the sha HEAD had *before* the attempt began, captured
+    per task, not whatever HEAD became. A capable model commits its own work
+    mid-attempt, having read the `kodr: ` convention straight out of git log,
+    and a bare `git reset --hard` keeps that commit -- so the task parked with
+    its rejected work still in history and the checklist disagreeing with both
+    the park commit and the loop record (observed with qwen3.8-27b-mlx against
+    a forced-failing gate; BACKLOG #8). A repo with no commits when the attempt
+    began has no sha to rewind to and keeps the bare reset.
+  - >
+    The checklist mark lands on the line index readNextTask returned, never on
+    a re-scan for "the first unchecked line". The two agree only while nothing
+    else edits the file mid-attempt, and the same model that commits its own
+    work also ticks its own box -- which slid the '!' onto the following,
+    never-attempted task. A line that is gone or already marked by the time the
+    loop goes to mark it stops the run with "mark-failed" rather than marking
+    whatever is nearest.
   - >
     Kodr's own artifact directories — .kodr/runs/ and the .kodr/loops/ record
     this spec adds — are excluded from the ratchet's `add` and survive its
@@ -335,6 +355,11 @@ tests:
     - stopOnPark false carries on to the next task after a park
     - a failed commit after a green build stops the loop with reason "commit-failed"
     - a failed park-mark commit stops the loop with reason "commit-failed"
+    - readNextTask returns the line index alongside the task text
+    - markTaskAt marks the given line, refusing one already marked behind its back
+    - markTaskAt refuses a line index outside the file
+    - park rewinds to the pre-attempt sha, discarding a commit made during the attempt
+    - park without a sha keeps the old bare-reset behaviour
     # --- what the shell version could not do ---
     - the loop record is written after every task transition, not only at the end
     - the loop record names the commit, attempts, and run records for each task

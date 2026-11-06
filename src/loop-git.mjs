@@ -148,6 +148,31 @@ export async function commitAll(cwd, message, options = {}) {
 }
 
 /**
+ * Current HEAD sha, or null when the repo has no commits yet. The loop takes
+ * this before each attempt so a park can reset to the pre-attempt state
+ * rather than to whatever HEAD became (BACKLOG #8).
+ * @param {string} cwd
+ * @param {object} [options]
+ * @param {Record<string, string>} [options.env]
+ * @param {number} [options.timeoutMs]
+ * @param {function} [options.run]
+ * @returns {Promise<string|null>}
+ */
+export async function headSha(cwd, options = {}) {
+  const run = options.run || runShell;
+  const result = await run(
+    'git rev-parse --verify HEAD',
+    cwd,
+    shellOptionsFor(options),
+  );
+  if (result.exitCode !== 0) {
+    return null;
+  }
+  const sha = result.stdout.trim();
+  return sha || null;
+}
+
+/**
  * Whether git tracks anything at `relPath` (a file, or a directory holding
  * tracked files). Used two ways: the loop refuses to start when the
  * checklist itself isn't tracked (an untracked file is deleted outright by
@@ -258,23 +283,33 @@ export async function wipeResetPaths(cwd, resetPaths = [], options = {}) {
  * then resetPaths. Never touches the checklist or commits -- the caller
  * marks the checklist and commits the mark afterward, since the mark has to
  * follow the reset.
+ *
+ * `resetTo` is the pre-attempt sha from headSha(). It matters whenever the
+ * model commits its own work mid-attempt, which a capable one does after
+ * reading the `kodr: ` convention out of git log: a bare `git reset --hard`
+ * resets to *current* HEAD, so that commit survives the park and the task is
+ * parked with its rejected work still in history (BACKLOG #8). Omitted or
+ * null keeps the old bare behaviour, which is correct for a repo that had no
+ * commits when the attempt began.
  * @param {string} cwd
  * @param {string[]} resetPaths
+ * @param {string|null} [resetTo] - Pre-attempt HEAD sha to reset back to
  * @param {object} [options]
  * @param {Record<string, string>} [options.env]
  * @param {number} [options.timeoutMs]
  * @param {function} [options.run] - Overridable for tests; defaults to shell.mjs's runShell
  * @returns {Promise<{ ok: boolean, error?: string, wiped?: string[], refused?: string[] }>}
  */
-export async function park(cwd, resetPaths = [], options = {}) {
+export async function park(cwd, resetPaths = [], resetTo = null, options = {}) {
   const run = options.run || runShell;
   const shellOptions = shellOptionsFor(options);
 
-  const resetResult = await run('git reset --hard', cwd, shellOptions);
+  const resetCmd = resetTo ? `git reset --hard ${resetTo}` : 'git reset --hard';
+  const resetResult = await run(resetCmd, cwd, shellOptions);
   if (resetResult.exitCode !== 0) {
     return {
       ok: false,
-      error: `git reset --hard failed: ${combinedOutput(resetResult)}`,
+      error: `${resetCmd} failed: ${combinedOutput(resetResult)}`,
     };
   }
 

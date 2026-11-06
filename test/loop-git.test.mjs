@@ -3,11 +3,14 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 
+import { runShell } from '../src/shell.mjs';
+
 import {
   commitAll,
   hasCommits,
   isGitRepo,
   isTracked,
+  headSha,
   park,
   registerExcludes,
   wipeResetPaths,
@@ -203,6 +206,74 @@ describe('park', () => {
     const result = await park(repo, ['..']);
     assert.equal(result.ok, true);
     assert.deepEqual(result.refused, ['..']);
+  });
+});
+
+describe('headSha', () => {
+  it('returns the current sha, and null with no commits', async () => {
+    const { repo } = await repoFixture();
+    const sha = await headSha(repo);
+    assert.match(sha, /^[0-9a-f]{40}$/);
+
+    const { mkdtemp } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const bare = await mkdtemp(join(tmpdir(), 'kodr-nocommits-'));
+    await runShell('git init -q', bare, {});
+    assert.equal(await headSha(bare), null);
+  });
+});
+
+describe('park with a pre-attempt sha', () => {
+  it('discards a commit the model made during the attempt', async () => {
+    // BACKLOG #8: a capable model reads the `kodr: ` convention out of git
+    // log and commits its own work. A bare reset --hard keeps that commit,
+    // so the task parks with its rejected work still in history.
+    const { repo } = await repoFixture();
+    const base = await headSha(repo);
+
+    await writeFile(join(repo, 'README.md'), 'model edit\n');
+    await runShell(
+      'git add -A && git commit -q -m "kodr: model did this"',
+      repo,
+      {},
+    );
+    const moved = await headSha(repo);
+    assert.notEqual(moved, base, 'the model commit should have moved HEAD');
+
+    const result = await park(repo, [], base);
+    assert.equal(result.ok, true);
+    assert.equal(
+      await headSha(repo),
+      base,
+      'park must rewind to the pre-attempt sha',
+    );
+    assert.equal(await readRepoFile(repo, 'README.md'), '# fixture\n');
+  });
+
+  it('without a sha, a bare reset keeps the model commit (the old behaviour)', async () => {
+    const { repo } = await repoFixture();
+    await writeFile(join(repo, 'README.md'), 'model edit\n');
+    await runShell(
+      'git add -A && git commit -q -m "kodr: model did this"',
+      repo,
+      {},
+    );
+    const moved = await headSha(repo);
+
+    const result = await park(repo, []);
+    assert.equal(result.ok, true);
+    assert.equal(await headSha(repo), moved);
+  });
+
+  it('reports the sha in the error when the reset fails', async () => {
+    const { repo } = await repoFixture();
+    const result = await park(
+      repo,
+      [],
+      'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+    );
+    assert.equal(result.ok, false);
+    assert.match(result.error, /git reset --hard deadbeef/);
   });
 });
 

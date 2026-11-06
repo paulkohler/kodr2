@@ -9,27 +9,14 @@ Line references are approximate — treat them as anchors, not addresses.
 
 ## Open
 
-- **#8** a model-authored `git commit` defeats the park path, mismarking the
-  checklist. Two independent faults compound. `markTask` flips *the first
-  unchecked line* (`loop.mjs:211`, `loop.mjs:231`) rather than the line
-  `nextTask` returned, and the park sequence runs a bare `git reset --hard`
-  (`loop-git.mjs:273`), which resets to *current* HEAD with no pre-attempt
-  snapshot. So when the model commits its own work mid-attempt — which a
-  capable model will do unprompted, having read the `kodr: ` convention out of
-  `git log` — that commit survives the park, and the `[!]` mark lands on the
-  *next* task instead of the one that failed. Observed 2026-11-07 with
-  qwen3.8-27b-mlx and a forced-failing gate (`--test false --max-attempts 1`):
-  the `max` task was left `- [x] ` with its work committed although the gate
-  rejected it, while `- [!] ` landed on `median`, never attempted. The park
-  commit and the loop record both name `max`, so the checklist, history and
-  record disagree about what happened. Surfaced while testing kodr inside an
-  OpenShell sandbox, but neither fault involves the sandbox: both are host-side
-  and should reproduce anywhere. Likely fix — capture `git rev-parse HEAD`
-  before each attempt and reset to that sha on park, and mark by the line index
-  `nextTask` consumed rather than re-scanning for the first unchecked line.
+None — #8 is fixed. New issues go here.
 
 ## Fixed
 
+- **#8** a model-authored `git commit` defeated the park path, mismarking
+  the checklist — park now rewinds to the sha HEAD had before the attempt
+  and the mark lands on the line index `readNextTask` returned, with a
+  `mark-failed` stop when that line moved under the loop
 - **#1** mid-loop failure zeroed run metrics — `8535040`
 - **#2** near-deadline timeout mislabeled `error` vs `budget-exceeded` — `638e485`
 - **#3** snapshot cap ignored below the workspace root — `2d4e318`

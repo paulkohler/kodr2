@@ -33,6 +33,7 @@ import {
   hasCommits,
   isGitRepo,
   isTracked,
+  headSha,
   park,
   registerExcludes,
 } from './loop-git.mjs';
@@ -44,7 +45,7 @@ import {
 import {
   loopGoalMaxAttempts,
   loopTasksFile,
-  markFirstTask,
+  markTaskAt,
   readNextTask,
   runLoop,
   validateLoopStart,
@@ -1838,17 +1839,27 @@ export async function runLoopCommand(args) {
 
   const onSigint = createSigintCanceller(controller);
   process.on('SIGINT', onSigint);
+  /** @type {number|null} */
+  let pendingTaskLine = null;
   try {
     const result = await runLoop({
       checklist: {
-        nextTask: () => readNextTask(tasksFile),
-        markTask: (mark) => markFirstTask(tasksFile, mark),
+        // The line index travels with the task so the later mark lands on
+        // the line this iteration actually took, not on whatever happens to
+        // be the first unchecked line by then (BACKLOG #8).
+        nextTask: async () => {
+          const next = await readNextTask(tasksFile);
+          pendingTaskLine = next ? next.line : null;
+          return next ? next.text : null;
+        },
+        markTask: (mark) => markTaskAt(tasksFile, pendingTaskLine, mark),
       },
       buildTask,
       buildGoal,
       git: {
         commitGreen: (message) => commitAll(cwd, message),
-        park: (resetPaths) => park(cwd, resetPaths),
+        park: (resetPaths, resetTo) => park(cwd, resetPaths, resetTo),
+        headSha: () => headSha(cwd),
       },
       resetPaths: args.resetPaths,
       maxAttempts: args.maxAttempts,

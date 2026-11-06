@@ -14,7 +14,7 @@ import {
   loopRetryBackoffMs,
   loopStopOnPark,
   loopTasksFile,
-  markFirstTask,
+  markTaskAt,
   readNextTask,
   runLoop,
   taskIsGreen,
@@ -30,17 +30,21 @@ const silentReporter = createNullReporter();
 
 function fakeChecklist(tasks) {
   const items = tasks.map((text) => ({ text, mark: ' ' }));
+  // Mirrors the CLI: the index travels with the task, so the mark lands on
+  // the line this iteration took rather than the first unchecked one.
+  let pending = null;
   return {
     items,
     nextTask: async () => {
-      const item = items.find((i) => i.mark === ' ');
-      return item ? item.text : null;
+      pending = items.findIndex((i) => i.mark === ' ');
+      return pending === -1 ? null : items[pending].text;
     },
     markTask: async (mark) => {
-      const item = items.find((i) => i.mark === ' ');
-      if (item) {
-        item.mark = mark;
+      if (pending === null || pending === -1) {
+        return { ok: false, error: 'no pending task' };
       }
+      items[pending].mark = mark;
+      return { ok: true };
     },
   };
 }
@@ -48,9 +52,13 @@ function fakeChecklist(tasks) {
 function fakeGit(overrides = {}) {
   const commitCalls = [];
   const parkCalls = [];
+  const parkResetTos = [];
+  const headShaCalls = [];
   return {
     commitCalls,
     parkCalls,
+    parkResetTos,
+    headShaCalls,
     commitGreen:
       overrides.commitGreen ||
       (async (message) => {
@@ -59,9 +67,16 @@ function fakeGit(overrides = {}) {
       }),
     park:
       overrides.park ||
-      (async (resetPaths) => {
+      (async (resetPaths, resetTo) => {
         parkCalls.push(resetPaths);
+        parkResetTos.push(resetTo);
         return { ok: true, wiped: [], refused: [] };
+      }),
+    headSha:
+      overrides.headSha ||
+      (async () => {
+        headShaCalls.push(true);
+        return `head-${headShaCalls.length}`;
       }),
   };
 }
@@ -255,26 +270,119 @@ describe('option resolvers', () => {
   });
 });
 
-describe('readNextTask / markFirstTask', () => {
-  it('reads and marks against a real temp file', async () => {
-    const { mkdtemp, rm } = await import('node:fs/promises');
+describe('runLoop park rewind (BACKLOG #8)', () => {
+  it('hands park the sha captured before the attempt ran', async () => {
+    const checklist = fakeChecklist(['only task']);
+    const git = fakeGit();
+    const result = await runLoop({
+      checklist,
+      buildTask: async () => fakeRunResult({ verification: { passed: false } }),
+      buildGoal: async () => fakeGoalResult(),
+      git,
+      clock: fakeClock(),
+      maxAttempts: 1,
+    });
+    assert.equal(result.parked, 1);
+    assert.equal(git.parkCalls.length, 1);
+    // headSha is taken once for the task, before the attempt; park gets it
+    assert.deepEqual(git.parkResetTos, ['head-1']);
+  });
+
+  it('stops with mark-failed rather than marking a different task', async () => {
+    const git = fakeGit();
+    const checklist = {
+      nextTask: async () => 'a task',
+      markTask: async () => ({
+        ok: false,
+        error: 'line 3 is no longer unchecked',
+      }),
+    };
+    const result = await runLoop({
+      checklist,
+      buildTask: async () => fakeRunResult({ verification: { passed: true } }),
+      buildGoal: async () => fakeGoalResult(),
+      git,
+      clock: fakeClock(),
+      maxAttempts: 1,
+    });
+    assert.equal(result.reason, 'mark-failed');
+    assert.equal(
+      git.commitCalls.length,
+      0,
+      'must not commit a mark it could not make',
+    );
+  });
+});
+
+describe('readNextTask / markTaskAt', () => {
+  const tmpChecklist = async (content) => {
+    const { mkdtemp, writeFile } = await import('node:fs/promises');
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
-    const { writeFile, readFile } = await import('node:fs/promises');
-
     const dir = await mkdtemp(join(tmpdir(), 'kodr-loop-checklist-'));
     const file = join(dir, 'TASKS.md');
-    await writeFile(file, '# Tasks\n\n- [ ] first\n- [ ] second\n');
+    await writeFile(file, content);
+    return { dir, file };
+  };
+  const cleanup = async (dir) => {
+    const { rm } = await import('node:fs/promises');
+    await rm(dir, { recursive: true, force: true });
+  };
 
-    assert.equal(await readNextTask(file), 'first');
-    await markFirstTask(file, 'x');
-    assert.equal(await readNextTask(file), 'second');
+  it('reads and marks against a real temp file', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const { dir, file } = await tmpChecklist(
+      '# Tasks\n\n- [ ] first\n- [ ] second\n',
+    );
+
+    const first = await readNextTask(file);
+    assert.equal(first.text, 'first');
+    assert.equal(first.line, 2);
+    assert.deepEqual(await markTaskAt(file, first.line, 'x'), { ok: true });
+
+    const second = await readNextTask(file);
+    assert.equal(second.text, 'second');
+    assert.equal(second.line, 3);
     const content = await readFile(file, 'utf8');
     assert.match(content, /- \[x\] first/);
-    await markFirstTask(file, '!');
+
+    await markTaskAt(file, second.line, '!');
     assert.equal(await readNextTask(file), null);
 
-    await rm(dir, { recursive: true, force: true });
+    await cleanup(dir);
+  });
+
+  it('marks the line it was given, not the first unchecked one', async () => {
+    // BACKLOG #8: something else ticks an earlier line mid-attempt (a model
+    // committing its own work and marking it). The mark must still land on
+    // the line this iteration took.
+    const { readFile, writeFile } = await import('node:fs/promises');
+    const { dir, file } = await tmpChecklist(
+      '# Tasks\n\n- [ ] alpha\n- [ ] beta\n',
+    );
+
+    const task = await readNextTask(file);
+    assert.equal(task.text, 'alpha');
+
+    // alpha gets ticked behind the loop's back; beta is now "first unchecked"
+    await writeFile(file, '# Tasks\n\n- [x] alpha\n- [ ] beta\n');
+
+    const marked = await markTaskAt(file, task.line, '!');
+    assert.equal(marked.ok, false);
+    assert.match(marked.error, /no longer unchecked/);
+
+    const content = await readFile(file, 'utf8');
+    assert.match(content, /- \[ \] beta/, 'beta must be left untouched');
+
+    await cleanup(dir);
+  });
+
+  it('refuses a line index outside the file', async () => {
+    const { dir, file } = await tmpChecklist('# Tasks\n\n- [ ] only\n');
+    const result = await markTaskAt(file, 99, 'x');
+    assert.equal(result.ok, false);
+    assert.match(result.error, /no line at index 99/);
+    await cleanup(dir);
   });
 
   it('returns null when the checklist is missing', async () => {
@@ -346,7 +454,7 @@ describe('runLoop', () => {
     const origMark = checklist.markTask;
     checklist.markTask = async (mark) => {
       events.push(`mark:${mark}`);
-      await origMark(mark);
+      return origMark(mark);
     };
     const origCommit = git.commitGreen;
     git.commitGreen = async (message) => {
