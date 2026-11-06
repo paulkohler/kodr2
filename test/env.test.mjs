@@ -54,4 +54,25 @@ describe('buildEnv', () => {
     const env = buildEnv(['KODR_DEFINITELY_UNSET']);
     assert.ok(!('KODR_DEFINITELY_UNSET' in env));
   });
+
+  it('forwards git identity so commits work without a ~/.gitconfig', () => {
+    // kodr loop commits per task. In a container or sandbox there is no
+    // ~/.gitconfig, so the environment is the only way to give git an
+    // identity; without this the loop does the work and then dies with
+    // "Author identity unknown" on its first commit.
+    const names = [
+      'GIT_AUTHOR_NAME',
+      'GIT_AUTHOR_EMAIL',
+      'GIT_COMMITTER_NAME',
+      'GIT_COMMITTER_EMAIL',
+    ];
+    for (const name of names) {
+      process.env[name] = `set-${name}`;
+      cleanup.push(name);
+    }
+    const env = buildEnv();
+    for (const name of names) {
+      assert.equal(env[name], `set-${name}`, `${name} should be forwarded`);
+    }
+  });
 });

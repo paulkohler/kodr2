@@ -54,7 +54,16 @@ constraints:
     control on that surface (see the harness spec), not an enforcement layer
   - Runs with a minimal curated environment, not the full process.env
   - >
-    Default env allowlist: PATH, HOME, TMPDIR, LANG, LC_ALL, LC_CTYPE, TERM, TZ
+    Default env allowlist: PATH, HOME, TMPDIR, LANG, LC_ALL, LC_CTYPE, TERM,
+    TZ, and the git identity pair GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL,
+    GIT_COMMITTER_NAME, GIT_COMMITTER_EMAIL. The git variables are here
+    because Kodr commits as part of normal operation (kodr loop commits per
+    task) and git refuses to commit without an identity: in a container,
+    sandbox or CI box with no ~/.gitconfig the environment is the only way to
+    supply one, and without them a loop does all its work and then dies with
+    "Author identity unknown" on its first commit. They carry identity, not
+    secrets, so forwarding them by default costs nothing the allowlist exists
+    to protect
   - Extra variables are passed through by name only (--env a,b,c)
   - Tracks files changed by shell commands using a bounded before/after workspace snapshot
   - >
@@ -77,6 +86,7 @@ tests:
     - rejects cd targets outside the workspace
     - allows cd targets inside the workspace
     - does not expose non-allowlisted environment variables by default
+    - forwards the git identity variables so commits work without a ~/.gitconfig
     - exposes extra variables named in envPassthrough
     - caps command timeout to the remaining run budget
     - the description names the default timeout out of the box

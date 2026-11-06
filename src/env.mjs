@@ -7,6 +7,14 @@
  */
 
 // A small default set: enough to find and run common tooling, nothing more.
+// The GIT_* identity pair is here because Kodr commits as part of normal
+// operation (kodr loop commits per task, see specs/loop.yaml). git refuses to
+// commit without an identity, and in an environment with no ~/.gitconfig --
+// a container, a sandbox, CI -- the only way to supply one is the
+// environment. Without these the loop does all the work and then dies with
+// "Author identity unknown" on its first commit. They are identity, not
+// secrets, so passing them by default costs nothing the allowlist exists to
+// protect.
 const DEFAULT_ENV_VARS = [
   'PATH',
   'HOME',
@@ -16,6 +24,10 @@ const DEFAULT_ENV_VARS = [
   'LC_CTYPE',
   'TERM',
   'TZ',
+  'GIT_AUTHOR_NAME',
+  'GIT_AUTHOR_EMAIL',
+  'GIT_COMMITTER_NAME',
+  'GIT_COMMITTER_EMAIL',
 ];
 
 /**
