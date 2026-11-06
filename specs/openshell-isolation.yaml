@@ -51,6 +51,13 @@ validation: >
   rather than unix permissions; Seccomp 2 and NoNewPrivs 1 in
   /proc/self/status. The constraints below record what the CLI actually does,
   not what its newer published docs describe -- several flags differ.
+  Re-validated the same day on CLI and gateway 0.1.7 after upgrading:
+  the policy file below was accepted verbatim, node still fetched the
+  model endpoint (200, six models) while /usr/bin/curl against the
+  identical URL was still refused, and Landlock still denied /usr and
+  /var/tmp while /tmp stayed writable. The per-binary guarantee therefore
+  survives the 0.0 -> 0.1 jump; the mechanism behind it does not, see the
+  egress constraint.
 
 inputs:
   args:
@@ -161,13 +168,19 @@ constraints:
     exists for iterating on a live sandbox, and `--dry-run` previews the
     merged result without sending it to the gateway
   - >
-    Egress enforcement is an HTTP proxy, not an L4 port allowlist. The
-    sandbox injects HTTP_PROXY/HTTPS_PROXY (observed: http://10.200.0.1:3128),
-    NODE_USE_ENV_PROXY=1 and a custom CA via NODE_EXTRA_CA_CERTS; a denial
-    comes back as a 403 whose body is {"error":"policy_denied"}, and a
-    connection that bypasses the proxy simply times out because there is no
-    direct route. Code that explicitly ignores proxy environment variables
-    therefore loses all egress rather than escaping the policy
+    Egress enforcement is never an L4 port allowlist, but how it is applied
+    moved between the two versions tested, so the wrapper must not depend on
+    the mechanism. On 0.0.56 the sandbox injected HTTP_PROXY/HTTPS_PROXY
+    (observed: http://10.200.0.1:3128) plus NODE_USE_ENV_PROXY=1, and a
+    denial came back as a 403 whose body was {"error":"policy_denied"}. On
+    0.1.7 with a bridge supervisor no proxy variables are injected at all --
+    only NODE_EXTRA_CA_CERTS -- and a denied binary gets a plain
+    `curl: (7) Couldn't connect to server` while the allowed binary reaches
+    the same host and port normally, which is interception below the HTTP
+    layer. The second shape is the stronger one because it does not rely on
+    the caller honouring proxy variables, but code that parses the denial
+    text will break across versions: treat any non-success as denied and read
+    the gateway's own log for the reason
   - >
     Exactly one egress rule in locked mode, scoped with --binary to the node
     path, written as `--add-endpoint host:port:full`. The per-binary scope is
@@ -227,6 +240,20 @@ constraints:
     one-shot runs and requires KODR_SHELL_KEEP=1 with
     KODR_SHELL_DOWNLOAD=1 to bring results back; a run abandoned without a
     download loses both the edits and .kodr/runs
+  - >
+    `--from` builds a Dockerfile or directory into the local engine on 0.0.56
+    but not on 0.1.7, which wants an image reference and prints build
+    instructions instead. The wrapper therefore builds the image itself and
+    passes a tag, which works on both
+  - >
+    The gateway is a prerequisite the wrapper does not manage and must not
+    silently paper over: on 0.1.7 a Docker sandbox needs gateway-minted
+    sandbox JWTs (OPENSHELL_LOCAL_TLS_DIR pointing at the PKI, or an explicit
+    [openshell.gateway.gateway_jwt] table) and a supervisor that can dial the
+    gateway back. `config preflight` exits 0 without the JWT material, so the
+    failure appears only at create time as "docker sandboxes require
+    launch-scoped gateway authentication" -- fail with that hint rather than
+    retrying
   - >
     The sandbox image must contain procps. shell.mjs shells out to
     `ps -Ao pid,ppid` to find a timed-out command's descendants; without it
