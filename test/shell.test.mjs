@@ -134,3 +134,36 @@ describe('runShell', () => {
     assert.equal(ticks.length, countAfterFinish);
   });
 });
+
+describe('runShell timeout with a backgrounded command', () => {
+  it('honours the timeout when an orphan holds the pipes open', async () => {
+    // BACKLOG #9 / the bug this guards: `sh -c "sleep 30 &"` exits at once,
+    // but the backgrounded child inherits stdout/stderr, so execFile's
+    // callback never fires -- and because sh is gone the orphan has been
+    // reparented to init, so the ppid walk finds nothing to kill. Before the
+    // fix this pended for the full 30s (a model-issued `cargo run &` pended
+    // ~7 minutes against a 180s timeout); now the timeout answers.
+    // A short sleep keeps the suite fast: the orphan's open pipes hold
+    // node's handle open until it exits, which is the leak BACKLOG #9 covers.
+    const started = Date.now();
+    const result = await runShell('sleep 2 &', process.cwd(), {
+      timeout: 300,
+      killGraceMs: 50,
+    });
+    const elapsed = Date.now() - started;
+    assert.equal(result.exitCode, 1);
+    assert.match(result.stderr, /timed out after 300ms/);
+    assert.ok(
+      elapsed < 5000,
+      `should resolve on the timeout, not wait for the orphan (took ${elapsed}ms)`,
+    );
+  });
+
+  it('still reports a foreground command that overruns', async () => {
+    const result = await runShell('sleep 30', process.cwd(), {
+      timeout: 300,
+      killGraceMs: 50,
+    });
+    assert.equal(result.exitCode, 1);
+  });
+});

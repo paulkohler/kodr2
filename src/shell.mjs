@@ -58,6 +58,7 @@ export function runShell(command, cwd, options = {}) {
     let timeoutTimer;
     let killGraceTimer;
     let timedOut = false;
+    let settled = false;
     // Once the timeout fires, the escalation to SIGKILL must run to
     // completion even if the immediate child dies from SIGTERM (which
     // resolves this promise) before a stubborn grandchild does. Otherwise
@@ -77,6 +78,12 @@ export function runShell(command, cwd, options = {}) {
         if (!escalationArmed) {
           clearTimeout(killGraceTimer);
         }
+        if (settled) {
+          // The timeout already answered the caller. Still let the kill
+          // escalation finish above; just don't resolve twice.
+          return;
+        }
+        settled = true;
         resolve({
           stdout: truncate(stdout || '', maxOutput),
           stderr: truncate(stderr || '', maxOutput),
@@ -100,6 +107,28 @@ export function runShell(command, cwd, options = {}) {
           killPids(pids, 'SIGKILL');
         }, killGraceMs);
         killGraceTimer.unref?.();
+        // Answer the caller now rather than waiting for execFile's callback,
+        // which fires only once the child has exited *and* its stdout and
+        // stderr pipes have closed. A backgrounded process keeps those pipes
+        // open after `sh` itself exits (`cargo run &`), and because `sh` is
+        // gone the orphan has already been reparented to init -- so the ppid
+        // walk above finds nothing to kill and nothing ever closes the pipes.
+        // That made the timeout unenforceable: a model-issued background
+        // command pended for minutes regardless of --command-timeout-ms.
+        // Resolving here makes the timeout mean what it says. The orphan can
+        // outlive the call; reaping it needs a process group, which this
+        // deliberately avoids (see descendantPids) -- tracked as BACKLOG #9.
+        if (!settled) {
+          settled = true;
+          if (heartbeatTimer) {
+            clearInterval(heartbeatTimer);
+          }
+          resolve({
+            stdout: '',
+            stderr: `command timed out after ${timeout}ms`,
+            exitCode: 1,
+          });
+        }
       }, timeout);
       timeoutTimer.unref?.();
     }

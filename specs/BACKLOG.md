@@ -9,7 +9,33 @@ Line references are approximate — treat them as anchors, not addresses.
 
 ## Open
 
-None — #8 is fixed. New issues go here.
+- **#9** a backgrounded command's orphan survives the timeout. The hang it
+  used to cause is fixed (the timeout now answers the caller itself, see
+  `specs/shell.yaml`), but nothing kills the process. `sh -c "cargo run &"`
+  exits immediately, so the server is reparented to init *before* the timeout
+  fires, and `descendantPids` walks `ps -Ao pid,ppid` down from the direct
+  child — a process that is no longer anyone's descendant cannot be found that
+  way at any snapshot moment. This is the second time the area has bitten:
+  `2843873` ("make timeout kill the whole command tree") fixed the live-tree
+  case (`npm` → `node --test`) and reasoned about reparenting happening *after*
+  SIGTERM; with `&` it happens first, which that design cannot reach.
+  Consequence today: a leaked process holding a port or burning CPU for the
+  rest of the session, and node's own handle stays open on the inherited pipes
+  until it exits.
+
+  The fix that would actually work is a process group: spawn with
+  `detached: true` so `sh` becomes a group leader, then `process.kill(-pid)` at
+  timeout, keeping the ppid walk as a fallback for hosts that silently refuse
+  to create a group (the concern `specs/shell.yaml` records for rejecting
+  groups originally — try-and-fall-back answers it, since a group id that was
+  never created simply ESRCHes). The reason this is filed rather than done:
+  `detached: true` also detaches the child from the terminal's process group,
+  so a Ctrl-C in the TUI would stop reaching an in-flight command. Doing it
+  safely means giving `runShell` an optional AbortSignal and killing the group
+  on abort, which is a change to the cancellation seam (`specs/cancel.yaml`)
+  and worth its own pass. Note `runShell` takes no signal today — cancellation
+  works between tool-loop turns — so that plumbing is new surface, not a
+  rewire.
 
 ## Fixed
 

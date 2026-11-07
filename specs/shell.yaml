@@ -90,6 +90,21 @@ constraints:
     child of it is reparented (to init), which changes its ppid -- a
     second lookup at SIGKILL time would lose track of it.
   - >
+    The timeout resolves the caller itself rather than waiting for
+    execFile's callback, which fires only once the child has exited *and*
+    its stdout and stderr pipes have closed. A backgrounded command keeps
+    those pipes open after `sh` exits (`cargo run &`), so the callback
+    never arrives -- and since `sh` is already gone the orphan was
+    reparented to init *before* the timeout fired, so the ppid walk above
+    has nothing to find and kills nothing. The earlier tree-kill fix
+    reasoned about reparenting happening after SIGTERM and snapshotted to
+    survive it; with `&` it happens first, and no snapshot moment exists
+    where the orphan was ever a reachable descendant. Until this, a
+    model-issued background command pended for minutes regardless of
+    --command-timeout-ms (observed: `cargo run &` pending ~7 minutes
+    against 180,000ms). Resolving on the timeout makes the limit mean what
+    it says; the orphan can still outlive the call, which is BACKLOG #9.
+  - >
     A timed-out command tree first gets SIGTERM, then SIGKILL after
     killGraceMs if any of it hasn't exited. The SIGKILL escalation is not
     cancelled just because the command's own callback already fired --
@@ -103,6 +118,8 @@ constraints:
 
 tests:
   unit:
+    - a timeout answers the caller even when a backgrounded orphan holds the pipes open
+    - a foreground command that overruns its timeout still reports a non-zero exit
     - successful command returns exit code 0
     - reports the process exit code on failure
     - captures stdout and stderr separately
