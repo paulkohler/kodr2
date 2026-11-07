@@ -315,6 +315,16 @@ constraints:
     sandbox probe hook actually printed. A caller's own --env wins and is left
     alone
   - >
+    The script body lives in a main() function called at the bottom, so bash
+    parses the whole file before executing any of it. Bash otherwise reads a
+    script incrementally from a file offset, and editing the file under a
+    running shell shifts those offsets into a garbage parse -- observed as a
+    syntax error partway through a multi-hour run whose script had been edited
+    in the repo meanwhile. This matters more here than most places, since the
+    wrapper exists to drive runs long enough that someone is likely to be
+    editing the repo while one is in flight. The body is deliberately left
+    unindented: the generated policy is whitespace-sensitive YAML in a heredoc
+  - >
     The sandbox image must contain procps. shell.mjs shells out to
     `ps -Ao pid,ppid` to find a timed-out command's descendants; without it
     the orphan kill degrades to signalling only the direct /bin/sh child and a

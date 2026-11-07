@@ -204,6 +204,11 @@ endpoint too. `KODR_SHELL_POLICY` overrides it with a file of your own.
   `kill(-pgid)` is refused outright and the group has to be enumerated and
   killed pid by pid instead. A command that calls `setsid` itself escapes the
   group and is not reached — a known limit.
+- **The wrapper is safe to edit mid-run, but kodr is not.** The script body is
+  wrapped in a function so bash parses all of it before executing any, which
+  stops an edit during a long run from corrupting the parse. The *uploaded*
+  kodr checkout is a snapshot taken at launch, so repo changes after that do
+  not affect a run in flight either way.
 - **On macOS the sandbox runs inside a Linux VM**, so Landlock and seccomp
   apply there rather than to the host OS. The boundary is real; it is one
   level further out than on Linux.

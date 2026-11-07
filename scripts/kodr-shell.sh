@@ -22,6 +22,20 @@
 # need neither OpenShell nor Docker.
 set -euo pipefail
 
+# Everything lives in main(), called at the very bottom. Bash reads a script
+# incrementally from a file offset as it executes, so editing the file under a
+# running shell shifts those offsets and the shell parses garbage -- observed
+# as `syntax error near unexpected token \`do'` partway through a multi-hour
+# run, after this file was edited in the repo while that run was in flight. A
+# function body has to be parsed complete before it can be called, so the
+# whole script is in memory before any of it runs. That matters here more than
+# most places: this wrapper exists to drive unattended runs that last hours,
+# which is exactly when someone is most likely to be editing the repo.
+#
+# Deliberately not indented: the policy heredoc below is whitespace-sensitive
+# YAML, and bash does not care.
+main() {
+
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
 
@@ -288,3 +302,6 @@ if [ "$KEEP" = 1 ]; then
   echo "kodr-shell: sandbox left running -- $OPENSHELL sandbox delete $SANDBOX_NAME" >&2
 fi
 exit "$rc"
+}
+
+main "$@"
