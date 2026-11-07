@@ -197,6 +197,31 @@ describe('kodr-shell command assembly', () => {
   });
 });
 
+describe('kodr-shell environment passthrough', () => {
+  it('forwards KODR_SHELL_ENV pairs into the exec', () => {
+    // An image ENV line does not reach the exec'd process, and kodr's own
+    // --env passthrough cannot help because there is nothing in kodr's
+    // environment to pass through. This is the only way in.
+    const { out } = dryRun(['run', 'x'], {
+      KODR_SHELL_ENV: 'CARGO_NET_OFFLINE=true,RUST_BACKTRACE=1',
+    });
+    assert.match(out, /CARGO_NET_OFFLINE=true/);
+    assert.match(out, /RUST_BACKTRACE=1/);
+    assert.match(out, /GIT_AUTHOR_NAME=/, 'git identity is still there');
+  });
+
+  it('warns on an entry that is not NAME=VALUE and drops it', () => {
+    const { out, code } = dryRun(['run', 'x'], { KODR_SHELL_ENV: 'OOPS' });
+    assert.equal(code, 0);
+    assert.match(out, /ignoring KODR_SHELL_ENV entry 'OOPS'/);
+  });
+
+  it('adds nothing when unset', () => {
+    const { out } = dryRun(['run', 'x']);
+    assert.doesNotMatch(out, /KODR_SHELL_ENV/);
+  });
+});
+
 describe('kodr-shell round trip', () => {
   it('emits a download when keeping the sandbox', () => {
     const { out, workspace } = dryRun(['loop'], {

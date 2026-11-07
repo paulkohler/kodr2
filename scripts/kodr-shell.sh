@@ -44,6 +44,7 @@ DEST="${KODR_SHELL_DEST:-$(dirname "$WORKSPACE")}"
 POLICY_OVERRIDE="${KODR_SHELL_POLICY:-}"
 KEEPALIVE="${KODR_SHELL_KEEPALIVE:-14400}"
 READY_TIMEOUT="${KODR_SHELL_READY_TIMEOUT:-120}"
+EXTRA_ENV="${KODR_SHELL_ENV:-}"
 GIT_NAME="${KODR_SHELL_GIT_NAME:-Kodr Sandbox}"
 GIT_EMAIL="${KODR_SHELL_GIT_EMAIL:-kodr@sandbox.invalid}"
 OPEN_HOST="${KODR_SHELL_OPEN_HOST:-openrouter.ai}"
@@ -230,10 +231,29 @@ emit "$OPENSHELL" sandbox upload "$SANDBOX_NAME" "$WORKSPACE" "$SANDBOX_ROOT" --
 # pair (see specs/tool-run-command.yaml) -- without that the loop does all its
 # work and then dies "Author identity unknown" on its first commit, since the
 # sandbox has no ~/.gitconfig.
+# An image ENV line does not reach the exec'd process, so a variable a task
+# needs (CARGO_NET_OFFLINE=true, say) cannot be baked into the image and
+# cannot be picked up by kodr's own --env passthrough either -- there is
+# nothing in kodr's environment to pass through. KODR_SHELL_ENV is the way in.
+env_prefix=(env
+  "GIT_AUTHOR_NAME=$GIT_NAME" "GIT_AUTHOR_EMAIL=$GIT_EMAIL"
+  "GIT_COMMITTER_NAME=$GIT_NAME" "GIT_COMMITTER_EMAIL=$GIT_EMAIL")
+if [ -n "$EXTRA_ENV" ]; then
+  # NAME=VALUE pairs, comma-separated. Values may not contain a comma.
+  old_ifs="$IFS"
+  IFS=','
+  for pair in $EXTRA_ENV; do
+    case "$pair" in
+      *=*) env_prefix+=("$pair") ;;
+      '') ;;
+      *) echo "kodr-shell: ignoring KODR_SHELL_ENV entry '$pair' (want NAME=VALUE)" >&2 ;;
+    esac
+  done
+  IFS="$old_ifs"
+fi
+
 rc=0
-emit "$OPENSHELL" sandbox exec -n "$SANDBOX_NAME" --no-tty -- env \
-  "GIT_AUTHOR_NAME=$GIT_NAME" "GIT_AUTHOR_EMAIL=$GIT_EMAIL" \
-  "GIT_COMMITTER_NAME=$GIT_NAME" "GIT_COMMITTER_EMAIL=$GIT_EMAIL" \
+emit "$OPENSHELL" sandbox exec -n "$SANDBOX_NAME" --no-tty -- "${env_prefix[@]}" \
   "$NODE_IN" "${kodr_in}/bin/kodr.mjs" "${args[@]}" || rc=$?
 
 if [ "$DOWNLOAD" = 1 ]; then

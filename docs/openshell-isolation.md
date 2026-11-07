@@ -86,6 +86,48 @@ which the shell runner's allowlist forwards (see
 has no `~/.gitconfig`, so without that the loop would do all its work and then
 fail on its first commit with "Author identity unknown".
 
+## Other languages need their own image
+
+`docker/openshell/Dockerfile` is **node-only** — node, `procps`, `git` and
+`curl`. It carries no other toolchain on purpose.
+
+This matters more than it sounds, because **egress is default-deny and scoped
+to the node binary**: the sandbox cannot `rustup`, `apt-get` or `pip` its way
+to a compiler at run time. A toolchain has to be baked into an image on the
+host, where Docker has network, and passed in:
+
+```bash
+KODR_SHELL_BUILD=1 KODR_SHELL_IMAGE=kodr-rust:local KODR_SHELL_IMAGE_DIR=./my-image scripts/kodr-shell.sh run "..."
+```
+
+Layer on the node base rather than starting over, and keep two things the
+harness needs: **`procps`** (`shell.mjs` shells out to `ps`) and **node at the
+path `KODR_SHELL_NODE` names** — the egress rule is scoped to that exact path,
+so a node somewhere else means no egress at all.
+
+```dockerfile
+FROM node:24.22.2-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends       procps git curl ca-certificates rustc cargo build-essential  && rm -rf /var/lib/apt/lists/*
+```
+
+Prefer one image per language over a single fat multi-language one: the Rust
+image above is ~1.4GB against ~490MB for the node base, and a sandbox pulls
+the whole thing.
+
+### Environment variables
+
+An image `ENV` line does **not** reach the process the wrapper execs, and
+kodr's own `--env` passthrough cannot help — it forwards names from kodr's
+environment, and there is nothing there to forward. Use `KODR_SHELL_ENV`:
+
+```bash
+KODR_SHELL_ENV="CARGO_NET_OFFLINE=true,RUST_BACKTRACE=1" scripts/kodr-shell.sh run "..."
+```
+
+Comma-separated `NAME=VALUE` pairs; values cannot contain a comma. A workspace
+config file (`.cargo/config.toml`, say) is often the steadier option for
+toolchain settings.
+
 ## Configuration
 
 Everything is overridable by environment variable.
@@ -106,6 +148,8 @@ Everything is overridable by environment variable.
 | `KODR_SHELL_PROVIDER_RECORD` | — | OpenShell provider to attach for credential injection |
 | `KODR_SHELL_KEEP` | `0` | `1` leaves the sandbox running |
 | `KODR_SHELL_DOWNLOAD` | `0` | `1` returns the workspace (needs `KEEP=1`) |
+| `KODR_SHELL_ENV` | — | Comma-separated `NAME=VALUE` pairs to set for the run |
+| `KODR_SHELL_IMAGE_DIR` | `docker/openshell` | Build context for `KODR_SHELL_BUILD=1` |
 | `KODR_SHELL_POLICY` | — | Use this policy file instead of the generated one |
 | `KODR_SHELL_KEEPALIVE` | `14400` | Seconds the sandbox is held open |
 | `KODR_SHELL_READY_TIMEOUT` | `120` | Seconds to wait for `Ready` |
@@ -143,6 +187,16 @@ endpoint too. `KODR_SHELL_POLICY` overrides it with a file of your own.
 - **Expect harmless noise** on every exec — a `.profile: Permission denied`
   from bash when the policy denies the home directory, and an `[UNDICI-EHPA]`
   warning from node. Neither affects the run.
+- **`--no-git-ignore` uploads build output too.** It is required so `.git`
+  survives (`kodr loop` resets against it), but it also disables
+  `.gitignore` filtering, so a `target/` or `node_modules/` goes up — and
+  comes back down. A Rust `target/` reached 78MB after a few turns. Clean the
+  build directory between runs if you are chaining turns.
+- **A backgrounded command leaks its process.** `cargo run &` or similar
+  returns control to kodr, and the timeout is now enforced, but the orphan
+  outlives the command (BACKLOG #9). In a sandbox it dies with the sandbox,
+  which is one more reason to run this kind of task here rather than on the
+  host.
 - **On macOS the sandbox runs inside a Linux VM**, so Landlock and seccomp
   apply there rather than to the host OS. The boundary is real; it is one
   level further out than on Linux.

@@ -296,6 +296,21 @@ constraints:
     run_command spawns a shell and a model-run script might, so the sandbox
     should not be the weakest Node on the machine
   - >
+    The shipped image is node-only and other languages get their own image,
+    baked on the host and passed with KODR_SHELL_IMAGE. This is forced by the
+    design rather than a convenience: egress is default-deny and scoped to the
+    node binary, so the sandbox cannot rustup, apt-get or pip a toolchain at
+    run time. A layered image must keep procps and node at the path
+    KODR_SHELL_NODE names, since the egress rule is scoped to that exact path.
+    One image per language, not one fat multi-language image -- adding Rust
+    took the image from ~490MB to ~1.4GB and a sandbox pulls all of it
+  - >
+    An image ENV line does not reach the exec'd process, and kodr's --env
+    passthrough cannot substitute because it forwards names from kodr's own
+    environment and there is nothing there to forward. KODR_SHELL_ENV carries
+    comma-separated NAME=VALUE pairs into the exec; values cannot contain a
+    comma
+  - >
     The sandbox image must contain procps. shell.mjs shells out to
     `ps -Ao pid,ppid` to find a timed-out command's descendants; without it
     the orphan kill degrades to signalling only the direct /bin/sh child and a
@@ -371,6 +386,7 @@ tests:
     - sandbox paths are computed as root/basename, matching upload semantics
     - injects --cwd unless the caller passes one
     - forwards the prompt and passthrough args unchanged
+    - forwards KODR_SHELL_ENV pairs into the exec, warning on a malformed entry
     - passes the git identity as environment, not a config write
     - attaches a provider record by name, forwarding no secret value
     - emits a docker build only when asked
