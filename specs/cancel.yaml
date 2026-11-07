@@ -129,10 +129,15 @@ constraints:
     park(), which is reset --hard plus clean -fd over the work the operator
     just interrupted.
   - >
-    Known gap: an in-flight verify/Stop-hook child process is not killed by a
-    cancel. The signal stops the harness from starting anything further (heal,
-    review, memory), but the running test command finishes on its own. Killing
-    child processes would mean threading the signal through shell.mjs's spawn.
+    An in-flight verify/Stop-hook child process is killed by a cancel. This
+    was a known gap -- the signal stopped the harness starting anything
+    further (heal, review, memory) while the running test command finished on
+    its own -- and closing it is what threading the signal through the shell
+    runner bought: runStopHooks forwards it to verify, verify to runShell, and
+    runShell kills the command's process group and answers at once. The group
+    is what makes it reliable rather than best-effort, since a test command
+    that backgrounded something leaves an orphan no ppid walk can find (see
+    specs/shell.yaml).
   - >
     The CLI installs a SIGINT handler (createSigintCanceller) only around the
     foreground run(): the first Ctrl-C aborts the run's controller and prints a
@@ -149,6 +154,8 @@ tests:
   unit:
     - abortError is tagged with a code isAbortError recognizes
     - chat aborts an in-flight request when the signal fires (rejects with isAbortError)
+    - an AbortSignal kills a running command's process group and answers at once
+    - a signal already aborted makes a command answer immediately
     - chat rejects immediately when the signal is already aborted and never hits the server
     - an aborted chat is not retried even with maxRetries > 0
     - the tool loop stops with cancelled when the signal is already aborted, before calling the model
