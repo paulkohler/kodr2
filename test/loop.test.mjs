@@ -1431,8 +1431,13 @@ describe('per-task progress on the reporter (BACKLOG #13)', () => {
         return fakeRunResult();
       },
       buildGoal: async () => fakeGoalResult(),
+      // A full 40-character sha, as commitAll really returns -- the verdict
+      // line has to abbreviate it, or a log line is unreadable.
       git: fakeGit({
-        commitGreen: async () => ({ ok: true, sha: 'deadbee' }),
+        commitGreen: async () => ({
+          ok: true,
+          sha: 'deadbee1234567890abcdef1234567890abcdef12',
+        }),
       }),
       clock: { now: () => clock, wait: async () => {} },
       reporter,

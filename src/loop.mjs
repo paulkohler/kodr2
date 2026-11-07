@@ -340,6 +340,20 @@ function seconds(ms) {
 }
 
 /**
+ * The commit as the verdict line shows it: abbreviated, because commitAll
+ * returns the full 40 characters and a log line is meant to be read. The
+ * record keeps the full sha -- this is presentation only.
+ * @param {string|undefined} sha
+ * @returns {string}
+ */
+function shortSha(sha) {
+  if (!sha) {
+    return '';
+  }
+  return ` (${sha.slice(0, 7)})`;
+}
+
+/**
  * A plain task's green decision -- completed AND not a no-op completion AND
  * verification did not fail. Mirrors specs/loop-scripts.yaml's ratchet.
  * @param {import('./harness.mjs').RunResult} result
@@ -854,7 +868,7 @@ export async function runLoop(params) {
       // and wall clock, and the sha to go and look at.
       reporter.notice(
         `kodr loop: ${label} green in ${entry.attempts} attempt(s), ` +
-          `${seconds(entry.durationMs)}s${entry.commit ? ` (${entry.commit})` : ''}`,
+          `${seconds(entry.durationMs)}s${shortSha(entry.commit)}`,
       );
       green += 1;
       record.tasks.push(entry);
