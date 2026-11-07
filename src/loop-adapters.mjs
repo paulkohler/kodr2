@@ -25,30 +25,42 @@ import { commitAll, headSha, park } from './loop-git.mjs';
  * checklist during the attempt, and a park's rewind restores it, so "first
  * unchecked" is not a stable address for the task that just ran.
  *
+ * The task *text* travels with the index for the same reason, and is what
+ * makes the mark idempotent: the index alone cannot tell "the model already
+ * wrote exactly this tick" from "the file moved under us", so markTaskAt has
+ * to refuse both, and refusing the first cost an 83-minute run its last green
+ * phase (BACKLOG #12).
+ *
  * The pending line is per-adapter, not module state: one adapter serves one
  * loop, and two loops over the same file cannot tread on each other.
  *
  * @param {string} tasksFile - Checklist path
- * @returns {{ nextTask: () => Promise<string|null>, markTask: (mark: string) => Promise<{ok: boolean, error?: string}> }}
+ * @returns {{ nextTask: () => Promise<string|null>, markTask: (mark: string) => Promise<{ok: boolean, error?: string, alreadyMarked?: boolean}> }}
  */
 export function checklistAdapter(tasksFile) {
   /** @type {number|null} */
   let pendingLine = null;
+  /** @type {string|null} */
+  let pendingText = null;
 
   return {
     nextTask: async () => {
       const next = await readNextTask(tasksFile);
       if (!next) {
         pendingLine = null;
+        pendingText = null;
         return null;
       }
       pendingLine = next.line;
+      pendingText = next.text;
       return next.text;
     },
     // A null line is out of range for markTaskAt, which returns the refusal
     // rather than defaulting to line 0 -- a mark with no task behind it is a
     // wiring fault, and the loop turns that refusal into a "mark-failed" stop.
-    markTask: (mark) => markTaskAt(tasksFile, pendingLine, mark),
+    // A null text is likewise not a string, so markTaskAt's already-marked
+    // check cannot fire on it.
+    markTask: (mark) => markTaskAt(tasksFile, pendingLine, mark, pendingText),
   };
 }
 

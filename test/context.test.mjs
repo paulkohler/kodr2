@@ -240,6 +240,30 @@ describe('buildSystemPrompt', () => {
     assert.ok(prompt.includes('absolute path as long as it is inside'));
   });
 
+  it("names a checklistFile as the harness's, and omits the section without one", async () => {
+    // BACKLOG #12: this has to come from the harness, not from the
+    // workspace's own AGENTS.md -- a model with no such line copies the
+    // `- [x]` convention off the checklist's earlier entries, which collides
+    // with the loop's own mark. A plain build sets no checklist and must
+    // carry no section at all.
+    const plain = await buildSystemPrompt(tmpDir);
+    assert.ok(!plain.includes('<harness-checklist>'));
+
+    await writeFile(join(tmpDir, 'KODR.md'), 'custom rules');
+    const prompt = await buildSystemPrompt(tmpDir, {
+      checklistFile: 'PLAN.md',
+    });
+    assert.ok(prompt.includes('<harness-checklist>'));
+    assert.ok(prompt.includes("PLAN.md is this run's checklist"));
+    assert.ok(prompt.includes('Do not tick, add, remove, reword, or reorder'));
+    // The harness's rule outranks the workspace's own instructions, so it is
+    // stated before them (the base prompt's precedence order).
+    assert.ok(
+      prompt.indexOf('<harness-checklist>') <
+        prompt.indexOf('<workspace-instructions>'),
+    );
+  });
+
   it('includes workspace instructions when present', async () => {
     await writeFile(join(tmpDir, 'KODR.md'), 'custom rules');
     const prompt = await buildSystemPrompt(tmpDir);

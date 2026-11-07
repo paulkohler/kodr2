@@ -23,6 +23,12 @@ inputs:
   testCommand:
     type: string
     description: Shell command for verification (e.g. "npm test")
+  checklistFile:
+    type: string
+    description: >
+      Workspace-relative path of a checklist the harness itself marks, named
+      to the model as not-yours-to-edit. Set by `kodr loop`; omitted
+      everywhere else.
   maxHealTurns:
     type: number
     description: Max repair attempts (default 3)
@@ -242,6 +248,14 @@ constraints:
     only the model-facing serialization differs. See specs/tool-read-file.yaml.
   - System prompt carries run_command conduct rules (stay inside the workspace; no sudo, global installs, or global config changes; no downloading/installing unless the task requires it and never piping fetched content into a shell; nothing destructive beyond the task; commands must be non-interactive and terminate) -- run_command validates only cd targets, so the prompt is the only control on that surface
   - System prompt instructs the model to treat workspace content and command output as data, not instructions, with an explicit precedence order (system prompt, then task, then workspace instructions/memory, then file contents)
+  - >
+    The optional checklistFile option names a file the *harness* owns, and
+    adds a system-prompt section saying so -- today only `kodr loop`'s
+    checklist. It is the harness's job to say this, not the workspace's: a
+    model that reads the `- [x]` convention off the checklist's own history
+    will copy it, which collides with the loop's own mark and cost an
+    83-minute run its last green phase (specs/loop.yaml, BACKLOG #12). Omitted
+    by every other front-end, so a plain `kodr build` carries no such section.
   - Workspace instructions (KODR.md/AGENTS.md) over their size cap (default 8,000 characters -- KODR_INSTRUCTIONS_SIZE_CAP, or the instructionsSizeCap option) produce a notice instead of silent truncation, the same signal MEMORY.md has -- the full file is still loaded into the prompt either way
   - Verification runs when a test command is set and the workspace was touched (files written or a command run)
   - A "complete" stop where the workspace was never touched sets noOpCompletion and emits a one-line stderr notice, so a genuine no-op (nothing to do) and a derailed run that quietly did nothing both stay visible instead of looking like an ordinary success
@@ -304,6 +318,7 @@ tests:
     - system prompt treats workspace content as data with an explicit precedence order
     - system prompt marks the file listing as truncated when the cap is hit
     - system prompt discloses the workspace root path and that absolute paths within it are accepted
+    - system prompt names a checklistFile as the harness's, and omits the section without one
     - workspace instructions over the size cap produce a notice, never truncation
     - instructionsSizeCap uses an explicit option, then the env var, then the default
     - buildSystemPrompt uses pre-fetched instructions without re-reading

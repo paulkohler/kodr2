@@ -21,7 +21,9 @@ import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import { runLoop } from '../src/loop.mjs';
 import { checklistAdapter, gitAdapter } from '../src/loop-adapters.mjs';
+import { createNullReporter } from '../src/reporter.mjs';
 import {
+  allCommittedFiles,
   commitSubjects,
   createLoopRepo,
   filesInHead,
@@ -226,6 +228,84 @@ describe('checklistAdapter', () => {
     // second still points at alpha's line, which is no longer unchecked --
     // refused, rather than silently walking onto beta.
     assert.equal((await second.markTask('!')).ok, false);
+  });
+});
+
+describe('a model that ticks its own box (BACKLOG #12)', () => {
+  /**
+   * A green attempt that also marks its own line done, which is what a
+   * capable model does once it has read the `- [x]` convention off the lines
+   * above: "Marking the phase complete in TASKS.md (consistent with how prior
+   * phases were recorded)". Before #12 this stopped the whole loop and the
+   * work it had just verified was never committed.
+   */
+  function tidyModel(repo, task) {
+    return async () => {
+      writeFileSync(join(repo, 'done.mjs'), 'export const done = true;\n');
+      const tasks = readFileSync(join(repo, 'TASKS.md'), 'utf8');
+      writeFileSync(
+        join(repo, 'TASKS.md'),
+        tasks.replace(`- [ ] ${task}`, `- [x] ${task}`),
+      );
+      return greenResult(['done.mjs', 'TASKS.md']);
+    };
+  }
+
+  it('commits the green work instead of stopping with mark-failed', async () => {
+    const repo = await repoWith(['alpha', 'beta']);
+    // maxTasks 0 disables the cap, so the loop runs the checklist out and the
+    // reason proves it carried on past the self-ticked task rather than
+    // stopping on it.
+    const result = await drive(repo, tidyModel(repo, 'alpha'), {
+      maxTasks: 0,
+    });
+
+    assert.equal(result.reason, 'backlog-empty');
+    assert.equal(result.green, 2);
+    assert.deepEqual(commitSubjects(repo), [
+      'kodr: beta',
+      'kodr: alpha',
+      'init',
+    ]);
+    assert.ok(
+      allCommittedFiles(repo).includes('done.mjs'),
+      'the verified work has to reach a commit -- not committing it is the whole cost of #12',
+    );
+    assert.equal(gitStatus(repo), '', 'nothing left uncommitted');
+  });
+
+  it('records that the attempt marked the line, rather than staying silent', async () => {
+    const repo = await repoWith(['alpha']);
+    const notices = [];
+    const result = await drive(repo, tidyModel(repo, 'alpha'), {
+      reporter: {
+        ...createNullReporter(),
+        notice: (text) => notices.push(text),
+      },
+    });
+
+    assert.equal(result.tasks[0].markedByAttempt, true);
+    assert.ok(
+      notices.some((n) => /already ticked this line itself/.test(n)),
+      `expected a notice about the self-tick, got ${JSON.stringify(notices)}`,
+    );
+  });
+
+  it('still refuses when the attempt rewrote the line instead of ticking it', async () => {
+    // The #8 guard has to keep its teeth: a reworded line means the index no
+    // longer addresses the task that ran, and nothing proves otherwise.
+    const repo = await repoWith(['alpha', 'beta']);
+    const result = await drive(repo, async () => {
+      writeFileSync(join(repo, 'done.mjs'), 'export const done = true;\n');
+      writeFileSync(
+        join(repo, 'TASKS.md'),
+        '- [x] something else\n- [ ] beta\n',
+      );
+      return greenResult(['done.mjs', 'TASKS.md']);
+    });
+
+    assert.equal(result.reason, 'mark-failed');
+    assert.equal(result.green, 0);
   });
 });
 

@@ -9,39 +9,6 @@ Line references are approximate — treat them as anchors, not addresses.
 
 ## Open
 
-- **#12** the model marking the checklist itself halts the whole loop, and a
-  green phase's work is left uncommitted. `markTaskAt` (`src/loop.mjs:251`)
-  refuses any line that is not still `- [ ] ` and the loop turns that into a
-  `mark-failed` stop. That guard is the #8 fix and it should stay — a mark
-  written onto the wrong task is worse. But it also fires on the harmless
-  case: the model writing *the very mark the loop was about to write*.
-
-  Found in the second CRM dogfooding run (`CRM-RUN-2-NOTES.md`), which ended
-  `kodr loop: mark-failed (green 2, parked 0)` at phase 3 of 15 after 83
-  minutes. Phase 2 finished green — `verify: pass`, 68 tests green twice, 30
-  of them new — and the run stopped without committing any of it, leaving the
-  work uncommitted in the tree. The cause, in the model's own words from the
-  log: "Everything checks out. Marking the phase complete in `TASKS.md`
-  (consistent with how prior phases were recorded)", then `edit_file
-  TASKS.md`. It had seen phases 0 and 1 recorded as `- [x]` and copied the
-  convention. Nothing in `AGENTS.md`, the system prompt or the skills says
-  the checklist belongs to the harness. The harness recorded the evidence
-  itself: the task entry's `filesChanged` lists `TASKS.md`.
-
-  Same shape as #8 — a model-authored edit defeating a loop mechanism — by a
-  different route. #8 was a `git commit`, this is the checklist.
-
-  Three candidate fixes, probably more than one of them:
-  - Make the mark idempotent: if the line at the remembered index is the same
-    task and already carries the mark the loop intended, that is success, not
-    a refusal. A *different* mark, different text, or a moved line still
-    stops. `checklistAdapter` already has the task text from `readNextTask`;
-    it just doesn't pass it to `markTask`.
-  - Tell the model the checklist is not its to edit, in
-    `examples/crm/AGENTS.md` and in the loop's own system prompt.
-  - Have the loop refuse the model write to the tasks file outright while it
-    is driving that file.
-
 - **#13** `kodr loop` prints no per-task marker, so an unattended run is
   opaque while it matters. No "starting task 3 of 15", no per-phase
   green/parked line — only one tally at the very end
@@ -56,6 +23,30 @@ Line references are approximate — treat them as anchors, not addresses.
 
 ## Fixed
 
+- **#12** the model marking the checklist itself halted the whole loop and
+  left a green phase's work uncommitted — the mark is idempotent now: a line
+  already reading exactly `- [<mark>] <task>`, the same mark on the same task
+  text, is success rather than a refusal, because the write it was about to
+  make is a no-op. A different mark, different text, or a moved line still
+  stops the run, so #8's guard keeps its teeth; proving sameness needs the
+  task text, so `checklistAdapter` now spends the text alongside the line
+  index. The harness also tells the model the checklist is not its to edit,
+  in its *own* system prompt (the new `checklistFile` option) rather than
+  leaving it to each workspace's `AGENTS.md` — advisory, and belt and braces
+  to the mark, not a substitute. A green task whose tick the model wrote
+  itself now says so on stderr and on the loop record (`markedByAttempt`),
+  because silence is how this stayed invisible until it cost a run. Found in
+  the second CRM dogfooding run: `mark-failed` at phase 3 of 15 after 83
+  minutes, with phase 2 green — verify pass, 68 tests green twice, 30 of them
+  new — and none of it committed. In the model's own words from the log,
+  "Everything checks out. Marking the phase complete in `TASKS.md` (consistent
+  with how prior phases were recorded)": it had read the `- [x]` convention
+  off phases 0 and 1 and copied it, the tidy thing to do, not the adversarial
+  one. Same shape as #8 — a model-authored edit defeating a loop mechanism —
+  by a different route. Still open as a design question, deliberately not
+  taken: having the loop refuse the model's write to the tasks file outright
+  while it drives that file, which would also block a task that legitimately
+  needs to extend the checklist
 - **#11** a cleanly-detached child outlived the run — `killTree` ran only
   from inside `runShell`, on output overflow, timeout and abort, so a command
   that *succeeds* having detached something was reaped by nothing. Every

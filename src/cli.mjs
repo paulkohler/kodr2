@@ -4,7 +4,7 @@
 
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { DEFAULT_COMMIT_TIMEOUT_MS } from './commit.mjs';
 import { runDoctorChecks } from './doctor.mjs';
 import { parseEnvNames } from './env.mjs';
@@ -1897,6 +1897,12 @@ export async function runLoopCommand(args) {
   }
 
   const runOptions = buildRunOptions(args, cwd, quiet);
+  // Every build this loop drives is told the checklist is the harness's, by
+  // the harness -- not by a line someone remembered to add to the workspace's
+  // own AGENTS.md (BACKLOG #12). Relative, because that is how the model
+  // addresses workspace paths, and named rather than hardcoded because
+  // --tasks may have renamed it.
+  runOptions.checklistFile = relative(cwd, tasksFile);
 
   // A dedicated read-only judge client for GOAL: items, same as `kodr goal`
   // (specs/goal.yaml) -- one client amortized across every GOAL: item in the

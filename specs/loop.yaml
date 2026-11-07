@@ -262,6 +262,39 @@ constraints:
     loop goes to mark it stops the run with "mark-failed" rather than marking
     whatever is nearest.
   - >
+    That refusal is idempotent, though: a line already reading exactly
+    `- [<mark>] <task>` -- the same mark the loop came to write, on the same
+    task text -- is success, not a refusal, because the file already says what
+    the write was going to make it say and the write itself is a no-op. A
+    *different* mark, different text, or a moved line still stops the run.
+
+    Without this the guard above fires on the one harmless case and the price
+    is the whole unattended run. Found live in the second CRM dogfooding run:
+    phase 2 of 15 finished green -- verify pass, 68 tests green twice, 30 of
+    them new -- and the run stopped with "mark-failed" without committing any
+    of it, 83 minutes in, because the model had written the tick itself. In its
+    own words from the log: "Everything checks out. Marking the phase complete
+    in TASKS.md (consistent with how prior phases were recorded)". It had read
+    the `- [x]` convention off phases 0 and 1 and copied it, which is the
+    tidier thing to do, not the adversarial one (BACKLOG #12).
+
+    Proving it is the same task needs the task text, not just the line index,
+    so markTaskAt takes the expected text and compares the whole line. With no
+    expected text it cannot prove sameness and refuses as before -- the
+    conservative direction, since the whole point of the guard is to never
+    mark a task nobody judged.
+  - >
+    The model is told the checklist is not its to edit, by the harness, in the
+    system prompt -- not by a line someone remembered to put in the workspace's
+    own AGENTS.md. Nothing in the prompt, the skills or the instructions said
+    so during the run above, and a convention read off the file's own history
+    is the obvious thing to copy. This is belt and braces to the idempotent
+    mark, not a substitute for it: prompt text is advisory and a capable model
+    will still occasionally tidy, which is exactly why the mark has to tolerate
+    it. The note names the checklist actually in use (`--tasks` may rename it)
+    and is added only when the loop is driving one, so a plain `kodr build` is
+    unaffected.
+  - >
     Kodr's own artifact directories — .kodr/runs/ and the .kodr/loops/ record
     this spec adds — are excluded from the ratchet's `add` and survive its
     `clean`, and the loop registers them at startup the way the shell version
@@ -397,6 +430,11 @@ tests:
     - readNextTask returns the line index alongside the task text
     - markTaskAt marks the given line, refusing one already marked behind its back
     - markTaskAt refuses a line index outside the file
+    - markTaskAt accepts a line already carrying the same mark on the same task text
+    - markTaskAt refuses an already-marked line whose text changed, or whose mark differs
+    - markTaskAt with no expected text refuses an already-marked line, as before
+    - a green task whose tick the model wrote itself still commits, and the loop carries on
+    - the loop's system prompt names the checklist as the harness's when a loop drives one
     - park rewinds to the pre-attempt sha, discarding a commit made during the attempt
     - park without a sha keeps the old bare-reset behaviour
     # --- what the shell version could not do ---

@@ -74,6 +74,34 @@ function workspaceRootNote(cwd) {
 }
 
 /**
+ * Tell the model that a file in the workspace belongs to the harness driving
+ * it, not to the task. Today that is only `kodr loop`'s checklist.
+ *
+ * This lives here, in the harness's own prompt, rather than in the
+ * workspace's AGENTS.md, because it is the harness's rule and the harness is
+ * the only thing that knows the rule applies. A model given no such line
+ * reads the `- [x]` convention off the checklist's own earlier entries and
+ * copies it -- the tidy thing to do -- and that collides with the loop's own
+ * mark. It cost an 83-minute run its last green phase (BACKLOG #12). Leaving
+ * it to each workspace to remember means every new checklist starts exposed.
+ *
+ * Advisory, and known to be: the fix proper is markTaskAt tolerating the
+ * duplicate tick (src/loop.mjs). This is the half that stops the model
+ * writing into the file at all.
+ * @param {string} checklistFile - Workspace-relative checklist path
+ * @returns {string}
+ */
+function checklistNote(checklistFile) {
+  return [
+    '<harness-checklist>',
+    `${checklistFile} is this run's checklist and belongs to the harness driving you, not to the task.`,
+    'Do not tick, add, remove, reword, or reorder its items. The harness marks each item itself once it has verified the work, and an edit of your own collides with that -- it can stop the run before your work has been saved.',
+    'Read it freely for context.',
+    '</harness-checklist>',
+  ].join('\n');
+}
+
+/**
  * Assemble the system prompt for a workspace.
  * @param {string} cwd - Workspace root
  * @param {object} [options]
@@ -90,10 +118,21 @@ function workspaceRootNote(cwd) {
  *   content. Reads it itself when omitted; callers that also need the content
  *   separately (the harness's size-cap notice) should read once and pass it
  *   through, same as memory.
+ * @param {string|null} [options.checklistFile] - Workspace-relative path of a
+ *   checklist the harness marks itself (`kodr loop`). Adds the
+ *   harness-checklist section; omitted everywhere else, so a plain build
+ *   carries no such section.
  * @returns {Promise<string>}
  */
 export async function buildSystemPrompt(cwd, options = {}) {
   const parts = [BASE_PROMPT, workspaceRootNote(cwd)];
+
+  // Before the workspace's own instructions and memory, matching the
+  // precedence the base prompt states: this is the harness speaking, and a
+  // workspace file saying otherwise does not get to win.
+  if (options.checklistFile) {
+    parts.push(checklistNote(options.checklistFile));
+  }
 
   const instructions =
     options.instructions !== undefined

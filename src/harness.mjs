@@ -21,7 +21,6 @@ import {
 import { createDebugLogger, debugLogEnabled } from './debug-log.mjs';
 import { buildEnv } from './env.mjs';
 import { heal } from './heal.mjs';
-import { createNullReporter, createTerminalReporter } from './reporter.mjs';
 import {
   loadHooks,
   runSessionHooks,
@@ -49,18 +48,19 @@ import {
   hasContextHeadroom,
 } from './model.mjs';
 import { createProvider, resolveProviderName } from './provider.mjs';
-import { discoverSkills } from './skills.mjs';
 import { DEFAULT_OLLAMA_BASE_URL } from './provider-ollama.mjs';
 import { DEFAULT_OPENROUTER_BASE_URL } from './provider-openrouter.mjs';
+import { createNullReporter, createTerminalReporter } from './reporter.mjs';
 import {
   minReviewToolCalls,
   reviewBaseUrlFor,
   reviewEndpoint,
-  reviewProviderName,
   reviewMaxToolTurns,
+  reviewProviderName,
   reviewSwapEnabled,
   runReview,
 } from './review.mjs';
+import { discoverSkills } from './skills.mjs';
 import {
   isCostBudgetExceeded,
   isRunBudgetExceeded,
@@ -153,6 +153,10 @@ export {
  *   Anthropic-family models; off otherwise; also KODR_CACHE). See
  *   specs/provider-cache.yaml.
  * @param {string} [options.testCommand] - Verification command
+ * @param {string} [options.checklistFile] - Workspace-relative path of a
+ *   checklist this harness marks itself, named to the model as not its to
+ *   edit (specs/loop.yaml, BACKLOG #12). Set by `kodr loop`; omitted by every
+ *   other front-end.
  * @param {number} [options.maxHealTurns] - Max heal turns (default 3)
  * @param {number} [options.maxRunMs] - Stop between turns after this many ms (0 disables)
  * @param {number} [options.requestTimeoutMs] - Hard per-request timeout ceiling,
@@ -396,6 +400,10 @@ export async function run(prompt, options) {
     memory: memoryContent,
     skills,
     instructions: instructionsContent,
+    // Only `kodr loop` sets this -- it is the one caller that marks a
+    // workspace file itself and so needs the model told to leave it alone
+    // (BACKLOG #12).
+    checklistFile: options.checklistFile,
   });
 
   // MEMORY.md is always loaded into the prompt above when it exists; this

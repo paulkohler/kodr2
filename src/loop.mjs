@@ -237,18 +237,28 @@ export async function readNextTask(tasksFile) {
  * parked). Refuses a line that is out of range or no longer unchecked rather
  * than marking the wrong task: a mismatch means the file moved under the
  * loop, and the honest response is to stop and let the operator look.
+ *
+ * One already-marked line is accepted instead of refused: the one already
+ * reading exactly what this call was about to write. See markedSameTask --
+ * refusing that case cost an 83-minute run its last green phase (BACKLOG
+ * #12).
  * @param {string} tasksFile
  * @param {number} line - Line index from readNextTask
  * @param {string} mark
- * @returns {Promise<{ ok: boolean, error?: string }>}
+ * @param {string|null} [expectedText] - Task text from readNextTask, for the
+ *   already-marked check. Without it an already-marked line is always refused.
+ * @returns {Promise<{ ok: boolean, error?: string, alreadyMarked?: boolean }>}
  */
-export async function markTaskAt(tasksFile, line, mark) {
+export async function markTaskAt(tasksFile, line, mark, expectedText) {
   const content = await readFile(tasksFile, 'utf8');
   const lines = content.split('\n');
   if (!Number.isInteger(line) || line < 0 || line >= lines.length) {
     return { ok: false, error: `checklist has no line at index ${line}` };
   }
   if (!/^- \[ \] /.test(lines[line])) {
+    if (markedSameTask(lines[line], mark, expectedText)) {
+      return { ok: true, alreadyMarked: true };
+    }
     return {
       ok: false,
       error: `checklist line ${line + 1} is no longer unchecked -- refusing to mark a different task`,
@@ -257,6 +267,33 @@ export async function markTaskAt(tasksFile, line, mark) {
   lines[line] = lines[line].replace(/^- \[ \] /, `- [${mark}] `);
   await writeFile(tasksFile, lines.join('\n'));
   return { ok: true };
+}
+
+/**
+ * Whether an already-marked line is *the very line this mark would have
+ * written* -- same marker, same task text. Then the write is a no-op and
+ * refusing it is pure loss: the model tidied the checklist itself, which is
+ * the tidy thing to do, not the adversarial one. It reads the `- [x]`
+ * convention off the lines above and copies it; in the run that found this
+ * (BACKLOG #12) its own words were "Marking the phase complete in TASKS.md
+ * (consistent with how prior phases were recorded)".
+ *
+ * Strict whole-line equality, deliberately: a different marker, reworded
+ * text, or a line that moved all still fall through to the refusal, because
+ * none of them prove the loop and the file agree about which task this is.
+ * No expectedText means there is nothing to prove it with, so an
+ * already-marked line is refused as before -- the conservative direction,
+ * since the guard exists to never mark a task nobody judged.
+ * @param {string} current - The line as it stands on disk
+ * @param {string} mark
+ * @param {string|null} [expectedText]
+ * @returns {boolean}
+ */
+function markedSameTask(current, mark, expectedText) {
+  if (typeof expectedText !== 'string') {
+    return false;
+  }
+  return current === `- [${mark}] ${expectedText}`;
 }
 
 /**
@@ -504,7 +541,7 @@ function goalWasCancelled(goalResult) {
  * set, or a failed git commit -- the loop never continues past a git
  * failure on the assumption that it worked.
  * @param {object} params
- * @param {{ nextTask: () => Promise<string|null>, markTask: (mark: string) => Promise<{ok: boolean, error?: string}|void> }} params.checklist
+ * @param {{ nextTask: () => Promise<string|null>, markTask: (mark: string) => Promise<{ok: boolean, error?: string, alreadyMarked?: boolean}> }} params.checklist
  * @param {(text: string, continuation: object|null) => Promise<import('./harness.mjs').RunResult>} params.buildTask
  * @param {(goalText: string) => Promise<import('./goal.mjs').GoalResult>} params.buildGoal
  * @param {{ commitGreen: (message: string) => Promise<{ok: boolean, sha?: string, error?: string, reason?: string}>, park: (resetPaths: string[], resetTo?: string|null) => Promise<{ok: boolean, error?: string, wiped?: string[], refused?: string[]}>, headSha?: () => Promise<string|null> }} params.git
@@ -732,6 +769,15 @@ export async function runLoop(params) {
         await emit('mark-failed');
         return finish('mark-failed');
       }
+      // Accepted, not refused (BACKLOG #12) -- but say so, because the model
+      // editing the checklist is worth knowing about even when it is harmless,
+      // and silence here is how it stayed invisible until it stopped a run.
+      if (markResult?.alreadyMarked) {
+        entry.markedByAttempt = true;
+        reporter.notice(
+          `kodr: ${task} -- the attempt had already ticked this line itself; left as it stands`,
+        );
+      }
       const commitResult = await git.commitGreen(`kodr: ${task}`);
       if (!commitResult.ok && commitResult.error) {
         entry.error = commitResult.error;
@@ -764,6 +810,11 @@ export async function runLoop(params) {
       reporter.notice(`resetPaths: refusing to wipe '${refused}'`);
     }
 
+    // No alreadyMarked branch here, unlike the green path: the park above has
+    // already rewound the tree to the pre-attempt sha and cleaned it, so
+    // whatever the attempt wrote into the checklist is gone by now and the
+    // line is back to '[ ]'. Only a green task reaches its mark with the
+    // model's own edit still in the file.
     const parkMark = await checklist.markTask('!');
     if (parkMark && !parkMark.ok) {
       entry.error = parkMark.error;

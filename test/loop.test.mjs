@@ -533,6 +533,75 @@ describe('readNextTask / markTaskAt', () => {
     await cleanup(dir);
   });
 
+  it('accepts a line already carrying the same mark on the same task', async () => {
+    // BACKLOG #12: the model ticked the box itself, copying the `- [x]`
+    // convention off the lines above it. The file already says exactly what
+    // this write was going to make it say, so refusing is pure loss -- it
+    // stopped an 83-minute run with a verified-green phase uncommitted.
+    const { readFile, writeFile } = await import('node:fs/promises');
+    const { dir, file } = await tmpChecklist(
+      '# Tasks\n\n- [ ] alpha\n- [ ] beta\n',
+    );
+
+    const task = await readNextTask(file);
+    await writeFile(file, '# Tasks\n\n- [x] alpha\n- [ ] beta\n');
+
+    const marked = await markTaskAt(file, task.line, 'x', task.text);
+    assert.equal(marked.ok, true);
+    assert.equal(marked.alreadyMarked, true);
+
+    const content = await readFile(file, 'utf8');
+    assert.match(content, /- \[x\] alpha/);
+    assert.match(content, /- \[ \] beta/, 'beta must be left untouched');
+
+    await cleanup(dir);
+  });
+
+  it('refuses an already-marked line whose mark differs', async () => {
+    // A '[x]' where the loop came to write '[!]' is not the same statement:
+    // something decided this task passed, and it was not the loop.
+    const { dir, file } = await tmpChecklist('# Tasks\n\n- [ ] alpha\n');
+    const task = await readNextTask(file);
+    const { writeFile } = await import('node:fs/promises');
+    await writeFile(file, '# Tasks\n\n- [x] alpha\n');
+
+    const marked = await markTaskAt(file, task.line, '!', task.text);
+    assert.equal(marked.ok, false);
+    assert.match(marked.error, /no longer unchecked/);
+    await cleanup(dir);
+  });
+
+  it('refuses an already-marked line whose text changed', async () => {
+    // Right marker, wrong line: the checklist was rewritten under the loop
+    // and the index no longer addresses the task that just ran. This is the
+    // #8 case and must still stop the run.
+    const { dir, file } = await tmpChecklist(
+      '# Tasks\n\n- [ ] alpha\n- [ ] beta\n',
+    );
+    const task = await readNextTask(file);
+    const { writeFile } = await import('node:fs/promises');
+    await writeFile(file, '# Tasks\n\n- [x] a brand new task\n- [ ] beta\n');
+
+    const marked = await markTaskAt(file, task.line, 'x', task.text);
+    assert.equal(marked.ok, false);
+    assert.match(marked.error, /no longer unchecked/);
+    await cleanup(dir);
+  });
+
+  it('refuses an already-marked line when given no expected text', async () => {
+    // Without the task text there is nothing to prove sameness with, so the
+    // conservative answer is the old one. A caller that forgets to pass it
+    // gets the pre-#12 behaviour, not a mark on an unverified task.
+    const { dir, file } = await tmpChecklist('# Tasks\n\n- [ ] alpha\n');
+    const task = await readNextTask(file);
+    const { writeFile } = await import('node:fs/promises');
+    await writeFile(file, '# Tasks\n\n- [x] alpha\n');
+
+    const marked = await markTaskAt(file, task.line, 'x');
+    assert.equal(marked.ok, false);
+    await cleanup(dir);
+  });
+
   it('returns null when the checklist is missing', async () => {
     assert.equal(await readNextTask('/nonexistent/TASKS.md'), null);
   });

@@ -55,9 +55,18 @@ constraints:
     rewind restores it, so the first unchecked line is no longer the task that
     just ran.
   - >
-    The index is per-adapter state, not module state. One adapter serves one
-    loop; two concurrent loops over the same file get two adapters and cannot
-    tread on each other's pending line.
+    The adapter holds the task *text* alongside the index and spends both on
+    the mark, because the index alone cannot tell "the model already wrote
+    exactly this tick" from "the file moved under us". Dropping the text makes
+    markTaskAt refuse the harmless case, which is BACKLOG #12 -- an 83-minute
+    run stopped with a verified-green phase left uncommitted. The text is the
+    line without its `- [ ] ` prefix, which is exactly what readNextTask
+    returns and what markTaskAt reassembles the expected line from, so the two
+    cannot drift apart.
+  - >
+    Both the index and the text are per-adapter state, not module state. One
+    adapter serves one loop; two concurrent loops over the same file get two
+    adapters and cannot tread on each other's pending line.
   - >
     markTask before any nextTask is refused by markTaskAt (a null line is out
     of range), not silently applied to line 0. A mark with no task behind it
@@ -92,4 +101,7 @@ tests:
     - the green path commits the model's work rather than rewinding it
     - a checklist edited by the model during the attempt still marks the right line
     - markTask before nextTask is refused rather than marking line 0
+    - >
+      a green task whose tick the model wrote itself over a real TASKS.md
+      still marks, commits, and lets the loop carry on to the next task
     - dropping headSha from the git object reproduces #8, proving the test has teeth
