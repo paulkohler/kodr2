@@ -110,7 +110,7 @@ export function runShell(command, cwd, options = {}) {
         if (stdout.length + stderr.length > cap) {
           overflowed = true;
           const pids = descendantPids(child.pid, psTimeoutMs);
-          killTree(child.pid, pids, 'SIGKILL');
+          killTree(child.pid, pids, 'SIGKILL', psTimeoutMs);
         }
       });
       stream.on('error', () => {
@@ -180,9 +180,9 @@ export function runShell(command, cwd, options = {}) {
         // chain a second lookup at SIGKILL time would need to rediscover
         // them by.
         const pids = descendantPids(child.pid, psTimeoutMs);
-        killTree(child.pid, pids, 'SIGTERM');
+        killTree(child.pid, pids, 'SIGTERM', psTimeoutMs);
         killGraceTimer = setTimeout(() => {
-          killTree(child.pid, pids, 'SIGKILL');
+          killTree(child.pid, pids, 'SIGKILL', psTimeoutMs);
         }, killGraceMs);
         killGraceTimer.unref?.();
         // Answer the caller now rather than waiting for execFile's callback,
@@ -220,9 +220,9 @@ export function runShell(command, cwd, options = {}) {
     if (signal) {
       onAbort = () => {
         const pids = descendantPids(child.pid, psTimeoutMs);
-        killTree(child.pid, pids, 'SIGTERM');
+        killTree(child.pid, pids, 'SIGTERM', psTimeoutMs);
         const graceTimer = setTimeout(() => {
-          killTree(child.pid, pids, 'SIGKILL');
+          killTree(child.pid, pids, 'SIGKILL', psTimeoutMs);
         }, killGraceMs);
         graceTimer.unref?.();
         if (!settled) {
@@ -265,6 +265,53 @@ function killPids(pids, signal) {
 }
 
 /**
+ * Every process whose process group id is `pid` -- the members of the group
+ * the detached child leads.
+ *
+ * This is the fallback for a host that refuses the group *signal* while still
+ * reporting group *membership*: inside an OpenShell sandbox `kill(-pgid)`
+ * comes back EPERM (seccomp, confirmed: single-pid kill works on the same
+ * process), so the group has to be enumerated and its members killed one at a
+ * time. A `ps` lookup by pgid finds the orphan that the ppid walk cannot,
+ * because group membership is inherited and survives reparenting while the
+ * ppid chain does not.
+ *
+ * Safe when `detached` was refused, which is the case that would otherwise be
+ * catastrophic: a process group's id is its leader's pid, so a row with
+ * `pgid == pid` can only exist if our own child created that group. If it
+ * never got one, it sits in the parent's group under a different id, nothing
+ * matches, and this returns empty rather than selecting Kodr and the user's
+ * shell. The current process is excluded regardless.
+ * @param {number|undefined} pid - The direct child's pid, i.e. its group id
+ * @param {number} psTimeoutMs
+ * @returns {number[]}
+ */
+export function groupMemberPids(pid, psTimeoutMs = DEFAULT_PS_TIMEOUT_MS) {
+  if (!pid) {
+    return [];
+  }
+  let table;
+  try {
+    table = execFileSync('ps', ['-Ao', 'pid,pgid'], {
+      timeout: psTimeoutMs,
+    }).toString();
+  } catch {
+    return [];
+  }
+  const members = [];
+  for (const line of table.split('\n').slice(1)) {
+    const [memberPid, pgid] = line.trim().split(/\s+/).map(Number);
+    if (!memberPid || !pgid) {
+      continue;
+    }
+    if (pgid === pid && memberPid !== process.pid) {
+      members.push(memberPid);
+    }
+  }
+  return members;
+}
+
+/**
  * Signal a timed-out command's whole process group, then its ppid-walked
  * descendants as a fallback.
  *
@@ -284,13 +331,20 @@ function killPids(pids, signal) {
  * @param {number[]} pids - Its ppid-walked descendants
  * @param {NodeJS.Signals} signal
  */
-function killTree(pid, pids, signal) {
+function killTree(pid, pids, signal, psTimeoutMs = DEFAULT_PS_TIMEOUT_MS) {
+  let groupSignalled = false;
   if (pid) {
     try {
       process.kill(-pid, signal);
+      groupSignalled = true;
     } catch {
-      // No such group -- detached was refused, or it is already gone.
+      // Either no such group (detached refused, or already gone) or the host
+      // denies group signals outright -- EPERM inside an OpenShell sandbox.
+      // Both are handled by enumerating the group below.
     }
+  }
+  if (!groupSignalled) {
+    killPids(groupMemberPids(pid, psTimeoutMs), signal);
   }
   killPids(pids, signal);
 }

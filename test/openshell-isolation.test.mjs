@@ -210,6 +210,26 @@ describe('kodr-shell environment passthrough', () => {
     assert.match(out, /GIT_AUTHOR_NAME=/, 'git identity is still there');
   });
 
+  it('also declares the names to kodr with --env', () => {
+    // Setting the variable on kodr's own process is only half of it: kodr
+    // replaces its children's environment with a curated allowlist, so hooks
+    // and run_command see it UNSET unless the name is admitted with --env.
+    // Observed in a sandbox: the prefix alone printed CARGO_NET_OFFLINE=UNSET.
+    const { out } = dryRun(['loop'], {
+      KODR_SHELL_ENV: 'CARGO_NET_OFFLINE=true,RUST_BACKTRACE=1',
+    });
+    assert.match(out, /--env CARGO_NET_OFFLINE\\?,RUST_BACKTRACE/);
+  });
+
+  it('leaves a caller-supplied --env alone', () => {
+    const { out } = dryRun(['loop', '--env', 'MINE'], {
+      KODR_SHELL_ENV: 'A=1',
+    });
+    const envFlags = (out.match(/(^| )--env /g) ?? []).length;
+    assert.equal(envFlags, 1, "the caller's --env wins; do not add a second");
+    assert.match(out, /--env MINE/);
+  });
+
   it('warns on an entry that is not NAME=VALUE and drops it', () => {
     const { out, code } = dryRun(['run', 'x'], { KODR_SHELL_ENV: 'OOPS' });
     assert.equal(code, 0);

@@ -116,17 +116,24 @@ the whole thing.
 
 ### Environment variables
 
-An image `ENV` line does **not** reach the process the wrapper execs, and
-kodr's own `--env` passthrough cannot help — it forwards names from kodr's
-environment, and there is nothing there to forward. Use `KODR_SHELL_ENV`:
+An image `ENV` line does **not** reach the process the wrapper execs, so a
+variable a task needs cannot be baked into the image. Use `KODR_SHELL_ENV`:
 
 ```bash
 KODR_SHELL_ENV="CARGO_NET_OFFLINE=true,RUST_BACKTRACE=1" scripts/kodr-shell.sh run "..."
 ```
 
-Comma-separated `NAME=VALUE` pairs; values cannot contain a comma. A workspace
-config file (`.cargo/config.toml`, say) is often the steadier option for
-toolchain settings.
+Comma-separated `NAME=VALUE` pairs; values cannot contain a comma.
+
+That sets the variable on kodr's own process **and** passes `--env NAME` so
+kodr admits it to the curated environment its children get. Both halves are
+needed: without the second, a hook or `run_command` sees the variable unset,
+because kodr never hands children the full `process.env` (see
+[`specs/tool-run-command.yaml`](../specs/tool-run-command.yaml)). If you pass
+your own `--env`, that wins and the wrapper adds nothing.
+
+A workspace config file (`.cargo/config.toml`, say) is often the steadier
+option for toolchain settings.
 
 ## Configuration
 
@@ -192,11 +199,11 @@ endpoint too. `KODR_SHELL_POLICY` overrides it with a file of your own.
   `.gitignore` filtering, so a `target/` or `node_modules/` goes up — and
   comes back down. A Rust `target/` reached 78MB after a few turns. Clean the
   build directory between runs if you are chaining turns.
-- **A backgrounded command leaks its process.** `cargo run &` or similar
-  returns control to kodr, and the timeout is now enforced, but the orphan
-  outlives the command (BACKLOG #9). In a sandbox it dies with the sandbox,
-  which is one more reason to run this kind of task here rather than on the
-  host.
+- **A backgrounded command is killed with its process group.** The timeout is
+  enforced and the orphan is reaped, including in a sandbox, where
+  `kill(-pgid)` is refused outright and the group has to be enumerated and
+  killed pid by pid instead. A command that calls `setsid` itself escapes the
+  group and is not reached — a known limit.
 - **On macOS the sandbox runs inside a Linux VM**, so Landlock and seccomp
   apply there rather than to the host OS. The boundary is real; it is one
   level further out than on Linux.

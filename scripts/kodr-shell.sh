@@ -62,12 +62,14 @@ kodr_in="${SANDBOX_ROOT}/${kodr_name}"
 args=("$@")
 have_base=0
 have_cwd=0
+have_env_flag=0
 provider=lmstudio
 prev=""
 for a in "${args[@]+"${args[@]}"}"; do
   case "$a" in
     --base-url | --base-url=*) have_base=1 ;;
     --cwd | --cwd=*) have_cwd=1 ;;
+    --env | --env=*) have_env_flag=1 ;;
     openrouter | ollama | lmstudio) if [ "$prev" = "--provider" ]; then provider="$a"; fi ;;
     --provider=*) provider="${a#--provider=}" ;;
   esac
@@ -231,25 +233,42 @@ emit "$OPENSHELL" sandbox upload "$SANDBOX_NAME" "$WORKSPACE" "$SANDBOX_ROOT" --
 # pair (see specs/tool-run-command.yaml) -- without that the loop does all its
 # work and then dies "Author identity unknown" on its first commit, since the
 # sandbox has no ~/.gitconfig.
-# An image ENV line does not reach the exec'd process, so a variable a task
-# needs (CARGO_NET_OFFLINE=true, say) cannot be baked into the image and
-# cannot be picked up by kodr's own --env passthrough either -- there is
-# nothing in kodr's environment to pass through. KODR_SHELL_ENV is the way in.
+# An image ENV line does not reach the exec'd process at all, so a variable a
+# task needs (CARGO_NET_OFFLINE=true, say) cannot be baked into the image.
+# KODR_SHELL_ENV sets it on kodr's own process -- but that alone is not
+# enough: kodr replaces its children's environment with a curated allowlist
+# (see specs/tool-run-command.yaml), so hooks and run_command would still see
+# it UNSET. Each name is therefore also declared to kodr with --env, which is
+# what admits it to that allowlist. Both halves are needed; verified in a
+# sandbox, where the prefix alone printed UNSET from a probe hook.
 env_prefix=(env
   "GIT_AUTHOR_NAME=$GIT_NAME" "GIT_AUTHOR_EMAIL=$GIT_EMAIL"
   "GIT_COMMITTER_NAME=$GIT_NAME" "GIT_COMMITTER_EMAIL=$GIT_EMAIL")
+extra_names=""
 if [ -n "$EXTRA_ENV" ]; then
   # NAME=VALUE pairs, comma-separated. Values may not contain a comma.
   old_ifs="$IFS"
   IFS=','
   for pair in $EXTRA_ENV; do
     case "$pair" in
-      *=*) env_prefix+=("$pair") ;;
+      *=*)
+        env_prefix+=("$pair")
+        name="${pair%%=*}"
+        if [ -n "$extra_names" ]; then
+          extra_names="$extra_names,$name"
+        else
+          extra_names="$name"
+        fi
+        ;;
       '') ;;
       *) echo "kodr-shell: ignoring KODR_SHELL_ENV entry '$pair' (want NAME=VALUE)" >&2 ;;
     esac
   done
   IFS="$old_ifs"
+fi
+# Only when the caller has not passed their own --env, which wins.
+if [ -n "$extra_names" ] && [ "$have_env_flag" = 0 ]; then
+  args+=(--env "$extra_names")
 fi
 
 rc=0

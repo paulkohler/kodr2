@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
-import { runShell } from '../src/shell.mjs';
+import { groupMemberPids, runShell } from '../src/shell.mjs';
 
 function isProcessAlive(pid) {
   try {
@@ -231,5 +231,45 @@ describe('runShell reaps a backgrounded orphan (BACKLOG #9)', () => {
     });
     assert.equal(result.exitCode, 1);
     assert.match(result.stderr, /cancelled/);
+  });
+});
+
+describe('groupMemberPids', () => {
+  it('finds the members of a group the child leads', async () => {
+    // The fallback for a host that reports group membership but refuses the
+    // group signal: inside an OpenShell sandbox `kill(-pgid)` is EPERM
+    // (seccomp), so the group has to be enumerated and killed pid by pid.
+    const { spawn } = await import('node:child_process');
+    const child = spawn('/bin/sh', ['-c', 'sleep 2'], { detached: true });
+    await new Promise((r) => setTimeout(r, 250));
+    const members = groupMemberPids(child.pid);
+    assert.ok(
+      members.includes(child.pid),
+      `expected the group leader ${child.pid} among ${JSON.stringify(members)}`,
+    );
+    try {
+      process.kill(-child.pid, 'SIGKILL');
+    } catch {
+      child.kill('SIGKILL');
+    }
+  });
+
+  it('never returns the current process', () => {
+    // The guard that matters. If `detached` were refused the child would sit
+    // in our own group, and selecting that group would target Kodr itself.
+    for (const probe of [process.pid, process.ppid, 1]) {
+      assert.ok(
+        !groupMemberPids(probe).includes(process.pid),
+        `groupMemberPids(${probe}) must not include this process`,
+      );
+    }
+  });
+
+  it('returns nothing for a group id that does not exist', () => {
+    assert.deepEqual(groupMemberPids(0x7ffffff), []);
+  });
+
+  it('returns nothing without a pid', () => {
+    assert.deepEqual(groupMemberPids(undefined), []);
   });
 });

@@ -96,6 +96,26 @@ constraints:
     anything else by accident, since a group's id is its leader's pid and the
     only process with that pid is our own child.
   - >
+    A host can report group membership while refusing the group *signal*, and
+    one that matters does: inside an OpenShell sandbox `kill(-pgid)` returns
+    EPERM under seccomp while a single-pid kill on the same process succeeds.
+    So when the group signal fails for any reason the group is enumerated
+    instead -- `ps -Ao pid,pgid` filtered to `pgid == child.pid` -- and its
+    members are killed one at a time. That lookup is what reaches the orphan,
+    since membership is inherited and survives reparenting while the ppid
+    chain does not. It stays safe in the case that would otherwise be
+    catastrophic: a group's id is its leader's pid, so a row matching
+    `pgid == child.pid` can only exist if our own child created that group. If
+    `detached` was refused the child sits in the parent's group under a
+    different id, nothing matches, and the lookup returns empty rather than
+    selecting Kodr and the user's shell. The current process is excluded
+    regardless.
+  - >
+    Known limit: a command that calls `setsid` itself leaves the group, and
+    nothing here reaches it. Untested, and out of scope -- a process that has
+    deliberately escaped every handle the parent holds is not something a
+    timeout can be expected to reap.
+  - >
     This is why the runner uses `spawn` rather than `execFile`: execFile
     silently drops `detached`, leaving the child in the parent's process group
     (verified -- the child's pgid came back as the launching shell's), so
@@ -148,6 +168,9 @@ tests:
   unit:
     - a timeout answers the caller even when a backgrounded orphan holds the pipes open
     - a timeout kills a backgrounded process the ppid walk cannot see
+    - groupMemberPids finds the members of a group the child leads
+    - groupMemberPids never returns the current process
+    - groupMemberPids returns nothing for a group id that does not exist
     - an AbortSignal cancels the command and kills its group
     - a signal already aborted answers at once
     - a foreground command that overruns its timeout still reports a non-zero exit

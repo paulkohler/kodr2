@@ -305,11 +305,15 @@ constraints:
     One image per language, not one fat multi-language image -- adding Rust
     took the image from ~490MB to ~1.4GB and a sandbox pulls all of it
   - >
-    An image ENV line does not reach the exec'd process, and kodr's --env
-    passthrough cannot substitute because it forwards names from kodr's own
-    environment and there is nothing there to forward. KODR_SHELL_ENV carries
-    comma-separated NAME=VALUE pairs into the exec; values cannot contain a
-    comma
+    An image ENV line does not reach the exec'd process at all, so a variable
+    a task needs cannot be baked into the image. KODR_SHELL_ENV carries
+    comma-separated NAME=VALUE pairs (values cannot contain a comma) and does
+    two things, both required: it sets them on kodr's own process, and it
+    declares each name to kodr with --env. The second half is not optional --
+    kodr replaces its children's environment with a curated allowlist, so
+    hooks and run_command see the variable UNSET without it, which is what a
+    sandbox probe hook actually printed. A caller's own --env wins and is left
+    alone
   - >
     The sandbox image must contain procps. shell.mjs shells out to
     `ps -Ao pid,ppid` to find a timed-out command's descendants; without it
@@ -387,6 +391,7 @@ tests:
     - injects --cwd unless the caller passes one
     - forwards the prompt and passthrough args unchanged
     - forwards KODR_SHELL_ENV pairs into the exec, warning on a malformed entry
+    - also declares those names to kodr with --env, and leaves a caller's --env alone
     - passes the git identity as environment, not a config write
     - attaches a provider record by name, forwarding no secret value
     - emits a docker build only when asked
