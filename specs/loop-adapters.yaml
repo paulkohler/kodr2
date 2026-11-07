@@ -41,7 +41,10 @@ inputs:
 outputs:
   checklist:
     type: object
-    description: "{ nextTask, markTask } — the shape runLoop's params.checklist wants"
+    description: >
+      { nextTask, markTask, progress } — the shape runLoop's params.checklist
+      wants. progress reports the position the last nextTask came from, so the
+      loop can say "task 3 of 15" rather than counting its own iterations.
   git:
     type: object
     description: "{ commitGreen, park, headSha } — the shape runLoop's params.git wants"
@@ -67,6 +70,12 @@ constraints:
     Both the index and the text are per-adapter state, not module state. One
     adapter serves one loop; two concurrent loops over the same file get two
     adapters and cannot tread on each other's pending line.
+  - >
+    progress() reports the position the *last* nextTask came from — the task's
+    index among every checklist item and the total count — and null before any
+    nextTask. It is the position in the file, not the loop's own iteration
+    count: a resumed run's first task is task 1 of that invocation but task 7
+    of the checklist, and the operator wants the latter (BACKLOG #13).
   - >
     markTask before any nextTask is refused by markTaskAt (a null line is out
     of range), not silently applied to line 0. A mark with no task behind it
@@ -101,6 +110,7 @@ tests:
     - the green path commits the model's work rather than rewinding it
     - a checklist edited by the model during the attempt still marks the right line
     - markTask before nextTask is refused rather than marking line 0
+    - progress reports the checklist position of the task nextTask returned, and null before it
     - >
       a green task whose tick the model wrote itself over a real TASKS.md
       still marks, commits, and lets the loop carry on to the next task

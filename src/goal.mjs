@@ -359,6 +359,10 @@ export async function runGoal(params) {
     }
 
     reporter.phase(`goal attempt ${attempt}/${maxAttempts}`);
+    // A phase produces no terminal bytes (specs/reporter.yaml), so a judged
+    // item announced its attempts to nobody -- and it is the most expensive
+    // kind, a build plus a judge each time. BACKLOG #13.
+    reporter.notice(`goal attempt ${attempt}/${maxAttempts}`);
 
     let prompt = goal;
     if (attempt > 1) {

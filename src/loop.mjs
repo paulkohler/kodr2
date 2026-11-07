@@ -33,6 +33,13 @@ export const DEFAULT_TASKS_FILE = 'TASKS.md';
 const GOAL_PREFIX = 'GOAL: ';
 
 /**
+ * A checklist item in any of its three states -- unchecked, done, parked.
+ * Used for counting the file's items, never for finding the next one (that is
+ * `- [ ] ` alone).
+ */
+const CHECKLIST_ITEM = /^- \[[ x!]\] /;
+
+/**
  * Outer retries per plain task before parking. Resolved from an explicit
  * option, then KODR_LOOP_MAX_ATTEMPTS, then the default.
  * @param {number} [option]
@@ -214,8 +221,13 @@ export function classifyTask(task) {
  * first unchecked line" silently moves the mark when something else ticks a
  * line mid-attempt, which a capable model does to its own work after reading
  * the `kodr: ` convention out of git log (BACKLOG #8).
+ *
+ * `index`/`total` are the task's 1-based position among every checklist item
+ * and the count of them, which is what lets the loop say "task 3 of 15". The
+ * loop's own iteration count cannot: a resumed run's first task is its task 1
+ * but the checklist's task 7 (BACKLOG #13).
  * @param {string} tasksFile
- * @returns {Promise<{ text: string, line: number }|null>}
+ * @returns {Promise<{ text: string, line: number, index: number, total: number }|null>}
  */
 export async function readNextTask(tasksFile) {
   let content;
@@ -229,7 +241,16 @@ export async function readNextTask(tasksFile) {
   if (line === -1) {
     return null;
   }
-  return { text: lines[line].replace(/^- \[ \] /, ''), line };
+  // Counted by position, not by matching the line's text: two identically
+  // worded items are legal, and indexOf would report the first one's place
+  // for both.
+  const isItem = (l) => CHECKLIST_ITEM.test(l);
+  return {
+    text: lines[line].replace(/^- \[ \] /, ''),
+    line,
+    index: lines.slice(0, line).filter(isItem).length + 1,
+    total: lines.filter(isItem).length,
+  };
 }
 
 /**
@@ -294,6 +315,28 @@ function markedSameTask(current, mark, expectedText) {
     return false;
   }
   return current === `- [${mark}] ${expectedText}`;
+}
+
+/**
+ * How a task is named in the run's output: its position in the checklist
+ * ("task 3/15") when the collaborator can report one, else the loop's own
+ * iteration count ("task 3"). `progress` is optional in the checklist
+ * contract the same way `headSha` is optional in the git one, so a caller
+ * without it degrades rather than failing.
+ * @param {{ index: number, total: number }|null} progress
+ * @param {number} attempted - Tasks attempted this invocation, including this one
+ * @returns {string}
+ */
+function taskLabel(progress, attempted) {
+  if (progress && progress.total > 0) {
+    return `task ${progress.index}/${progress.total}`;
+  }
+  return `task ${attempted}`;
+}
+
+/** Whole seconds, for the per-task verdict line. */
+function seconds(ms) {
+  return Math.round(ms / 1000);
 }
 
 /**
@@ -397,12 +440,14 @@ function addUsage(total, usage) {
  * @param {{ now: () => number, wait: (ms: number) => Promise<void> }} ctx.clock
  * @param {import('./reporter.mjs').Reporter} ctx.reporter
  * @param {(result: import('./harness.mjs').RunResult) => void} ctx.onAttempt
+ * @param {string} [ctx.label] - How this task is named in the output ("task 3/15")
  * @param {boolean} [ctx.failOnReview]
  * @returns {Promise<{ isGreen: boolean, attempts: number, result: import('./harness.mjs').RunResult|null, usage: { prompt: number, completion: number, cost: number }, allErrored: boolean }>}
  */
 async function attemptTask(text, ctx) {
   const { buildTask, maxAttempts, backoffMs, clock, reporter, onAttempt } = ctx;
   const failOnReview = Boolean(ctx.failOnReview);
+  const label = ctx.label || 'task';
   let attempt = 0;
   let continuation = null;
   let result = null;
@@ -413,6 +458,11 @@ async function attemptTask(text, ctx) {
 
   while (attempt < maxAttempts) {
     attempt += 1;
+    // Announced *before* the build, not after: this is the line that tells an
+    // operator watching a log whether the next few minutes are a new task or
+    // another go at the current one, which nothing in the output said before
+    // (BACKLOG #13).
+    reporter.notice(`kodr loop: ${label} attempt ${attempt}/${maxAttempts}`);
     result = await buildTask(prompt, continuation);
     addUsage(usage, result.usage);
     onAttempt(result);
@@ -541,7 +591,7 @@ function goalWasCancelled(goalResult) {
  * set, or a failed git commit -- the loop never continues past a git
  * failure on the assumption that it worked.
  * @param {object} params
- * @param {{ nextTask: () => Promise<string|null>, markTask: (mark: string) => Promise<{ok: boolean, error?: string, alreadyMarked?: boolean}> }} params.checklist
+ * @param {{ nextTask: () => Promise<string|null>, markTask: (mark: string) => Promise<{ok: boolean, error?: string, alreadyMarked?: boolean}>, progress?: () => ({ index: number, total: number }|null|Promise<{ index: number, total: number }|null>) }} params.checklist
  * @param {(text: string, continuation: object|null) => Promise<import('./harness.mjs').RunResult>} params.buildTask
  * @param {(goalText: string) => Promise<import('./goal.mjs').GoalResult>} params.buildGoal
  * @param {{ commitGreen: (message: string) => Promise<{ok: boolean, sha?: string, error?: string, reason?: string}>, park: (resetPaths: string[], resetTo?: string|null) => Promise<{ok: boolean, error?: string, wiped?: string[], refused?: string[]}>, headSha?: () => Promise<string|null> }} params.git
@@ -654,7 +704,12 @@ export async function runLoop(params) {
     // (BACKLOG #8).
     const baseSha = git.headSha ? await git.headSha() : null;
     const { kind, text } = classifyTask(task);
+    const label = taskLabel(
+      checklist.progress ? await checklist.progress() : null,
+      tasksAttempted,
+    );
     reporter.phase(`loop task ${tasksAttempted} (${kind}): ${task}`);
+    reporter.notice(`kodr loop: ${label} (${kind}) ${task}`);
 
     let entry;
     let isGreen;
@@ -692,6 +747,7 @@ export async function runLoop(params) {
         clock,
         reporter,
         failOnReview,
+        label,
         onAttempt: (result) => {
           addUsage(usage, result.usage);
           retries += result.retries || 0;
@@ -793,6 +849,13 @@ export async function runLoop(params) {
       } else {
         reporter.notice(`kodr: ${task} -- ${commitResult.reason}`);
       }
+      // The verdict line. Everything an operator reading a log wants about a
+      // finished task, on one line: that it passed, what it cost in attempts
+      // and wall clock, and the sha to go and look at.
+      reporter.notice(
+        `kodr loop: ${label} green in ${entry.attempts} attempt(s), ` +
+          `${seconds(entry.durationMs)}s${entry.commit ? ` (${entry.commit})` : ''}`,
+      );
       green += 1;
       record.tasks.push(entry);
       await emit();
@@ -834,6 +897,10 @@ export async function runLoop(params) {
     } else {
       reporter.notice(`kodr: park ${task} -- ${parkCommit.reason}`);
     }
+    reporter.notice(
+      `kodr loop: ${label} parked after ${entry.attempts} attempt(s), ` +
+        `${seconds(entry.durationMs)}s -- tree rewound`,
+    );
     parked += 1;
     record.tasks.push(entry);
     await emit();

@@ -9,20 +9,25 @@ Line references are approximate — treat them as anchors, not addresses.
 
 ## Open
 
-- **#13** `kodr loop` prints no per-task marker, so an unattended run is
-  opaque while it matters. No "starting task 3 of 15", no per-phase
-  green/parked line — only one tally at the very end
-  (`kodr loop: <reason> (green N, parked M)`). The sole progress signal on
-  stdout is the ANSI-coloured `note context window ...` line at each
-  attempt's start, and it cannot distinguish the next phase from a retry of
-  the current one, which is the single thing an operator most wants to know.
-  Telling them apart during the run above meant shelling into the sandbox to
-  read `git log` and `TASKS.md`. The data is all there — the loop knows the
-  task index, the attempt number and the previous phase's verdict — it just
-  never says any of it.
+Nothing open.
 
 ## Fixed
 
+- **#13** `kodr loop` printed no per-task marker, so an unattended run was
+  opaque while it mattered — three lines per task now reach the reporter's
+  `notice` rather than only its byte-less `phase`: the task starting with its
+  position in the checklist and its kind, each attempt numbered against the
+  cap, and the verdict with its commit sha, attempt count and duration. A
+  `GOAL: ` item announces its attempts too, since runGoal owns its own
+  attempt loop and a judged item is the most expensive kind to be blind
+  about. The position comes from the checklist's new optional `progress()`,
+  so it is the place in the *file* (`task 7/15`) rather than the count
+  attempted this invocation — optional the same way `git.headSha` is, so a
+  collaborator without it degrades to the iteration count. Before this the
+  only progress signal was the model's own `context window ...` notice at
+  each attempt's start, which cannot tell the next phase from a retry of the
+  current one; telling them apart during the second CRM dogfooding run meant
+  shelling into the sandbox for `git log` and `TASKS.md`, three times
 - **#12** the model marking the checklist itself halted the whole loop and
   left a green phase's work uncommitted — the mark is idempotent now: a line
   already reading exactly `- [<mark>] <task>`, the same mark on the same task

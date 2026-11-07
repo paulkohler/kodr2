@@ -163,6 +163,33 @@ Same advice as the bash scripts, because it's the same ratchet underneath:
 - **Order matters.** Each task starts from the previous one's commit, so put
   scaffolding first.
 
+## Watching it run
+
+Three lines per task reach stderr as the loop goes, so a detached run is
+readable while it matters rather than only once it finishes:
+
+```
+note kodr loop: task 2/15 (task) Deal entity -- CRUD plus the stage machine
+note kodr loop: task 2/15 attempt 1/3
+note kodr loop: task 2/15 attempt 2/3
+note kodr loop: task 2/15 green in 2 attempt(s), 612s (736dc25)
+```
+
+The position is the task's place in the checklist, not the count attempted
+this invocation, so a resumed run says `task 7/15` rather than starting over
+at 1. The attempt line is the one that matters: without it, a long silence
+could equally be the next phase or a third go at the current one.
+
+To tail a detached run, grep without a `^` anchor — the `note` prefix is
+ANSI-coloured, so `^kodr loop:` matches only the final summary line:
+
+```bash
+grep -E 'kodr loop:|HTTP [45][0-9]{2}' ../kodr-loop.out
+```
+
+`--quiet` and `--json` silence all of it; `--events` gets the same
+transitions as NDJSON, and `--tui` renders them live.
+
 ## Reading the results
 
 ```bash

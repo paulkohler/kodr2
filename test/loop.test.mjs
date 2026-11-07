@@ -39,6 +39,13 @@ function fakeChecklist(tasks) {
       pending = items.findIndex((i) => i.mark === ' ');
       return pending === -1 ? null : items[pending].text;
     },
+    // Also mirrors the CLI: the position comes from the read nextTask already
+    // did, so it is the task's place in the file rather than the loop's own
+    // iteration count.
+    progress: () =>
+      pending === null || pending === -1
+        ? null
+        : { index: pending + 1, total: items.length },
     markTask: async (mark) => {
       if (pending === null || pending === -1) {
         return { ok: false, error: 'no pending task' };
@@ -599,6 +606,29 @@ describe('readNextTask / markTaskAt', () => {
 
     const marked = await markTaskAt(file, task.line, 'x');
     assert.equal(marked.ok, false);
+    await cleanup(dir);
+  });
+
+  it('reports the task position among all items, and the total', async () => {
+    // What lets the loop say "task 3 of 15" instead of counting its own
+    // iterations -- which on a resumed run would say "task 1" for the
+    // checklist's seventh item (BACKLOG #13). Counted by position, so two
+    // identically worded items still get their own places.
+    const { dir, file } = await tmpChecklist(
+      '# Tasks\n\n- [x] done\n- [!] parked\n- [ ] repeat\n- [ ] repeat\n',
+    );
+    const next = await readNextTask(file);
+    assert.equal(next.text, 'repeat');
+    assert.equal(next.index, 3);
+    assert.equal(next.total, 4);
+
+    const { writeFile } = await import('node:fs/promises');
+    await writeFile(
+      file,
+      '# Tasks\n\n- [x] done\n- [!] parked\n- [x] repeat\n- [ ] repeat\n',
+    );
+    const fourth = await readNextTask(file);
+    assert.equal(fourth.index, 4, 'the second "repeat" is item 4, not item 3');
     await cleanup(dir);
   });
 
@@ -1342,6 +1372,117 @@ describe('runLoop', () => {
       reporter,
     });
     assert.ok(phases.some((p) => p.includes('add a test')));
+  });
+});
+
+describe('per-task progress on the reporter (BACKLOG #13)', () => {
+  const collectNotices = () => {
+    const notices = [];
+    return {
+      notices,
+      reporter: { ...silentReporter, notice: (text) => notices.push(text) },
+    };
+  };
+
+  it('announces each task with its checklist position and kind', async () => {
+    const checklist = fakeChecklist(['alpha', 'GOAL: ship it']);
+    const { notices, reporter } = collectNotices();
+    await runLoop({
+      checklist,
+      buildTask: async () => fakeRunResult(),
+      buildGoal: async () => fakeGoalResult(),
+      git: fakeGit(),
+      reporter,
+    });
+
+    assert.ok(notices.includes('kodr loop: task 1/2 (task) alpha'));
+    assert.ok(notices.includes('kodr loop: task 2/2 (goal) GOAL: ship it'));
+  });
+
+  it('announces each attempt, numbered against the cap', async () => {
+    // The whole complaint: "attempt N started" could not tell the next phase
+    // from a retry of the current one, and that is what an operator watching
+    // an overnight log most needs to know.
+    const checklist = fakeChecklist(['alpha']);
+    const { notices, reporter } = collectNotices();
+    await runLoop({
+      checklist,
+      buildTask: async () => fakeRunResult({ stoppedReason: 'tool-limit' }),
+      buildGoal: async () => fakeGoalResult(),
+      git: fakeGit(),
+      maxAttempts: 3,
+      retryBackoffMs: 0,
+      reporter,
+    });
+
+    assert.ok(notices.includes('kodr loop: task 1/1 attempt 1/3'));
+    assert.ok(notices.includes('kodr loop: task 1/1 attempt 2/3'));
+    assert.ok(notices.includes('kodr loop: task 1/1 attempt 3/3'));
+  });
+
+  it("carries the commit sha, attempts and duration on a green task's verdict", async () => {
+    const checklist = fakeChecklist(['alpha']);
+    const { notices, reporter } = collectNotices();
+    let clock = 0;
+    await runLoop({
+      checklist,
+      buildTask: async () => {
+        clock += 4000;
+        return fakeRunResult();
+      },
+      buildGoal: async () => fakeGoalResult(),
+      git: fakeGit({
+        commitGreen: async () => ({ ok: true, sha: 'deadbee' }),
+      }),
+      clock: { now: () => clock, wait: async () => {} },
+      reporter,
+    });
+
+    const verdict = notices.find((n) => n.includes('green in'));
+    assert.ok(verdict, `no verdict line in ${JSON.stringify(notices)}`);
+    assert.match(verdict, /task 1\/1 green in 1 attempt\(s\), 4s \(deadbee\)/);
+  });
+
+  it("says parked, with the attempt count, on a parked task's verdict", async () => {
+    const checklist = fakeChecklist(['alpha']);
+    const { notices, reporter } = collectNotices();
+    await runLoop({
+      checklist,
+      buildTask: async () => fakeRunResult({ stoppedReason: 'tool-limit' }),
+      buildGoal: async () => fakeGoalResult(),
+      git: fakeGit(),
+      maxAttempts: 2,
+      retryBackoffMs: 0,
+      reporter,
+    });
+
+    assert.ok(
+      notices.some((n) =>
+        /task 1\/1 parked after 2 attempt\(s\).*tree rewound/.test(n),
+      ),
+      `no park verdict in ${JSON.stringify(notices)}`,
+    );
+  });
+
+  it('falls back to the iteration count when the checklist has no progress()', async () => {
+    // progress is optional in the contract, the same way git.headSha is, so a
+    // collaborator without it has to degrade rather than crash on a
+    // position it cannot know.
+    const { progress: _dropped, ...checklist } = {
+      ...fakeChecklist(['alpha']),
+      progress: () => ({ index: 1, total: 1 }),
+    };
+    const { notices, reporter } = collectNotices();
+    await runLoop({
+      checklist,
+      buildTask: async () => fakeRunResult(),
+      buildGoal: async () => fakeGoalResult(),
+      git: fakeGit(),
+      reporter,
+    });
+
+    assert.ok(notices.includes('kodr loop: task 1 (task) alpha'));
+    assert.ok(!notices.some((n) => n.includes('task 1/')));
   });
 });
 

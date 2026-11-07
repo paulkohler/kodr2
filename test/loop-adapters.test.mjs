@@ -216,6 +216,27 @@ describe('checklistAdapter', () => {
     assert.match(readRepoFile(repo, 'TASKS.md'), /- \[x\] alpha/);
   });
 
+  it('reports the checklist position of the task nextTask returned', async () => {
+    const repo = await repoWith(['alpha', 'beta', 'gamma']);
+    const checklist = checklistAdapter(join(repo, 'TASKS.md'));
+
+    assert.equal(checklist.progress(), null, 'nothing read yet');
+    assert.equal(await checklist.nextTask(), 'alpha');
+    assert.deepEqual(checklist.progress(), { index: 1, total: 3 });
+
+    assert.equal((await checklist.markTask('x')).ok, true);
+    assert.equal(await checklist.nextTask(), 'beta');
+    // Position in the file, not the loop's iteration count: a resumed run
+    // starting here has to say 2 of 3, not 1 of 3 (BACKLOG #13).
+    assert.deepEqual(checklist.progress(), { index: 2, total: 3 });
+
+    assert.equal((await checklist.markTask('x')).ok, true);
+    assert.equal(await checklist.nextTask(), 'gamma');
+    assert.equal((await checklist.markTask('x')).ok, true);
+    assert.equal(await checklist.nextTask(), null);
+    assert.equal(checklist.progress(), null, 'forgotten with the backlog');
+  });
+
   it('keeps its pending line private to the adapter instance', async () => {
     const repo = await repoWith(['alpha', 'beta']);
     const tasksFile = join(repo, 'TASKS.md');

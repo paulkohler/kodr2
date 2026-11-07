@@ -75,6 +75,36 @@ beyond_the_scripts:
     The reporter channel (specs/reporter.yaml), so a loop is watchable live in
     the TUI instead of only through a nohup log — the exact artifact bug 1 froze.
   - >
+    Every task boundary and every attempt is announced on the reporter's
+    `notice`, not only its `phase`. A phase produces no terminal bytes by
+    design (specs/reporter.yaml), so a loop driven from a nohup log printed
+    nothing per task at all: no "task 3 of 15", no per-phase verdict, just one
+    tally at the very end. The only progress signal was the model's own
+    `context window ...` notice at each attempt's start, which cannot tell the
+    next phase from a retry of the current one -- the single thing an operator
+    most wants to know at 1am. Telling them apart during the second CRM
+    dogfooding run meant shelling into the sandbox to read `git log` and
+    TASKS.md, three times (BACKLOG #13).
+
+    Three lines per task, all of them data the loop already holds: the task
+    starting, with its position in the checklist and its kind; each attempt,
+    numbered against the cap; and the task's verdict, with its commit sha,
+    attempt count and duration. The position comes from the checklist's
+    optional `progress()`, so it is the position in the *file* (task 3 of 15)
+    rather than the count attempted this invocation -- a resumed run starts at
+    task 1 of its own but not of the checklist. Optional the same way
+    `git.headSha` is: a collaborator without it degrades to the attempt count
+    rather than failing.
+
+    `phase` keeps firing alongside, unchanged, so the TUI and --events are
+    unaffected; --quiet and --json already select the null reporter, so
+    nothing new needs suppressing and no flag is added.
+  - >
+    A `GOAL: ` item announces its attempts too, for the same reason and in the
+    same words. runGoal owns its own attempt loop and reported attempt starts
+    only as a phase, so a judged item was the blindest part of a run -- it is
+    also the most expensive, costing a build plus a judge per attempt.
+  - >
     Portability. No jq, no `bash >= 4.4`, so stock macOS and Windows work.
 
 inputs:
@@ -451,6 +481,12 @@ tests:
     - the loop refuses to start when the checklist is missing
     - the loop refuses to start in a repo with no commits, leaving the checklist intact
     - loop phases and notices reach the injected reporter
+    - each task is announced on the reporter with its checklist position and kind
+    - each attempt is announced, numbered against the attempt cap
+    - a green task's verdict notice carries its commit sha, attempts and duration
+    - a parked task's verdict notice says parked, with its attempt count
+    - the position falls back to the attempt count when the checklist has no progress()
+    - readNextTask reports the task's position among all checklist items, and the total
     - parseArgs parses the loop subcommand, --tasks, --max-attempts, and the loop budgets
   eval:
     - >

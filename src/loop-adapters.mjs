@@ -34,14 +34,20 @@ import { commitAll, headSha, park } from './loop-git.mjs';
  * The pending line is per-adapter, not module state: one adapter serves one
  * loop, and two loops over the same file cannot tread on each other.
  *
+ * `progress` reports where in the file the last task came from, so the loop
+ * can say "task 3 of 15" instead of counting its own iterations -- which
+ * would say "task 1" for the first task of a resumed run (BACKLOG #13).
+ *
  * @param {string} tasksFile - Checklist path
- * @returns {{ nextTask: () => Promise<string|null>, markTask: (mark: string) => Promise<{ok: boolean, error?: string, alreadyMarked?: boolean}> }}
+ * @returns {{ nextTask: () => Promise<string|null>, markTask: (mark: string) => Promise<{ok: boolean, error?: string, alreadyMarked?: boolean}>, progress: () => { index: number, total: number }|null }}
  */
 export function checklistAdapter(tasksFile) {
   /** @type {number|null} */
   let pendingLine = null;
   /** @type {string|null} */
   let pendingText = null;
+  /** @type {{ index: number, total: number }|null} */
+  let pendingProgress = null;
 
   return {
     nextTask: async () => {
@@ -49,12 +55,18 @@ export function checklistAdapter(tasksFile) {
       if (!next) {
         pendingLine = null;
         pendingText = null;
+        pendingProgress = null;
         return null;
       }
       pendingLine = next.line;
       pendingText = next.text;
+      pendingProgress = { index: next.index, total: next.total };
       return next.text;
     },
+    // Reported from the read nextTask already did, not by re-reading: a
+    // second read could see a file the attempt has since edited, and then the
+    // position announced would not be the position marked.
+    progress: () => pendingProgress,
     // A null line is out of range for markTaskAt, which returns the refusal
     // rather than defaulting to line 0 -- a mark with no task behind it is a
     // wiring fault, and the loop turns that refusal into a "mark-failed" stop.
