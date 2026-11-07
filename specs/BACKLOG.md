@@ -9,7 +9,33 @@ Line references are approximate — treat them as anchors, not addresses.
 
 ## Open
 
-None — #8, #9 and #10 are fixed. New issues go here.
+- **#11** a cleanly-detached child outlives the run, and nothing reaps it.
+  `killTree` is only ever called from inside `runShell`, on three paths:
+  output overflow, timeout, and abort (`src/shell.mjs`). A command that
+  *succeeds* having detached something is reaped by none of them, and no
+  other part of the harness sweeps children at end of run — so the process
+  survives `kodr` exiting and keeps whatever port it holds. Same consequence
+  as #9 by a route the fix does not cover; `specs/shell.yaml`'s "Known limit"
+  bullet names `setsid` but not this.
+
+  Not hypothetical, and not something a model has to be talked into. Asked
+  only to start a server in the background and curl it,
+  `qwen3.8-27b-mlx` hit the #9 timeout reaping, diagnosed it correctly
+  ("the background job inherited the output pipe, so the command never
+  finished"), and routed around it unprompted on its next tool call with
+  `nohup node server.mjs > /dev/null 2>&1 &`. The redirect closes the pipes
+  and `&` backgrounds it, so `sh` exits 0 in 7ms; there is no timeout to
+  fire. Verified on the host with a direct `runShell` probe: exit 0, and the
+  server still answering afterwards.
+
+  Contained inside an OpenShell sandbox, since the sandbox is deleted at run
+  end — an incidental point in the sandbox's favour. On the host it is a real
+  leak.
+
+  The fix is a design call, not an obvious patch: sweeping the run's process
+  group at exit would also kill a dev server the operator deliberately asked
+  for, so it probably wants to be opt-out, and at minimum the run should
+  report what it left running instead of leaving it silent.
 
 ## Fixed
 
