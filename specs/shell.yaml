@@ -78,11 +78,15 @@ constraints:
     that direct child, so a grandchild the shell spawned (npm's own `node
     --test` child, for example) could outlive the "timed out" command and
     hang the box indefinitely -- this matters because /bin/sh -c "npm
-    test" is a process tree, not a single process. Descendants are found
-    by walking `ps -Ao pid,ppid` from the direct child's pid rather than
-    by relying on OS process groups, since some sandboxed/containerized
-    hosts silently refuse to create a new process group for a detached
-    child, which would make a group-based kill a silent no-op.
+    test" is a process tree, not a single process. Two mechanisms run, in
+    this order: the command's process group is signalled, and `ps -Ao
+    pid,ppid` is walked from the direct child's pid. The walk is not
+    vestigial -- it is what covers a host that silently refuses to create a
+    new process group for a detached child, which would otherwise make the
+    group kill a no-op. This spec previously said descendants were found by
+    the walk *rather than* by relying on groups, which was true before the
+    runner moved to `spawn`; the group is now the primary mechanism and the
+    next two constraints are why.
   - >
     The command runs in its own process group and a timeout or cancellation
     signals the group as well as the ppid-walked descendants. The group is the
