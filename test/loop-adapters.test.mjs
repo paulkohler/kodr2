@@ -256,3 +256,50 @@ describe('the #8 control -- the regression is detectable', () => {
     );
   });
 });
+
+describe('an all-errored task over a real repo (BACKLOG #10)', () => {
+  it('rewinds the tree but leaves the checklist file unchecked', async () => {
+    // The composition the fakes in loop.test.mjs cannot reach: a real
+    // TASKS.md on disk has to still read "- [ ]" afterwards, because that is
+    // what lets a rerun pick the task up. A mark here would retire it.
+    const repo = await repoWith(['alpha', 'beta']);
+    const before = git(repo, ['rev-parse', 'HEAD']).trim();
+
+    const result = await runLoop({
+      checklist: checklistAdapter(join(repo, 'TASKS.md')),
+      buildTask: async () => {
+        // A half-finished attempt leaves debris, then the provider dies.
+        writeFileSync(join(repo, 'scratch.mjs'), 'export const partial = 1;\n');
+        return {
+          stoppedReason: 'error',
+          noOpCompletion: false,
+          verification: null,
+          filesChanged: ['scratch.mjs'],
+          error: { message: 'HTTP 500', name: 'Error', stack: '' },
+          messages: [],
+          usage: { prompt: 1, completion: 1, cost: 0 },
+          retries: 0,
+        };
+      },
+      buildGoal: async () => {
+        throw new Error('unused');
+      },
+      git: gitAdapter(repo),
+      maxAttempts: 2,
+      // The backoff between errored attempts is real time; loop.test.mjs
+      // covers it against a fake clock, so skip the 5s wait here.
+      retryBackoffMs: 0,
+    });
+
+    assert.equal(result.reason, 'attempts-errored');
+    assert.equal(result.parked, 0);
+
+    const tasks = readRepoFile(repo, 'TASKS.md');
+    assert.match(tasks, /- \[ \] alpha/);
+    assert.match(tasks, /- \[ \] beta/);
+
+    assert.equal(git(repo, ['rev-parse', 'HEAD']).trim(), before, 'no commit');
+    assert.equal(gitStatus(repo), '', 'the debris should be swept');
+    assert.deepEqual(commitSubjects(repo), ['init']);
+  });
+});

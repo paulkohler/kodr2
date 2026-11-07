@@ -270,6 +270,154 @@ describe('option resolvers', () => {
   });
 });
 
+describe('runLoop on a task that only ever errors (BACKLOG #10)', () => {
+  const erroredResult = (message = 'HTTP 500 from the provider') =>
+    fakeRunResult({
+      stoppedReason: 'error',
+      verification: null,
+      filesChanged: [],
+      error: { message, name: 'Error', stack: '' },
+    });
+
+  it('leaves the line unchecked and stops with attempts-errored', async () => {
+    const checklist = fakeChecklist(['phase one', 'phase two']);
+    const git = fakeGit();
+    const result = await runLoop({
+      checklist,
+      buildTask: async () => erroredResult(),
+      buildGoal: async () => fakeGoalResult(),
+      git,
+      clock: fakeClock(),
+      maxAttempts: 3,
+    });
+
+    assert.equal(result.reason, 'attempts-errored');
+    assert.equal(result.parked, 0, 'an error is not a park');
+    assert.equal(result.green, 0);
+    // The whole point: a rerun has to be able to pick this task up again.
+    assert.equal(checklist.items[0].mark, ' ');
+    assert.equal(checklist.items[1].mark, ' ');
+    assert.deepEqual(git.commitCalls, [], 'nothing to commit with no mark');
+  });
+
+  it('still rewinds to the pre-attempt sha', async () => {
+    const git = fakeGit();
+    const result = await runLoop({
+      checklist: fakeChecklist(['phase one']),
+      buildTask: async () => erroredResult(),
+      buildGoal: async () => fakeGoalResult(),
+      git,
+      clock: fakeClock(),
+      maxAttempts: 2,
+    });
+
+    assert.equal(result.reason, 'attempts-errored');
+    assert.equal(git.parkCalls.length, 1, 'the workspace is still rewound');
+    assert.deepEqual(git.parkResetTos, ['head-1']);
+  });
+
+  it('parks normally when an error is followed by a real verdict', async () => {
+    // A fair attempt happened, so '!' is the honest mark. This is the line
+    // between the two behaviours and the reason it is "every attempt", not
+    // "the last attempt".
+    const checklist = fakeChecklist(['phase one']);
+    const git = fakeGit();
+    let call = 0;
+    const result = await runLoop({
+      checklist,
+      buildTask: async () => {
+        call += 1;
+        if (call === 1) {
+          return erroredResult();
+        }
+        return fakeRunResult({ verification: { passed: false } });
+      },
+      buildGoal: async () => fakeGoalResult(),
+      git,
+      clock: fakeClock(),
+      maxAttempts: 2,
+    });
+
+    assert.equal(result.reason, 'parked');
+    assert.equal(result.parked, 1);
+    assert.equal(checklist.items[0].mark, '!');
+  });
+
+  it('parks normally when the gate fails first and the provider dies after', async () => {
+    const checklist = fakeChecklist(['phase one']);
+    let call = 0;
+    const result = await runLoop({
+      checklist,
+      buildTask: async () => {
+        call += 1;
+        if (call === 1) {
+          return fakeRunResult({ verification: { passed: false } });
+        }
+        return erroredResult();
+      },
+      buildGoal: async () => fakeGoalResult(),
+      git: fakeGit(),
+      clock: fakeClock(),
+      maxAttempts: 2,
+    });
+
+    assert.equal(result.reason, 'parked');
+    assert.equal(checklist.items[0].mark, '!');
+  });
+
+  it('stops even with stopOnPark disabled', async () => {
+    // stopOnPark is about parks. Whatever broke the attempts will break the
+    // next task too, so carrying on would walk the backlog turning every
+    // line into the same non-verdict.
+    const checklist = fakeChecklist(['phase one', 'phase two']);
+    const result = await runLoop({
+      checklist,
+      buildTask: async () => erroredResult(),
+      buildGoal: async () => fakeGoalResult(),
+      git: fakeGit(),
+      clock: fakeClock(),
+      maxAttempts: 1,
+      stopOnPark: false,
+    });
+
+    assert.equal(result.reason, 'attempts-errored');
+    assert.equal(result.tasks.length, 1, 'it did not move on to phase two');
+    assert.equal(checklist.items[1].mark, ' ');
+  });
+
+  it('records the status and the last error on the task entry', async () => {
+    const result = await runLoop({
+      checklist: fakeChecklist(['phase one']),
+      buildTask: async () => erroredResult('socket hang up'),
+      buildGoal: async () => fakeGoalResult(),
+      git: fakeGit(),
+      clock: fakeClock(),
+      maxAttempts: 2,
+    });
+
+    assert.equal(result.tasks.length, 1);
+    assert.equal(result.tasks[0].status, 'errored');
+    assert.equal(result.tasks[0].error, 'socket hang up');
+    assert.equal(result.tasks[0].attempts, 2, 'both attempts were spent');
+  });
+
+  it('reports a failed rewind as commit-failed, not attempts-errored', async () => {
+    const result = await runLoop({
+      checklist: fakeChecklist(['phase one']),
+      buildTask: async () => erroredResult(),
+      buildGoal: async () => fakeGoalResult(),
+      git: fakeGit({
+        park: async () => ({ ok: false, error: 'reset --hard refused' }),
+      }),
+      clock: fakeClock(),
+      maxAttempts: 1,
+    });
+
+    assert.equal(result.reason, 'commit-failed');
+    assert.equal(result.tasks[0].error, 'reset --hard refused');
+  });
+});
+
 describe('runLoop park rewind (BACKLOG #8)', () => {
   it('hands park the sha captured before the attempt ran', async () => {
     const checklist = fakeChecklist(['only task']);

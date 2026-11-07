@@ -64,6 +64,17 @@ Each checklist line is one iteration, and only one outcome commits:
   anything after a parked task would build on a foundation that was just
   reverted. Pass `--no-stop-on-park` to carry on instead, when the backlog is
   independent tasks rather than an ordered plan.
+- **Never got an answer (errors out)** — when *every* attempt for a task ends
+  in an error rather than a verdict (the provider is unreachable, say), the
+  tree is still rewound but the task is **not** marked. The loop stops with
+  reason `attempts-errored` and the line stays `- [ ]`, so once the provider
+  is back a rerun picks up the same task with nothing to undo. `- [!]` is
+  reserved for "the model was given a fair attempt and didn't pass the gate";
+  a task nobody got an answer for hasn't earned it, and since no later run
+  re-attempts a marked line, marking it would retire the task for good. This
+  stop ignores `--no-stop-on-park` — whatever broke the attempts will break
+  the next task too. (A task that errors *once* and then runs and fails its
+  gate did get a fair attempt, and parks normally.)
 
 A `GOAL: ` line is judged instead of gated by `--test`: it routes to
 `kodr goal`'s own build+judge loop (`--goal-max-attempts` attempts, default

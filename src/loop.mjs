@@ -361,7 +361,7 @@ function addUsage(total, usage) {
  * @param {import('./reporter.mjs').Reporter} ctx.reporter
  * @param {(result: import('./harness.mjs').RunResult) => void} ctx.onAttempt
  * @param {boolean} [ctx.failOnReview]
- * @returns {Promise<{ isGreen: boolean, attempts: number, result: import('./harness.mjs').RunResult|null, usage: { prompt: number, completion: number, cost: number } }>}
+ * @returns {Promise<{ isGreen: boolean, attempts: number, result: import('./harness.mjs').RunResult|null, usage: { prompt: number, completion: number, cost: number }, allErrored: boolean }>}
  */
 async function attemptTask(text, ctx) {
   const { buildTask, maxAttempts, backoffMs, clock, reporter, onAttempt } = ctx;
@@ -371,6 +371,7 @@ async function attemptTask(text, ctx) {
   let result = null;
   let isGreen = false;
   let prompt = text;
+  let errored = 0;
   const usage = { prompt: 0, completion: 0, cost: 0 };
 
   while (attempt < maxAttempts) {
@@ -378,6 +379,9 @@ async function attemptTask(text, ctx) {
     result = await buildTask(prompt, continuation);
     addUsage(usage, result.usage);
     onAttempt(result);
+    if (result.stoppedReason === 'error') {
+      errored += 1;
+    }
     isGreen = taskIsGreen(result, { failOnReview });
     if (isGreen) {
       break;
@@ -416,7 +420,16 @@ async function attemptTask(text, ctx) {
     }
   }
 
-  return { isGreen, attempts: attempt, result, usage };
+  // allErrored, not "the last attempt errored": a task that errored once and
+  // then ran and failed its gate did get a fair attempt, and should park like
+  // any other failure (BACKLOG #10).
+  return {
+    isGreen,
+    attempts: attempt,
+    result,
+    usage,
+    allErrored: attempt > 0 && errored === attempt,
+  };
 }
 
 // Just the decision, not the findings -- the loop record is a per-task
@@ -473,7 +486,7 @@ function goalWasCancelled(goalResult) {
 
 /**
  * @typedef {object} LoopResult
- * @property {string} reason - "backlog-empty" | "budget" | "parked" | "commit-failed" | "cancelled"
+ * @property {string} reason - "backlog-empty" | "budget" | "parked" | "commit-failed" | "cancelled" | "mark-failed" | "attempts-errored"
  * @property {Array} tasks
  * @property {number} green
  * @property {number} parked
@@ -609,6 +622,10 @@ export async function runLoop(params) {
     let entry;
     let isGreen;
     let cancelled;
+    // A GOAL: item has no equivalent -- runGoal owns its own attempt loop and
+    // reports its own reason -- so this stays false on that branch.
+    let allErrored = false;
+    let lastError = null;
 
     if (kind === 'goal') {
       const goalResult = await buildGoal(text);
@@ -646,6 +663,8 @@ export async function runLoop(params) {
       isGreen = attemptOutcome.isGreen;
       const { attempts, result, usage: taskUsage } = attemptOutcome;
       cancelled = taskWasCancelled(result);
+      allErrored = attemptOutcome.allErrored;
+      lastError = result?.error?.message ?? null;
       entry = {
         task,
         kind: 'task',
@@ -668,6 +687,41 @@ export async function runLoop(params) {
       record.tasks.push(entry);
       await emit('cancelled');
       return finish('cancelled');
+    }
+
+    if (allErrored) {
+      // Every attempt threw instead of producing a verdict, so there is
+      // nothing to judge. Rewind the workspace, but leave the checklist line
+      // unchecked: '!' means "the model was given a fair attempt and did not
+      // pass the gate", and a task that never got an answer has not earned
+      // that mark. Marking it would retire the task permanently -- no later
+      // run re-attempts a marked line -- so a provider that was briefly
+      // unreachable would silently truncate the whole backlog (BACKLOG #10).
+      entry.status = 'errored';
+      if (lastError) {
+        entry.error = lastError;
+      }
+      const erroredPark = await git.park(resetPaths, baseSha);
+      if (!erroredPark.ok) {
+        entry.error = erroredPark.error;
+        record.tasks.push(entry);
+        await emit('commit-failed');
+        return finish('commit-failed');
+      }
+      for (const refused of erroredPark.refused ?? []) {
+        reporter.notice(`resetPaths: refusing to wipe '${refused}'`);
+      }
+      let notice = `kodr: ${task} -- every attempt errored, left unchecked for a rerun`;
+      if (lastError) {
+        notice = `${notice}: ${lastError}`;
+      }
+      reporter.notice(notice);
+      record.tasks.push(entry);
+      // Unconditional, not gated on stopOnPark: whatever broke the attempts
+      // will break the next task too, and carrying on would walk the backlog
+      // turning every line into the same non-verdict.
+      await emit('attempts-errored');
+      return finish('attempts-errored');
     }
 
     if (isGreen) {

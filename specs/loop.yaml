@@ -173,7 +173,11 @@ outputs:
       failed — the workspace may be inconsistent and the loop stops rather
       than continue on a false assumption), "mark-failed" (the checklist line
       this iteration took is gone or no longer unchecked, so marking it would
-      mark a different task — the loop stops instead of guessing), or "error"
+      mark a different task — the loop stops instead of guessing),
+      "attempts-errored" (every attempt for the task ended stoppedReason
+      "error", so the model never got a verdict — the workspace is rewound
+      but the checklist line is left unchecked, and the loop stops
+      regardless of stopOnPark), or "error"
       (a startup precondition
       failed, or an uncaught error propagated out of runLoop — the CLI's own
       catch, not a value runLoop returns itself).
@@ -181,8 +185,8 @@ outputs:
     type: array
     description: >
       One entry per task attempted — { task, kind ("task"|"goal"), status
-      ("green"|"parked"), attempts, stoppedReason, goalReason, filesChanged,
-      commit, usage, durationMs, runRecords }
+      ("green"|"parked"|"cancelled"|"errored"), attempts, stoppedReason,
+      goalReason, filesChanged, commit, usage, durationMs, runRecords }
   green:
     type: number
     description: Tasks that went green and were committed
@@ -283,6 +287,36 @@ constraints:
     another attempt will follow. A genuine build or test failure gets no delay —
     the model has to act, not wait — and a park already happening is not delayed.
   - >
+    A task whose every attempt ended stoppedReason "error" is not parked. It
+    is rewound, left unchecked, and the loop stops with reason
+    "attempts-errored" -- because "[!]" means one thing, and it has to keep
+    meaning it: the model was given a fair attempt and did not pass the gate.
+    An attempt that ends "error" produced no verdict at all, so marking it
+    "[!]" records a judgement nobody made.
+
+    The cost of conflating them is not cosmetic. "[!]" is terminal -- no later
+    run re-attempts a marked line -- so a provider that is briefly unreachable
+    permanently retires the task, and an unattended overnight run truncates
+    at the first hiccup with a checklist that reads as though the model
+    failed. Found live: a 14-phase CRM run (examples/crm/TASKS.md) parked
+    phase 1 after three HTTP 500s from a healthy LM Studio, and resuming it
+    meant hand-editing "[!]" back to "[ ]" first.
+
+    "Every attempt", not "the last attempt": a task that errored once and
+    then ran and failed its gate did get a fair attempt, and parks normally.
+    Equally this is not only about providers -- stoppedReason "error" is the
+    harness's catch-all for a thrown error, so it also covers a bug in Kodr
+    itself, and blaming the model for that is just as wrong. The name says
+    what is known rather than guessing at a cause.
+  - >
+    The rewind still happens, which is where this differs from a cancel. A
+    Ctrl-C leaves everything untouched because the operator is right there
+    and may want to look; an outage at 3am is found hours later, so the
+    kinder default is a tree back at the last green commit rather than
+    whatever a half-finished attempt wrote. The run transcripts under .kodr/
+    survive it (they are excluded, and `git clean -fd` spares ignored paths),
+    so the evidence for diagnosing the outage is still on disk.
+  - >
     Every git operation returns { ok, error } rather than throwing, and a failed
     commit stops the loop with reason "commit-failed" and a non-zero exit. The
     loop never continues past a git failure on the assumption that it worked.
@@ -334,6 +368,11 @@ tests:
     - the checklist tick is committed before any later task can reset it (mark-then-commit order)
     - a red task retries in place with the prior transcript replayed, up to maxAttempts
     - a task that never goes green parks — reset, mark '!', and its own commit of the checklist
+    - a task whose every attempt errors is left unchecked and stops the loop with "attempts-errored"
+    - a task that errors then fails its gate parks normally -- it got a fair attempt
+    - an all-errored task is still rewound to the pre-attempt sha
+    - an all-errored task stops the loop even with stopOnPark disabled
+    - the all-errored stop carries the last attempt's error message on its task entry
     - an empty backlog exits cleanly with reason "backlog-empty"
     - green requires completed AND not noOpCompletion AND verification not failed
     - a no-op completion (completed, no files changed) is not green and does not commit

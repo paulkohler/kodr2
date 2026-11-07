@@ -9,10 +9,19 @@ Line references are approximate — treat them as anchors, not addresses.
 
 ## Open
 
-None — #8 and #9 are fixed. New issues go here.
+None — #8, #9 and #10 are fixed. New issues go here.
 
 ## Fixed
 
+- **#10** a provider outage parked the task as though the model had failed
+  it — a task whose *every* attempt ends stoppedReason "error" is no longer
+  marked `[!]`: the tree is still rewound, the line is left `[ ]`, and the
+  loop stops with reason `attempts-errored` so a rerun resumes the same task
+  with nothing to hand-undo. Found in the CRM dogfooding run
+  (`examples/crm/TASKS.md`): phase 1's three attempts were all HTTP 500 from
+  a healthy LM Studio, ten seconds end to end, and the phase was retired
+  permanently for it. A task that errors once and then fails its gate still
+  parks — it got a fair attempt
 - **#9** a backgrounded command's orphan survived the timeout — the runner
   now spawns into its own process group and signals the group (`execFile`
   silently drops `detached`, which is why the group never existed), with the
