@@ -9,7 +9,50 @@ Line references are approximate — treat them as anchors, not addresses.
 
 ## Open
 
-_(nothing open)_
+- **#12** the model marking the checklist itself halts the whole loop, and a
+  green phase's work is left uncommitted. `markTaskAt` (`src/loop.mjs:251`)
+  refuses any line that is not still `- [ ] ` and the loop turns that into a
+  `mark-failed` stop. That guard is the #8 fix and it should stay — a mark
+  written onto the wrong task is worse. But it also fires on the harmless
+  case: the model writing *the very mark the loop was about to write*.
+
+  Found in the second CRM dogfooding run (`CRM-RUN-2-NOTES.md`), which ended
+  `kodr loop: mark-failed (green 2, parked 0)` at phase 3 of 15 after 83
+  minutes. Phase 2 finished green — `verify: pass`, 68 tests green twice, 30
+  of them new — and the run stopped without committing any of it, leaving the
+  work uncommitted in the tree. The cause, in the model's own words from the
+  log: "Everything checks out. Marking the phase complete in `TASKS.md`
+  (consistent with how prior phases were recorded)", then `edit_file
+  TASKS.md`. It had seen phases 0 and 1 recorded as `- [x]` and copied the
+  convention. Nothing in `AGENTS.md`, the system prompt or the skills says
+  the checklist belongs to the harness. The harness recorded the evidence
+  itself: the task entry's `filesChanged` lists `TASKS.md`.
+
+  Same shape as #8 — a model-authored edit defeating a loop mechanism — by a
+  different route. #8 was a `git commit`, this is the checklist.
+
+  Three candidate fixes, probably more than one of them:
+  - Make the mark idempotent: if the line at the remembered index is the same
+    task and already carries the mark the loop intended, that is success, not
+    a refusal. A *different* mark, different text, or a moved line still
+    stops. `checklistAdapter` already has the task text from `readNextTask`;
+    it just doesn't pass it to `markTask`.
+  - Tell the model the checklist is not its to edit, in
+    `examples/crm/AGENTS.md` and in the loop's own system prompt.
+  - Have the loop refuse the model write to the tasks file outright while it
+    is driving that file.
+
+- **#13** `kodr loop` prints no per-task marker, so an unattended run is
+  opaque while it matters. No "starting task 3 of 15", no per-phase
+  green/parked line — only one tally at the very end
+  (`kodr loop: <reason> (green N, parked M)`). The sole progress signal on
+  stdout is the ANSI-coloured `note context window ...` line at each
+  attempt's start, and it cannot distinguish the next phase from a retry of
+  the current one, which is the single thing an operator most wants to know.
+  Telling them apart during the run above meant shelling into the sandbox to
+  read `git log` and `TASKS.md`. The data is all there — the loop knows the
+  task index, the attempt number and the previous phase's verdict — it just
+  never says any of it.
 
 ## Fixed
 
