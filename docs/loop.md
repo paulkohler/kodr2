@@ -203,7 +203,9 @@ rewritten after every task transition — not just at the end, so a loop that's
 `SIGKILL`ed or whose host dies still leaves everything up to its last
 transition on disk. One entry per task: the task text, its kind, outcome,
 attempts, `stoppedReason`/`goalReason`, files changed, the commit it produced,
-usage, and duration. This is what `git log` alone can't give you: a loop
+usage, and duration — plus `markedByAttempt: true` on the rare task whose
+checklist line the model ticked itself before the loop got there (harmless,
+and tolerated, but worth being able to count). This is what `git log` alone can't give you: a loop
 whose logs went quiet still has a record you can read to tell "healthy and
 slow" from "actually stuck," and the loop-level summary (`{ reason, green,
 parked, usage, durationMs, recordPath }`) agrees with it field for field.
