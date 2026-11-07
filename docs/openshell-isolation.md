@@ -204,6 +204,14 @@ endpoint too. `KODR_SHELL_POLICY` overrides it with a file of your own.
   `kill(-pgid)` is refused outright and the group has to be enumerated and
   killed pid by pid instead. A command that calls `setsid` itself escapes the
   group and is not reached — a known limit.
+- **A command that detaches cleanly is reaped at the end of the run.** The
+  timeout kill above only fires on a command that overflows, times out or is
+  cancelled, so `node server.mjs > /dev/null 2>&1 &` — which exits 0 in
+  milliseconds — slipped past it and kept its port after `kodr` exited. The
+  run now sweeps the groups its commands left behind before it exits, and
+  reports what it killed on stderr. Inside a sandbox this was already
+  contained, since the sandbox is deleted at run end; on the host it was a
+  real leak. `--keep-orphans` leaves them running, still reported.
 - **The wrapper is safe to edit mid-run, but kodr is not.** The script body is
   wrapped in a function so bash parses all of it before executing any, which
   stops an edit during a long run from corrupting the parse. The *uploaded*

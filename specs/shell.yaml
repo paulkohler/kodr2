@@ -115,10 +115,22 @@ constraints:
     selecting Kodr and the user's shell. The current process is excluded
     regardless.
   - >
+    Every group the runner creates is registered, and dropped again when the
+    command closes with the group already empty -- the common case, checked
+    with `kill(-pgid, 0)`, a syscall rather than a `ps` fork, so it is cheap
+    enough to run after every command. What is left over is the set of groups
+    that outlived their command, which is what the end-of-run sweep reaps
+    (BACKLOG #11, specs/orphan-sweep.yaml). The three killTree paths here
+    cover a command that overflows, times out or is cancelled; they do not
+    cover one that *succeeds* having detached something, and
+    `node server.mjs > /dev/null 2>&1 &` is exactly that -- the redirect
+    closes the pipes, so `sh` exits 0 in milliseconds and no timeout ever
+    fires.
+  - >
     Known limit: a command that calls `setsid` itself leaves the group, and
-    nothing here reaches it. Untested, and out of scope -- a process that has
-    deliberately escaped every handle the parent holds is not something a
-    timeout can be expected to reap.
+    neither the timeout kill nor the end-of-run sweep reaches it. Untested,
+    and out of scope -- a process that has deliberately escaped every handle
+    the parent holds is not something a timeout can be expected to reap.
   - >
     This is why the runner uses `spawn` rather than `execFile`: execFile
     silently drops `detached`, leaving the child in the parent's process group
@@ -170,6 +182,7 @@ constraints:
 
 tests:
   unit:
+    - a group is registered on spawn and forgotten at close once it is empty
     - a timeout answers the caller even when a backgrounded orphan holds the pipes open
     - a timeout kills a backgrounded process the ppid walk cannot see
     - groupMemberPids finds the members of a group the child leads

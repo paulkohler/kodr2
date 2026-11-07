@@ -1,0 +1,121 @@
+name: orphan-sweep
+status: implemented
+
+description: >
+  A run reaps the processes its commands left behind before it exits, and
+  says what it found. Closes BACKLOG #11: killTree is reachable only from
+  inside runShell, on output overflow, timeout and abort, so a command that
+  *succeeds* having detached something is reaped by nothing. A model asked
+  only to start a server in the background hit the #9 timeout reaping,
+  diagnosed it correctly, and routed around it on its very next tool call
+  with `nohup node server.mjs > /dev/null 2>&1 &` -- the redirect closes the
+  pipes, so `sh` exits 0 in 7ms, no timeout fires, and the server outlived
+  `kodr` still holding its port. Nothing reported it either, which was the
+  worse half of the bug.
+
+inputs:
+  keepOrphans:
+    type: boolean
+    required: false
+    description: >
+      Leave survivors running instead of killing them (--keep-orphans /
+      KODR_KEEP_ORPHANS). They are still found and still reported -- the
+      flag changes what happens to them, not whether the operator hears
+      about them.
+  sweepGraceMs:
+    type: number
+    required: false
+    description: >
+      Delay in ms between the sweep's SIGTERM and its SIGKILL escalation
+      (default 2,000, KODR_SWEEP_GRACE_MS). Shorter than the shell runner's
+      5s kill grace on purpose: this one runs with the operator waiting on
+      an exit, and it is only paid at all when something was found.
+  psTimeoutMs:
+    type: number
+    required: false
+    description: Timeout in ms for the `ps` lookup used to enumerate a group
+
+outputs:
+  groups:
+    type: array
+    description: Process group ids that still had members
+  pids:
+    type: array
+    description: Every surviving pid found, across all those groups
+  survivors:
+    type: array
+    description: >
+      Pids still alive after the SIGTERM/SIGKILL pass. Normally empty; a
+      non-empty list is reported rather than swallowed.
+
+constraints:
+  - >
+    The sweep kills only process groups runShell itself created, never
+    Kodr's own group. Kodr's group leader is the shell that launched it, so
+    a `kill(-pgid)` on our own group would take out the operator's terminal.
+    Safety rests on the same argument as the existing group kill: a group's
+    id is its leader's pid, and the only process that can have created a
+    group whose id equals a pid we spawned is that child of ours.
+  - >
+    A group is remembered only once it is known to have outlived its
+    command, checked at the moment the command closes with
+    `process.kill(-pgid, 0)` -- a syscall, not a `ps` fork, so it is cheap
+    enough to run after every command. ESRCH means the group is already
+    empty and is forgotten; success means something is still in there. The
+    registry therefore holds actual leaks, not one entry per command, and a
+    long-lived front-end (the ACP server) does not accumulate thousands of
+    stale pids.
+  - >
+    EPERM from that probe says nothing about membership -- it is the host
+    refusing group signals, which inside an OpenShell sandbox it does under
+    seccomp -- so the group is enumerated with `ps -Ao pid,pgid` instead.
+    The sandbox is the case this has to work in, since it is where a model
+    is actually turned loose.
+  - >
+    Pid reuse is the residual risk and it is accepted knowingly: between a
+    group emptying and the end of the run, its id could in principle be
+    taken by an unrelated new group leader. The membership probe runs
+    microseconds after the child's own exit, where reuse is not a practical
+    possibility, and the window after that is bounded by the run. Named here
+    so that nobody has to rediscover it.
+  - >
+    Survivors get SIGTERM, then SIGKILL after sweepGraceMs if any are still
+    alive. The wait is skipped entirely when nothing was found, which is the
+    overwhelmingly common case, so a clean run does not pay 2 seconds to
+    exit.
+  - >
+    What was found is written to stderr whether or not it was killed, and
+    regardless of --quiet: silence about a leaked process is the bug being
+    fixed, and --quiet exists to keep progress chatter off the terminal, not
+    to hide this. stderr, not stdout, so --json output stays parseable.
+  - >
+    Killing is the default because the unattended loop is the case that
+    matters -- nobody is watching it to notice a leftover server, and it can
+    run hundreds of commands. --keep-orphans is for the operator who
+    deliberately asked Kodr to start something long-lived and means to keep
+    it. One boolean, no middle setting.
+  - >
+    The sweep runs in a `finally` around the whole command dispatch, so it
+    happens on the error paths too -- a run that throws is exactly when
+    something is most likely to have been left behind.
+  - >
+    Not a replacement for runShell's own killTree paths. A timeout still
+    reaps immediately rather than deferring to the end of the run: a command
+    that has already blown its limit should not keep burning CPU for the
+    rest of the loop.
+  - >
+    Known limit, inherited from the shell runner: a command that calls
+    `setsid` itself leaves the group and nothing here reaches it.
+
+tests:
+  unit:
+    - a command that cleanly detaches a child has it reaped by the end-of-run sweep
+    - the sweep reports the pids it killed
+    - a run with nothing left behind sweeps nothing and pays no grace delay
+    - keepOrphans finds and reports survivors without killing them
+    - a group whose members all exited is forgotten, not reported
+    - the sweep never returns Kodr's own pid
+    - survivors that ignore SIGTERM are escalated to SIGKILL
+    - the sweep runs even when the dispatched command throws
+    - sweepGraceMs resolves from the flag, then KODR_SWEEP_GRACE_MS, then the default
+    - keepOrphans resolves from the flag, then KODR_KEEP_ORPHANS

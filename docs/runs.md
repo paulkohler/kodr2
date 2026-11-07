@@ -44,6 +44,21 @@ see the [hook configuration](../specs/hooks.yaml).
 model HTTP request (default 600000 ms). `--max-run-ms` controls the run's
 wall-clock budget, checked between turns (default 0, disabled).
 
+A timeout is not the only way a command leaves something running. One that
+*succeeds* having detached a child — `node server.mjs > /dev/null 2>&1 &`
+exits 0 in milliseconds — trips no timeout at all, so the run sweeps whatever
+its commands left behind before it exits and says what it killed on stderr:
+
+```bash
+kodr "…" --keep-orphans            # leave them running (still reported)
+kodr "…" --sweep-grace-ms 5000     # SIGTERM-to-SIGKILL delay (default 2000)
+```
+
+Killing is the default because the unattended loop is the case that matters:
+nobody is watching it to notice a leftover server holding a port. Use
+`--keep-orphans` (or `KODR_KEEP_ORPHANS`) when you deliberately asked Kodr to
+start something long-lived.
+
 Another budget on a long session is the **tool-turn ceiling**
 (`--max-tool-turns`, default 50). Note how it compounds with the system
 prompt: the prompt tells the model to make *one tool call per message*

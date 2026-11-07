@@ -55,6 +55,11 @@ import {
   createTerminalReporter,
 } from './reporter.mjs';
 import { failOnReviewEnabled, reviewBlocks } from './review.mjs';
+import {
+  DEFAULT_SWEEP_GRACE_MS,
+  detachedSurvivors,
+  sweepDetachedChildren,
+} from './shell.mjs';
 import { computeStats, loadRunRecords } from './stats.mjs';
 import { MAX_TOOL_TURNS } from './tool-loop.mjs';
 
@@ -118,6 +123,8 @@ const RUN_RECORD_FILENAME =
  * @property {boolean} json
  * @property {boolean} events
  * @property {boolean} tui
+ * @property {boolean} keepOrphans
+ * @property {number|null} sweepGraceMs
  * @property {boolean} approveCommands
  * @property {boolean} noFail
  * @property {boolean} help
@@ -127,13 +134,35 @@ const RUN_RECORD_FILENAME =
 /** @typedef {import('./harness.mjs').RunResult} RunResult */
 
 /**
- * Parse CLI arguments and run.
+ * Parse CLI arguments and run, then reap whatever the run's commands left
+ * behind.
+ *
+ * The sweep is in a `finally` so it also runs on the error paths -- a run that
+ * threw is exactly when something is most likely still running -- and here,
+ * around the whole dispatch, so every front-end gets it: one-shot, goal, loop,
+ * the TUI and the ACP server (see specs/orphan-sweep.yaml).
  * @param {string[]} argv - process.argv.slice(2)
+ * @param {object} [options]
+ * @param {function} [options.dispatch] - Overridable for tests; defaults to
+ *   the command dispatch below. The only way to prove the reap survives a
+ *   dispatch that throws without a model and a real failing run.
  * @returns {Promise<void>}
  */
-export async function main(argv) {
+export async function main(argv, options = {}) {
   const args = parseArgs(argv);
+  const run = options.dispatch || dispatch;
+  try {
+    await run(args);
+  } finally {
+    await reapLeftoverChildren(args);
+  }
+}
 
+/**
+ * @param {CliArgs} args
+ * @returns {Promise<void>}
+ */
+async function dispatch(args) {
   if (args.help) {
     printHelp();
     return;
@@ -248,6 +277,14 @@ export async function main(argv) {
     (!Number.isInteger(args.commandTimeoutMs) || args.commandTimeoutMs < 1)
   ) {
     process.stderr.write('--command-timeout-ms must be a positive integer.\n');
+    process.exitCode = 1;
+    return;
+  }
+  if (
+    args.sweepGraceMs !== null &&
+    (!Number.isInteger(args.sweepGraceMs) || args.sweepGraceMs < 0)
+  ) {
+    process.stderr.write('--sweep-grace-ms must be a non-negative integer.\n');
     process.exitCode = 1;
     return;
   }
@@ -549,6 +586,90 @@ export function visionEnabled(args) {
 }
 
 /**
+ * Whether a process a command left running should be left alone, from
+ * --keep-orphans or KODR_KEEP_ORPHANS. Off by default: the unattended loop is
+ * the case that matters, where nobody is watching to notice a leftover server
+ * and a run can issue hundreds of commands. The flag is for an operator who
+ * deliberately asked Kodr to start something long-lived and means to keep it
+ * (see specs/orphan-sweep.yaml).
+ * @param {CliArgs} args
+ * @returns {boolean}
+ */
+export function keepOrphansEnabled(args) {
+  if (args.keepOrphans) {
+    return true;
+  }
+  const env = process.env.KODR_KEEP_ORPHANS;
+  return env === '1' || env === 'true';
+}
+
+/**
+ * SIGTERM-to-SIGKILL delay for the end-of-run sweep, from --sweep-grace-ms,
+ * KODR_SWEEP_GRACE_MS, or the shell runner's default. Overridable like every
+ * other limit here rather than fixed in code; a non-numeric or negative value
+ * falls through to the default rather than turning the escalation into an
+ * immediate SIGKILL.
+ * @param {CliArgs} args
+ * @returns {number}
+ */
+export function sweepGraceMs(args) {
+  const candidates = [
+    args.sweepGraceMs,
+    Number(process.env.KODR_SWEEP_GRACE_MS),
+  ];
+  for (const candidate of candidates) {
+    if (Number.isInteger(candidate) && candidate >= 0) {
+      return candidate;
+    }
+  }
+  return DEFAULT_SWEEP_GRACE_MS;
+}
+
+/**
+ * Reap whatever this run's commands left running, and say what was found.
+ *
+ * Reported on stderr whether or not it was killed, and regardless of --quiet:
+ * silence about a leaked process is the half of BACKLOG #11 that actually hurt
+ * -- a server kept its port after `kodr` exited and nothing mentioned it.
+ * --quiet exists to keep progress chatter off the terminal, not to hide this,
+ * and stderr keeps --json output parseable.
+ * @param {CliArgs} args
+ * @param {{ write: (text: string) => void }} [err]
+ * @returns {Promise<void>}
+ */
+export async function reapLeftoverChildren(args, err = process.stderr) {
+  if (keepOrphansEnabled(args)) {
+    const found = detachedSurvivors();
+    if (found.pids.length > 0) {
+      err.write(
+        `kodr: ${describeLeftovers(found.pids)} left running by a command -- kept (--keep-orphans)\n`,
+      );
+    }
+    return;
+  }
+  const swept = await sweepDetachedChildren({ graceMs: sweepGraceMs(args) });
+  if (swept.pids.length === 0) {
+    return;
+  }
+  let notice = `kodr: killed ${describeLeftovers(swept.pids)} left running by a command`;
+  if (swept.escalated.length > 0) {
+    notice = `${notice} (SIGKILL after ${sweepGraceMs(args)}ms: ${swept.escalated.join(', ')})`;
+  }
+  err.write(`${notice}\n`);
+}
+
+/**
+ * @param {number[]} pids
+ * @returns {string}
+ */
+function describeLeftovers(pids) {
+  if (pids.length === 1) {
+    return `1 process (pid ${pids[0]})`;
+  }
+  return `${pids.length} processes (pids ${pids.join(', ')})`;
+}
+
+/**
  * A compact, machine-readable summary of a run for --json mode. Lets an external
  * harness/adapter read what Kodr did (outcome and cost) without scraping output.
  * @param {RunResult} result
@@ -682,6 +803,14 @@ export function parseArgs(argv) {
     // specs/provider.yaml).
     reasoning: null,
     vision: false,
+    // false, not null: keepOrphansEnabled checks for an explicit true first,
+    // so KODR_KEEP_ORPHANS stays reachable when the flag is omitted. This has
+    // to become null the day a --no-keep-orphans exists, since false would
+    // then have to mean "explicitly off, beat the env var".
+    keepOrphans: false,
+    // null so KODR_SWEEP_GRACE_MS still reaches sweepGraceMs() when the flag
+    // isn't passed -- same reasoning as maxRepeatToolErrors above.
+    sweepGraceMs: null,
     openrouterNoZdr: null,
     openrouterAllowDataCollection: null,
     openrouterProviderOnly: [],
@@ -813,6 +942,16 @@ export function parseArgs(argv) {
     if (arg === '--vision') {
       args.vision = true;
       i++;
+      continue;
+    }
+    if (arg === '--keep-orphans') {
+      args.keepOrphans = true;
+      i++;
+      continue;
+    }
+    if (arg === '--sweep-grace-ms' && argv[i + 1]) {
+      args.sweepGraceMs = Number(argv[i + 1]);
+      i += 2;
       continue;
     }
     if (arg === '--openrouter-no-zdr') {
@@ -1196,6 +1335,11 @@ Options:
                                   (default: 600000 = 10 min, or KODR_REQUEST_TIMEOUT_MS)
   --command-timeout-ms <n>        Timeout for each model-issued run_command
                                   (default: 600000 = 10 min, or KODR_COMMAND_TIMEOUT_MS)
+  --keep-orphans                  Leave processes a command detached (nohup server &) running
+                                  when the run exits, instead of killing them. They are
+                                  reported either way (or KODR_KEEP_ORPHANS)
+  --sweep-grace-ms <n>            SIGTERM-to-SIGKILL delay for that end-of-run sweep
+                                  (default: 2000, or KODR_SWEEP_GRACE_MS)
   --max-attempts <n>              For 'kodr goal': cap on build+judge iterations (default: 3,
                                   or KODR_GOAL_MAX_ATTEMPTS). For 'kodr loop': outer retries per
                                   plain task before parking (default: 3, or KODR_LOOP_MAX_ATTEMPTS)

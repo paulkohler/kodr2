@@ -10,6 +10,7 @@
  */
 
 import { execFileSync, spawn } from 'node:child_process';
+import { setTimeout as delay } from 'node:timers/promises';
 import { buildEnv } from './env.mjs';
 
 // Local models are slow and may drive long builds or test suites, so the
@@ -24,6 +25,26 @@ export const DEFAULT_KILL_GRACE_MS = 5_000;
 // able to hang it indefinitely and reintroduce the exact class of bug this
 // mechanism exists to close.
 export const DEFAULT_PS_TIMEOUT_MS = 2_000;
+// Grace between the end-of-run sweep's SIGTERM and its SIGKILL. Shorter than
+// DEFAULT_KILL_GRACE_MS on purpose: that one runs mid-run, where patience is
+// free, while this one runs with the operator waiting on an exit -- and it is
+// only paid at all when the sweep actually found something.
+export const DEFAULT_SWEEP_GRACE_MS = 2_000;
+
+/**
+ * Process groups runShell created that may still have members, keyed by group
+ * id (the direct child's pid).
+ *
+ * A command can exit 0 having left something behind -- `nohup server &`
+ * redirects away the pipes, so `sh` exits at once and neither the timeout nor
+ * the abort path ever runs (BACKLOG #11). Nothing else in the harness looked
+ * at children once a command succeeded, so the process outlived `kodr`, still
+ * holding its port, and nothing said so. Every group goes in here on spawn and
+ * comes out again at close once it is confirmed empty, so what is left at the
+ * end of a run is the set of groups that outlived their command.
+ * @type {Set<number>}
+ */
+const detachedGroups = new Set();
 
 /**
  * Run a shell command and resolve with its captured output.
@@ -91,6 +112,10 @@ export function runShell(command, cwd, options = {}) {
       detached: true,
     });
 
+    if (child.pid) {
+      detachedGroups.add(child.pid);
+    }
+
     // execFile's maxBuffer, by hand: stop accumulating past the cap and fail
     // the command, rather than growing a string without limit.
     const cap = maxOutput * 2;
@@ -153,6 +178,7 @@ export function runShell(command, cwd, options = {}) {
     // hold those streams open forever, which is why the timeout and the abort
     // path answer the caller themselves.
     child.on('close', (code, signalName) => {
+      forgetEmptyGroup(child.pid, psTimeoutMs);
       if (timedOut || overflowed) {
         finish(1);
         return;
@@ -193,9 +219,11 @@ export function runShell(command, cwd, options = {}) {
         // walk above finds nothing to kill and nothing ever closes the pipes.
         // That made the timeout unenforceable: a model-issued background
         // command pended for minutes regardless of --command-timeout-ms.
-        // Resolving here makes the timeout mean what it says. The orphan can
-        // outlive the call; reaping it needs a process group, which this
-        // deliberately avoids (see descendantPids) -- tracked as BACKLOG #9.
+        // Resolving here makes the timeout mean what it says. The orphan is
+        // reaped by the group kill above (BACKLOG #9, since fixed -- this
+        // comment used to say the module deliberately avoided process groups,
+        // which stopped being true when it moved to spawn), and anything that
+        // survives even that is caught by the end-of-run sweep.
         if (!settled) {
           settled = true;
           if (heartbeatTimer) {
@@ -290,25 +318,189 @@ export function groupMemberPids(pid, psTimeoutMs = DEFAULT_PS_TIMEOUT_MS) {
   if (!pid) {
     return [];
   }
-  let table;
-  try {
-    table = execFileSync('ps', ['-Ao', 'pid,pgid'], {
-      timeout: psTimeoutMs,
-    }).toString();
-  } catch {
+  const rows = psRows('pid,pgid', psTimeoutMs);
+  if (!rows) {
     return [];
   }
   const members = [];
-  for (const line of table.split('\n').slice(1)) {
-    const [memberPid, pgid] = line.trim().split(/\s+/).map(Number);
-    if (!memberPid || !pgid) {
-      continue;
-    }
+  for (const [memberPid, pgid] of rows) {
     if (pgid === pid && memberPid !== process.pid) {
       members.push(memberPid);
     }
   }
   return members;
+}
+
+/**
+ * Two numeric columns of `ps -Ao`, parsed. Null (not an empty list) when `ps`
+ * itself failed, so a caller that has a meaningful fallback for that case can
+ * tell it apart from a genuinely empty answer.
+ *
+ * The lookup is bounded by psTimeoutMs: it runs synchronously on the event
+ * loop, so a wedged `ps` must not be able to reintroduce the class of hang
+ * this whole mechanism exists to close.
+ * @param {string} columns - e.g. 'pid,ppid'
+ * @param {number} psTimeoutMs
+ * @returns {number[][]|null}
+ */
+function psRows(columns, psTimeoutMs) {
+  let table;
+  try {
+    table = execFileSync('ps', ['-Ao', columns], {
+      timeout: psTimeoutMs,
+    }).toString();
+  } catch {
+    return null;
+  }
+  const rows = [];
+  for (const line of table.split('\n').slice(1)) {
+    const [first, second] = line.trim().split(/\s+/).map(Number);
+    if (!first || !second) {
+      continue;
+    }
+    rows.push([first, second]);
+  }
+  return rows;
+}
+
+/**
+ * Drop a group from the registry once nothing is left in it.
+ *
+ * `kill(-pgid, 0)` is a syscall rather than a `ps` fork, so this is cheap
+ * enough to run after every single command -- which is what keeps the
+ * registry down to actual leaks instead of one entry per command, and keeps a
+ * long-lived front-end (the ACP server) from accumulating stale pids.
+ *
+ * ESRCH means the group is empty. EPERM says nothing about membership -- it is
+ * the host refusing group signals outright, which is what an OpenShell sandbox
+ * does under seccomp -- so there the group is enumerated instead. That is the
+ * case this has to be right in, since the sandbox is where a model is actually
+ * turned loose.
+ * @param {number|undefined} pgid
+ * @param {number} psTimeoutMs
+ */
+function forgetEmptyGroup(pgid, psTimeoutMs) {
+  if (!pgid) {
+    return;
+  }
+  try {
+    process.kill(-pgid, 0);
+    return; // Still has members; keep it for the end-of-run sweep.
+  } catch (err) {
+    const code = /** @type {NodeJS.ErrnoException} */ (err).code;
+    if (code === 'EPERM' && groupMemberPids(pgid, psTimeoutMs).length > 0) {
+      return;
+    }
+  }
+  detachedGroups.delete(pgid);
+}
+
+/**
+ * Surviving members of the registered groups, bucketed by group.
+ *
+ * One `ps` call covers every group, rather than one per group: the registry is
+ * normally empty or tiny, but a loop that leaked repeatedly should not turn
+ * its own cleanup into a fork storm.
+ * @param {number} psTimeoutMs
+ * @returns {Map<number, number[]>}
+ */
+function survivorsByGroup(psTimeoutMs) {
+  /** @type {Map<number, number[]>} */
+  const byGroup = new Map();
+  if (detachedGroups.size === 0) {
+    return byGroup;
+  }
+  const rows = psRows('pid,pgid', psTimeoutMs);
+  if (!rows) {
+    return byGroup;
+  }
+  for (const [pid, pgid] of rows) {
+    if (!detachedGroups.has(pgid) || pid === process.pid) {
+      continue;
+    }
+    const members = byGroup.get(pgid) ?? [];
+    members.push(pid);
+    byGroup.set(pgid, members);
+  }
+  return byGroup;
+}
+
+/**
+ * What a command left running: the groups that still have members, and every
+ * surviving pid in them. Finds without killing, which is what --keep-orphans
+ * needs -- the operator still hears about a leftover process, they just keep
+ * it (see specs/orphan-sweep.yaml).
+ * @param {number} [psTimeoutMs]
+ * @returns {{ groups: number[], pids: number[] }}
+ */
+export function detachedSurvivors(psTimeoutMs = DEFAULT_PS_TIMEOUT_MS) {
+  const byGroup = survivorsByGroup(psTimeoutMs);
+  const pids = [];
+  for (const members of byGroup.values()) {
+    pids.push(...members);
+  }
+  return { groups: [...byGroup.keys()], pids };
+}
+
+/**
+ * Forget every tracked group without touching the processes in it. For tests,
+ * which share one process and would otherwise inherit each other's leaks.
+ */
+export function forgetDetachedGroups() {
+  detachedGroups.clear();
+}
+
+/**
+ * Reap whatever the run's commands left behind: SIGTERM every surviving group,
+ * then SIGKILL anything still alive after graceMs.
+ *
+ * Only groups runShell created are ever touched -- never Kodr's own, whose
+ * leader is the shell that launched us, so signalling it would take out the
+ * operator's terminal. The safety argument is the one the timeout kill already
+ * rests on: a group's id is its leader's pid, and the only process that can
+ * have created a group whose id equals a pid we spawned is that child of ours.
+ * @param {object} [options]
+ * @param {number} [options.graceMs] - SIGTERM-to-SIGKILL delay
+ * @param {number} [options.psTimeoutMs]
+ * @returns {Promise<{ groups: number[], pids: number[], escalated: number[] }>}
+ */
+export async function sweepDetachedChildren(options = {}) {
+  const psTimeoutMs = options.psTimeoutMs ?? DEFAULT_PS_TIMEOUT_MS;
+  const graceMs = options.graceMs ?? DEFAULT_SWEEP_GRACE_MS;
+  const byGroup = survivorsByGroup(psTimeoutMs);
+  detachedGroups.clear();
+  const groups = [...byGroup.keys()];
+  const pids = [];
+  for (const members of byGroup.values()) {
+    pids.push(...members);
+  }
+  if (pids.length === 0) {
+    return { groups, pids, escalated: [] };
+  }
+  for (const [pgid, members] of byGroup) {
+    killTree(pgid, members, 'SIGTERM', psTimeoutMs);
+  }
+  await delay(graceMs);
+  const escalated = pids.filter(stillAlive);
+  if (escalated.length > 0) {
+    for (const [pgid, members] of byGroup) {
+      killTree(pgid, members.filter(stillAlive), 'SIGKILL', psTimeoutMs);
+    }
+  }
+  return { groups, pids, escalated };
+}
+
+/**
+ * @param {number} pid
+ * @returns {boolean}
+ */
+function stillAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -363,21 +555,13 @@ function descendantPids(rootPid, psTimeoutMs) {
   if (!rootPid) {
     return [];
   }
-  let table;
-  try {
-    table = execFileSync('ps', ['-Ao', 'pid,ppid'], {
-      timeout: psTimeoutMs,
-    }).toString();
-  } catch {
+  const rows = psRows('pid,ppid', psTimeoutMs);
+  if (!rows) {
     return [rootPid];
   }
 
   const childrenByParent = new Map();
-  for (const line of table.split('\n').slice(1)) {
-    const [pid, ppid] = line.trim().split(/\s+/).map(Number);
-    if (!pid || !ppid) {
-      continue;
-    }
+  for (const [pid, ppid] of rows) {
     const siblings = childrenByParent.get(ppid) ?? [];
     siblings.push(pid);
     childrenByParent.set(ppid, siblings);
