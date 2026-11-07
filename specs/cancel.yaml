@@ -155,6 +155,7 @@ tests:
     - abortError is tagged with a code isAbortError recognizes
     - chat aborts an in-flight request when the signal fires (rejects with isAbortError)
     - an AbortSignal kills a running command's process group and answers at once
+    - a cancel reaps a server a Stop hook backgrounded, through runStopHooks
     - a signal already aborted makes a command answer immediately
     - chat rejects immediately when the signal is already aborted and never hits the server
     - an aborted chat is not retried even with maxRetries > 0

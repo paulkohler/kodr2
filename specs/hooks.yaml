@@ -197,6 +197,19 @@ constraints:
     hook's name; not shown when --quiet is set.
   - Output truncated at the verify output limit (overridable).
   - >
+    runStopHooks forwards its AbortSignal to every hook it runs, so a
+    cancelled run stops the hook that is in flight rather than waiting it out.
+    This is load-bearing for a hook that starts something: a gate of the shape
+    `node server.mjs & sleep 600` backgrounds a process that outlives the
+    shell, and before the signal was plumbed through, cancelling the run left
+    that process holding its port for the rest of the session. The cancel path
+    reaches it the same way the timeout does -- see the shell spec's process
+    group constraints -- so the two are one mechanism with two triggers, and
+    both are tested through runStopHooks rather than only against runShell
+    directly: the signal is optional at every layer it crosses
+    (`options.signal`), so a layer that forgets to pass it on degrades to the
+    old leak with nothing failing.
+  - >
     No tri-state flags: runWhenUnchanged is a plain boolean.
   - Errors at the config boundary are returned values, not thrown.
   - >
@@ -238,3 +251,6 @@ tests:
     - stopVerifyBudgetMs holds back the reserve and is undefined without a budget
     - heartbeatIntervalMs resolves option over env over default
     - runStopHooks reports heartbeats tagged with the running hook's name
+    - a Stop hook that backgrounds a long-lived process has it reaped when the hook times out
+    - an AbortSignal cancels the Stop hook in flight and reaps what it backgrounded
+    - a Stop hook sequence run with no signal still behaves as before
