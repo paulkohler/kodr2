@@ -41,6 +41,17 @@ outputs:
 
 constraints:
   - >
+    The shell runner takes the signal too, so cancellation reaches a running
+    command rather than only the gap between tool-loop turns. It is forwarded
+    to run_command through the tool registry's context and to Stop hooks
+    through runStopHooks, and on abort the command's process group is killed
+    and the call answers at once. This became necessary when the runner
+    started detaching its children into their own process group (see
+    specs/shell.yaml): a detached child does not receive the terminal's
+    SIGINT. It is also a gain rather than a swap -- terminal delivery only
+    ever worked for a TTY front-end, so a cancelled loop or ACP run
+    previously left its command running to completion.
+  - >
     The model client (src/model.mjs) accepts a per-call signal on chat(). When it
     fires, streamRequest destroys the underlying request socket -- the same
     teardown the hard timeout already performs -- and the call rejects with a

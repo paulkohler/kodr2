@@ -139,6 +139,10 @@ export default {
       cwd: context.cwd,
       env: buildEnv(context.envPassthrough),
       timeout: commandTimeout(context),
+      // Forwarded so Ctrl-C reaches the command itself, not just the gap
+      // between tool-loop turns (specs/cancel.yaml). A detached child no
+      // longer gets the terminal's SIGINT, so this is the only route.
+      signal: context.signal,
     });
     const changed = await changedFiles(context.cwd, before, cap);
     for (const path of changed) {

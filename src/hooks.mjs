@@ -115,6 +115,7 @@ function normalizeHook(hook) {
  * @param {number} [options.maxOutput] - Max characters of combined output
  * @param {number} [options.heartbeatMs] - Interval for onHeartbeat (0 disables)
  * @param {function} [options.onHeartbeat] - Called with (hookName, elapsedMs) on each tick
+ * @param {AbortSignal} [options.signal] - Cancellation signal, forwarded to each hook
  * @returns {Promise<{ passed: boolean, command: string, output: string, exitCode: number, results: Array }>}
  */
 export async function runStopHooks(hooks, cwd, options = {}) {
@@ -132,6 +133,7 @@ export async function runStopHooks(hooks, cwd, options = {}) {
       timeout: resolveHookTimeout(hook.timeout, budgetMs),
       maxOutput,
       heartbeatMs,
+      signal: options.signal,
       onHeartbeat: onHeartbeat
         ? (elapsedMs) => onHeartbeat(hook.name, elapsedMs)
         : undefined,

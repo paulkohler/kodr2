@@ -383,6 +383,7 @@ export async function run(prompt, options) {
     vision: options.vision,
     initialFilesChanged: priorFilesChanged,
     backend: options.backend,
+    signal: options.signal,
   });
   const commandEnv = buildEnv(envPassthrough);
   // Read once and pass the same content to both buildSystemPrompt and the
@@ -604,6 +605,10 @@ export async function run(prompt, options) {
           budgetMs,
           touchedWorkspace,
           heartbeatMs,
+          // A Stop hook is often the longest command in a run (`cargo test`),
+          // and the child is detached from the terminal group, so Ctrl-C only
+          // reaches it through here (specs/cancel.yaml).
+          signal: options.signal,
           // Gated on quiet (like the model heartbeat) so no timer is scheduled
           // when there's nothing to render.
           onHeartbeat: quiet

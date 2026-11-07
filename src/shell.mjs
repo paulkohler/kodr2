@@ -9,7 +9,7 @@
  * timeout), or a buffer overflow are all reported as a non-zero exitCode.
  */
 
-import { execFile, execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { buildEnv } from './env.mjs';
 
 // Local models are slow and may drive long builds or test suites, so the
@@ -42,6 +42,8 @@ export const DEFAULT_PS_TIMEOUT_MS = 2_000;
  *   command tree from SIGTERM to SIGKILL (default 5 seconds)
  * @param {number} [options.psTimeoutMs] - Timeout for the `ps` call used to
  *   find a timed-out command's descendants (default 2 seconds)
+ * @param {AbortSignal} [options.signal] - Cancellation signal. Kills the
+ *   command's process group and answers at once (see specs/cancel.yaml).
  * @returns {Promise<{ stdout: string, stderr: string, exitCode: number }>}
  */
 export function runShell(command, cwd, options = {}) {
@@ -51,6 +53,7 @@ export function runShell(command, cwd, options = {}) {
   const heartbeatMs = options.heartbeatMs ?? 0;
   const killGraceMs = options.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
   const psTimeoutMs = options.psTimeoutMs ?? DEFAULT_PS_TIMEOUT_MS;
+  const signal = options.signal;
 
   return new Promise((resolve) => {
     const startedAt = Date.now();
@@ -59,6 +62,7 @@ export function runShell(command, cwd, options = {}) {
     let killGraceTimer;
     let timedOut = false;
     let settled = false;
+    let onAbort;
     // Once the timeout fires, the escalation to SIGKILL must run to
     // completion even if the immediate child dies from SIGTERM (which
     // resolves this promise) before a stubborn grandchild does. Otherwise
@@ -66,31 +70,105 @@ export function runShell(command, cwd, options = {}) {
     // clean up the survivor.
     let escalationArmed = false;
 
-    const child = execFile(
-      '/bin/sh',
-      ['-c', command],
-      { cwd, maxBuffer: maxOutput * 2, env },
-      (err, stdout, stderr) => {
-        if (heartbeatTimer) {
-          clearInterval(heartbeatTimer);
-        }
-        clearTimeout(timeoutTimer);
-        if (!escalationArmed) {
-          clearTimeout(killGraceTimer);
-        }
-        if (settled) {
-          // The timeout already answered the caller. Still let the kill
-          // escalation finish above; just don't resolve twice.
+    // detached makes /bin/sh a process group leader, which is what lets a
+    // backgrounded orphan be killed at all: process group membership is
+    // inherited and survives reparenting, so `kill(-pgid)` still reaches a
+    // process that `ps -Ao pid,ppid` can no longer connect to us (see
+    // killTree). The child is never unref'd, so Node still waits for it.
+    //
+    // Typed loosely on purpose: execFile forwards its options to spawn and
+    // honours `detached` at runtime, but @types/node leaves it out of
+    // ExecFileOptions, so a precise annotation here would be a lie that
+    // doesn't compile.
+    // spawn, not execFile: execFile silently drops `detached`, leaving the
+    // child in the parent's process group (verified -- the child's pgid came
+    // back as the launching shell's). Without its own group there is no group
+    // to signal, so `kill(-pid)` just ESRCHes and a backgrounded orphan
+    // survives. spawn honours it, which is the whole basis of killTree.
+    const child = spawn('/bin/sh', ['-c', command], {
+      cwd,
+      env,
+      detached: true,
+    });
+
+    // execFile's maxBuffer, by hand: stop accumulating past the cap and fail
+    // the command, rather than growing a string without limit.
+    const cap = maxOutput * 2;
+    let stdout = '';
+    let stderr = '';
+    let overflowed = false;
+    const collect = (stream, append) => {
+      if (!stream) {
+        return;
+      }
+      stream.setEncoding('utf8');
+      stream.on('data', (chunk) => {
+        if (overflowed) {
           return;
         }
-        settled = true;
-        resolve({
-          stdout: truncate(stdout || '', maxOutput),
-          stderr: truncate(stderr || '', maxOutput),
-          exitCode: timedOut ? 1 : exitCodeFrom(err),
-        });
-      },
-    );
+        append(chunk);
+        if (stdout.length + stderr.length > cap) {
+          overflowed = true;
+          const pids = descendantPids(child.pid, psTimeoutMs);
+          killTree(child.pid, pids, 'SIGKILL');
+        }
+      });
+      stream.on('error', () => {
+        // A broken pipe on a killed command is not a failure of its own.
+      });
+    };
+    collect(child.stdout, (c) => {
+      stdout += c;
+    });
+    collect(child.stderr, (c) => {
+      stderr += c;
+    });
+
+    const finish = (exitCode) => {
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+      }
+      clearTimeout(timeoutTimer);
+      if (!escalationArmed) {
+        clearTimeout(killGraceTimer);
+      }
+      if (onAbort && signal) {
+        signal.removeEventListener('abort', onAbort);
+      }
+      if (settled) {
+        // The timeout or a cancellation already answered the caller. Still
+        // let the kill escalation finish above; just don't resolve twice.
+        return;
+      }
+      settled = true;
+      resolve({
+        stdout: truncate(stdout, maxOutput),
+        stderr: truncate(stderr, maxOutput),
+        exitCode,
+      });
+    };
+
+    // 'close' rather than 'exit': it waits for the stdio streams to drain, so
+    // output written just before exit is not lost. A backgrounded orphan can
+    // hold those streams open forever, which is why the timeout and the abort
+    // path answer the caller themselves.
+    child.on('close', (code, signalName) => {
+      if (timedOut || overflowed) {
+        finish(1);
+        return;
+      }
+      if (typeof code === 'number') {
+        finish(code);
+        return;
+      }
+      // Killed by a signal, or no code at all.
+      finish(signalName ? 1 : 1);
+    });
+
+    child.on('error', (err) => {
+      stderr += `${stderr ? '\n' : ''}${err.message}`;
+      finish(1);
+    });
 
     if (timeout > 0) {
       timeoutTimer = setTimeout(() => {
@@ -102,9 +180,9 @@ export function runShell(command, cwd, options = {}) {
         // chain a second lookup at SIGKILL time would need to rediscover
         // them by.
         const pids = descendantPids(child.pid, psTimeoutMs);
-        killPids(pids, 'SIGTERM');
+        killTree(child.pid, pids, 'SIGTERM');
         killGraceTimer = setTimeout(() => {
-          killPids(pids, 'SIGKILL');
+          killTree(child.pid, pids, 'SIGKILL');
         }, killGraceMs);
         killGraceTimer.unref?.();
         // Answer the caller now rather than waiting for execFile's callback,
@@ -133,6 +211,40 @@ export function runShell(command, cwd, options = {}) {
       timeoutTimer.unref?.();
     }
 
+    // Ctrl-C has to be forwarded explicitly now that the child is detached:
+    // a detached child is in its own process group, so the terminal's SIGINT
+    // no longer reaches it. This is strictly better than relying on that --
+    // terminal delivery never worked for a non-TTY front-end (the loop, ACP)
+    // in the first place, where an interrupted run would leave its command
+    // running to completion.
+    if (signal) {
+      onAbort = () => {
+        const pids = descendantPids(child.pid, psTimeoutMs);
+        killTree(child.pid, pids, 'SIGTERM');
+        const graceTimer = setTimeout(() => {
+          killTree(child.pid, pids, 'SIGKILL');
+        }, killGraceMs);
+        graceTimer.unref?.();
+        if (!settled) {
+          settled = true;
+          if (heartbeatTimer) {
+            clearInterval(heartbeatTimer);
+          }
+          clearTimeout(timeoutTimer);
+          resolve({
+            stdout: '',
+            stderr: 'command cancelled',
+            exitCode: 1,
+          });
+        }
+      };
+      if (signal.aborted) {
+        onAbort();
+      } else {
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+    }
+
     if (heartbeatMs > 0 && options.onHeartbeat) {
       heartbeatTimer = setInterval(() => {
         options.onHeartbeat(Date.now() - startedAt);
@@ -150,6 +262,37 @@ function killPids(pids, signal) {
       // Already gone -- nothing left to signal.
     }
   }
+}
+
+/**
+ * Signal a timed-out command's whole process group, then its ppid-walked
+ * descendants as a fallback.
+ *
+ * The group is what catches a backgrounded orphan. `sh -c "cargo run &"`
+ * exits immediately, so the server is reparented to init and stops being a
+ * descendant of anything we can name -- there is no moment at which a ppid
+ * walk could have found it. It stays in the process group it inherited,
+ * though, so the group signal still reaches it.
+ *
+ * The group kill is attempted, not relied on: a host that silently refuses to
+ * put the child in its own group leaves no group whose id equals the child's
+ * pid, so `kill(-pid)` throws ESRCH and the ppid walk still does the work
+ * (the original reason this module avoided groups outright). It cannot hit
+ * anything else by accident -- a process group's id is its leader's pid, and
+ * the only process with that pid is our own child.
+ * @param {number|undefined} pid - The direct child's pid
+ * @param {number[]} pids - Its ppid-walked descendants
+ * @param {NodeJS.Signals} signal
+ */
+function killTree(pid, pids, signal) {
+  if (pid) {
+    try {
+      process.kill(-pid, signal);
+    } catch {
+      // No such group -- detached was refused, or it is already gone.
+    }
+  }
+  killPids(pids, signal);
 }
 
 /**
@@ -201,21 +344,6 @@ function descendantPids(rootPid, psTimeoutMs) {
     }
   }
   return pids;
-}
-
-/**
- * Normalize an execFile error to a numeric exit code. A numeric `code` is the
- * process exit status; anything else (a signal name, the maxBuffer error
- * string, a null code on timeout) is reported as a generic failure.
- */
-function exitCodeFrom(err) {
-  if (!err) {
-    return 0;
-  }
-  if (typeof err.code === 'number') {
-    return err.code;
-  }
-  return 1;
 }
 
 function truncate(text, max) {

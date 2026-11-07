@@ -84,6 +84,34 @@ constraints:
     hosts silently refuse to create a new process group for a detached
     child, which would make a group-based kill a silent no-op.
   - >
+    The command runs in its own process group and a timeout or cancellation
+    signals the group as well as the ppid-walked descendants. The group is the
+    only thing that reaches a backgrounded orphan: `sh -c "cargo run &"` exits
+    at once, so the child is reparented to init and stops being anyone's
+    descendant -- there is no moment at which a ppid walk could find it -- but
+    process group membership is inherited and survives reparenting. The group
+    kill is attempted, not relied on, so a host that refuses to create one
+    (the original reason this module avoided groups) just falls back to the
+    walk: a group id that was never created ESRCHes, and it cannot hit
+    anything else by accident, since a group's id is its leader's pid and the
+    only process with that pid is our own child.
+  - >
+    This is why the runner uses `spawn` rather than `execFile`: execFile
+    silently drops `detached`, leaving the child in the parent's process group
+    (verified -- the child's pgid came back as the launching shell's), so
+    there is no group to signal and the orphan survives. Output capping is
+    therefore done by hand in place of execFile's maxBuffer: accumulation
+    stops at twice maxOutput and the tree is killed, which keeps overflow
+    mapping to a non-zero exit as before.
+  - >
+    A detached child no longer receives the terminal's SIGINT, so
+    cancellation is forwarded explicitly: runShell takes an optional
+    AbortSignal, kills the group and answers at once when it fires. This is
+    strictly better than relying on terminal delivery, which never worked for
+    a non-TTY front-end (the loop, ACP) -- an interrupted run there left its
+    command running to completion. The signal reaches run_command through the
+    tool registry's context and Stop hooks through runStopHooks.
+  - >
     The descendant list is snapshotted once, at the moment SIGTERM is
     sent, and the same list is reused for the SIGKILL escalation rather
     than re-querying `ps`. Once a process in the tree dies, any surviving
@@ -103,7 +131,7 @@ constraints:
     model-issued background command pended for minutes regardless of
     --command-timeout-ms (observed: `cargo run &` pending ~7 minutes
     against 180,000ms). Resolving on the timeout makes the limit mean what
-    it says; the orphan can still outlive the call, which is BACKLOG #9.
+    it says.
   - >
     A timed-out command tree first gets SIGTERM, then SIGKILL after
     killGraceMs if any of it hasn't exited. The SIGKILL escalation is not
@@ -119,6 +147,9 @@ constraints:
 tests:
   unit:
     - a timeout answers the caller even when a backgrounded orphan holds the pipes open
+    - a timeout kills a backgrounded process the ppid walk cannot see
+    - an AbortSignal cancels the command and kills its group
+    - a signal already aborted answers at once
     - a foreground command that overruns its timeout still reports a non-zero exit
     - successful command returns exit code 0
     - reports the process exit code on failure

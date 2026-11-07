@@ -167,3 +167,69 @@ describe('runShell timeout with a backgrounded command', () => {
     assert.equal(result.exitCode, 1);
   });
 });
+
+describe('runShell reaps a backgrounded orphan (BACKLOG #9)', () => {
+  const settle = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  it('kills a backgrounded process the ppid walk cannot see', async () => {
+    // The orphan is reparented to init the moment `sh` exits, so no ppid walk
+    // can find it. It stays in the process group it inherited, which is what
+    // the group kill reaches. If the kill fails, the marker appears.
+    const { mkdtemp } = await import('node:fs/promises');
+    const { existsSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = await mkdtemp(join(tmpdir(), 'kodr-orphan-'));
+    const marker = join(dir, 'MARKER');
+
+    const result = await runShell(`(sleep 1; touch ${marker}) &`, dir, {
+      timeout: 200,
+      killGraceMs: 50,
+    });
+    assert.equal(result.exitCode, 1);
+
+    // Wait past when the orphan would have written, had it survived.
+    await settle(1600);
+    assert.equal(
+      existsSync(marker),
+      false,
+      'the backgrounded process should have been killed with its group',
+    );
+  });
+
+  it('cancels on an AbortSignal and kills the group with it', async () => {
+    // Ctrl-C has to be forwarded explicitly: a detached child is in its own
+    // process group, so the terminal's SIGINT no longer reaches it.
+    const { mkdtemp } = await import('node:fs/promises');
+    const { existsSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = await mkdtemp(join(tmpdir(), 'kodr-cancel-'));
+    const marker = join(dir, 'MARKER');
+
+    const controller = new AbortController();
+    const started = Date.now();
+    setTimeout(() => controller.abort(), 150);
+    const result = await runShell(`(sleep 1; touch ${marker}) &`, dir, {
+      timeout: 60000,
+      killGraceMs: 50,
+      signal: controller.signal,
+    });
+    const elapsed = Date.now() - started;
+
+    assert.equal(result.exitCode, 1);
+    assert.match(result.stderr, /cancelled/);
+    assert.ok(elapsed < 5000, `should answer on abort (took ${elapsed}ms)`);
+    await settle(1600);
+    assert.equal(existsSync(marker), false, 'abort should kill the group too');
+  });
+
+  it('answers at once when the signal is already aborted', async () => {
+    const result = await runShell('sleep 30', process.cwd(), {
+      timeout: 60000,
+      signal: AbortSignal.abort(),
+    });
+    assert.equal(result.exitCode, 1);
+    assert.match(result.stderr, /cancelled/);
+  });
+});

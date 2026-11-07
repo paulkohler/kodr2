@@ -19,6 +19,7 @@ const MAX_OUTPUT = 20_000;
  * @param {Record<string, string>} [options.env] - Child environment
  * @param {number} [options.heartbeatMs] - Interval for onHeartbeat (0 disables)
  * @param {function} [options.onHeartbeat] - Called with elapsed ms on each tick
+ * @param {AbortSignal} [options.signal] - Cancellation signal, forwarded to the runner
  * @returns {Promise<{ passed: boolean, command: string, output: string, exitCode: number }>}
  */
 export async function verify(command, cwd, options = {}) {
@@ -27,6 +28,7 @@ export async function verify(command, cwd, options = {}) {
     timeout: options.timeout ?? DEFAULT_TIMEOUT,
     maxOutput,
     env: options.env,
+    signal: options.signal,
     heartbeatMs: options.heartbeatMs,
     onHeartbeat: options.onHeartbeat,
   });
