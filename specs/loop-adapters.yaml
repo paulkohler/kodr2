@@ -1,0 +1,95 @@
+name: loop-adapters
+status: implemented
+description: >
+  The two collaborator objects `runLoop` is driven by — the checklist
+  (nextTask/markTask) and git (commitGreen/park/headSha) — built as a tested
+  unit instead of inline in the CLI.
+
+  This exists because BACKLOG #8 lived in that wiring and nowhere else. The
+  bug had two halves: `markTask` re-found "the first unchecked line" instead
+  of the line the iteration had actually taken, and `park` ran a bare
+  `git reset --hard` instead of rewinding to the sha HEAD held before the
+  attempt. A model that committed its own work mid-attempt therefore left the
+  work in history, and the `[!]` landed on a different task than the one that
+  failed. Observed on a four-task checklist: `max` was marked `[x]` with work
+  committed even though the gate had rejected it, and `median` carried a `[!]`
+  for an attempt that was never made.
+
+  Both halves were fixed, and both are covered — `test/loop.test.mjs` proves
+  `runLoop` hands park the pre-attempt sha, `test/loop-git.test.mjs` proves a
+  real `park(cwd, paths, sha)` discards a model commit. Neither test can fail
+  if the *wiring between them* regresses, because each one fakes the other
+  side. Drop `headSha` from the object the CLI passes and every one of those
+  tests still passes while #8 is fully back.
+
+  That gap was structural: the wiring was an object literal inside a 60-line
+  block of `runLoopCommand`, reachable only by running the real CLI against a
+  real model. Extracting it makes the composition addressable, so the
+  regression test can drive the real adapters over a real git repo with only
+  the model faked.
+
+inputs:
+  tasksFile:
+    type: string
+    required: true
+    description: Checklist path, for checklistAdapter
+  cwd:
+    type: string
+    required: true
+    description: Workspace root, for gitAdapter
+
+outputs:
+  checklist:
+    type: object
+    description: "{ nextTask, markTask } — the shape runLoop's params.checklist wants"
+  git:
+    type: object
+    description: "{ commitGreen, park, headSha } — the shape runLoop's params.git wants"
+
+constraints:
+  - >
+    checklistAdapter holds the line index `readNextTask` returned and spends
+    it on the next `markTask`, so the mark lands on the line this iteration
+    took. Re-reading the file to find "the first unchecked line" is the #8
+    bug: by mark time the model may have edited the checklist, and a park's
+    rewind restores it, so the first unchecked line is no longer the task that
+    just ran.
+  - >
+    The index is per-adapter state, not module state. One adapter serves one
+    loop; two concurrent loops over the same file get two adapters and cannot
+    tread on each other's pending line.
+  - >
+    markTask before any nextTask is refused by markTaskAt (a null line is out
+    of range), not silently applied to line 0. A mark with no task behind it
+    is a wiring fault, and failing loudly is what turns it into the
+    `mark-failed` stop rather than a corrupted checklist.
+  - >
+    gitAdapter.park forwards its resetTo argument to loop-git's park
+    unchanged. The default must stay "rewind to the given sha": a park that
+    silently falls back to a bare reset keeps a model-authored commit, which
+    is #8's other half and is invisible in the loop's own output.
+  - >
+    gitAdapter exposes headSha. It is optional in runLoop's contract (`git
+    .headSha?.()`) so a caller can omit it, which means omitting it degrades
+    to the pre-#8 behaviour with no error — the one failure mode the
+    regression test below has to cover explicitly.
+  - >
+    The adapters are the only loop wiring the CLI builds. Anything the CLI
+    still constructs inline is, by construction, untested, so new
+    collaborators belong here rather than beside the call.
+
+deliverables:
+  - src/loop-adapters.mjs
+  - test/loop-adapters.test.mjs
+  - src/cli.mjs uses both adapters in runLoopCommand
+
+tests:
+  unit:
+    - the mark lands on the line nextTask returned, not on the first unchecked line now
+    - a model-authored commit during the attempt is gone from history after the park
+    - the park commit touches the checklist and nothing else
+    - history after a parked task is the pre-attempt sha plus exactly one park commit
+    - the green path commits the model's work rather than rewinding it
+    - a checklist edited by the model during the attempt still marks the right line
+    - markTask before nextTask is refused rather than marking line 0
+    - dropping headSha from the git object reproduces #8, proving the test has teeth

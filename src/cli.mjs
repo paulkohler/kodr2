@@ -29,12 +29,16 @@ import {
 } from './harness.mjs';
 import { DEFAULT_INCIDENT_HEARTBEAT_MS } from './incident.mjs';
 import {
-  commitAll,
+  loopGoalMaxAttempts,
+  loopTasksFile,
+  runLoop,
+  validateLoopStart,
+} from './loop.mjs';
+import { checklistAdapter, gitAdapter } from './loop-adapters.mjs';
+import {
   hasCommits,
   isGitRepo,
   isTracked,
-  headSha,
-  park,
   registerExcludes,
 } from './loop-git.mjs';
 import {
@@ -42,14 +46,6 @@ import {
   loopsDir,
   writeLoopRecord,
 } from './loop-record.mjs';
-import {
-  loopGoalMaxAttempts,
-  loopTasksFile,
-  markTaskAt,
-  readNextTask,
-  runLoop,
-  validateLoopStart,
-} from './loop.mjs';
 import { readMemory, runMemoryConsolidation } from './memory.mjs';
 import { DEFAULT_MAX_RETRIES } from './model.mjs';
 import { createProvider, resolveProviderName } from './provider.mjs';
@@ -1839,28 +1835,16 @@ export async function runLoopCommand(args) {
 
   const onSigint = createSigintCanceller(controller);
   process.on('SIGINT', onSigint);
-  /** @type {number|null} */
-  let pendingTaskLine = null;
   try {
     const result = await runLoop({
-      checklist: {
-        // The line index travels with the task so the later mark lands on
-        // the line this iteration actually took, not on whatever happens to
-        // be the first unchecked line by then (BACKLOG #8).
-        nextTask: async () => {
-          const next = await readNextTask(tasksFile);
-          pendingTaskLine = next ? next.line : null;
-          return next ? next.text : null;
-        },
-        markTask: (mark) => markTaskAt(tasksFile, pendingTaskLine, mark),
-      },
+      // Both collaborators are built by loop-adapters.mjs rather than inline:
+      // BACKLOG #8 was a bug in exactly this wiring, and inline here it was
+      // reachable only by running the real CLI against a real model
+      // (specs/loop-adapters.yaml).
+      checklist: checklistAdapter(tasksFile),
       buildTask,
       buildGoal,
-      git: {
-        commitGreen: (message) => commitAll(cwd, message),
-        park: (resetPaths, resetTo) => park(cwd, resetPaths, resetTo),
-        headSha: () => headSha(cwd),
-      },
+      git: gitAdapter(cwd),
       resetPaths: args.resetPaths,
       maxAttempts: args.maxAttempts,
       retryBackoffMs: args.retryBackoffMs,
