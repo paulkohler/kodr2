@@ -1774,6 +1774,7 @@ export async function runGoalCommand(args) {
     const goalResult = await runGoal({
       goal,
       maxAttempts: args.maxAttempts,
+      retryBackoffMs: args.retryBackoffMs,
       reporter: loopReporter,
       runTask: (prompt, continuation) =>
         run(prompt, {
@@ -1955,6 +1956,7 @@ export async function runLoopCommand(args) {
     runGoal({
       goal: goalText,
       maxAttempts: loopGoalMaxAttempts(args.goalMaxAttempts),
+      retryBackoffMs: args.retryBackoffMs,
       reporter,
       runTask: buildTask,
       evaluate: withReviewGate(

@@ -157,8 +157,10 @@ kodr goal "the /health route is documented in the README and has a test" \
 
 Each attempt builds and verifies, then a read-only judge inspects the workspace.
 If the goal is not met, its feedback goes into the next attempt. The default
-cap is three attempts. The loop also stops on a build error or two consecutive
-attempts with no changes.
+cap is three attempts. The loop also stops when two consecutive attempts change no files.
+A build that ends in a transient provider error (a request timeout, a 5xx) is
+not judged: it waits `--retry-backoff-ms` and the next attempt runs, but it
+still spends an attempt, so a dead backend ends the goal.
 
 A judge verdict without sufficient tool use cannot establish that the goal
 is met. This differs from the advisory grounding check used by

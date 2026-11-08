@@ -228,11 +228,12 @@ describe('runGoal', () => {
     assert.equal(taskCalls, 2);
   });
 
-  it('stops with reason "build-error" without judging when a build attempt errors', async () => {
+  it('stops with reason "build-error" without judging when the final build attempt errors', async () => {
     let judged = 0;
     const result = await runGoal({
       goal: 'g',
       maxAttempts: 3,
+      retryBackoffMs: 0,
       runTask: async () => fakeResult({ stoppedReason: 'error' }),
       evaluate: async () => {
         judged += 1;
@@ -241,8 +242,52 @@ describe('runGoal', () => {
     });
     assert.equal(result.reason, 'build-error');
     assert.equal(result.met, false);
-    assert.equal(result.attempts, 1);
+    assert.equal(result.attempts, 3);
     assert.equal(judged, 0);
+  });
+
+  it('backs off and retries a build error while attempts remain, without judging it', async () => {
+    const prompts = [];
+    let judged = 0;
+    const result = await runGoal({
+      goal: 'the goal',
+      maxAttempts: 3,
+      retryBackoffMs: 0,
+      runTask: async (prompt) => {
+        prompts.push(prompt);
+        if (prompts.length === 1) {
+          return fakeResult({ stoppedReason: 'error' });
+        }
+        return fakeResult();
+      },
+      evaluate: async () => {
+        judged += 1;
+        return verdict({ met: true });
+      },
+    });
+    assert.equal(result.reason, 'met');
+    assert.equal(result.attempts, 2);
+    assert.equal(judged, 1);
+    assert.equal(prompts[1], 'the goal');
+  });
+
+  it('waits retryBackoffMs before retrying a build error', async () => {
+    const started = Date.now();
+    let calls = 0;
+    await runGoal({
+      goal: 'g',
+      maxAttempts: 2,
+      retryBackoffMs: 60,
+      runTask: async () => {
+        calls += 1;
+        if (calls === 1) {
+          return fakeResult({ stoppedReason: 'error' });
+        }
+        return fakeResult();
+      },
+      evaluate: async () => verdict({ met: true }),
+    });
+    assert.ok(Date.now() - started >= 50);
   });
 
   it('stops with reason "judge-error" and preserves the build when the judge throws', async () => {

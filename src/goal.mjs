@@ -11,6 +11,7 @@
  * grounded tool loop borrowing the review pass's anti-hallucination stance.
  */
 
+import { loopRetryBackoffMs } from './loop.mjs';
 import { loadPrompt } from './prompts.mjs';
 import { createNullReporter } from './reporter.mjs';
 import { reviewBlocks } from './review.mjs';
@@ -325,6 +326,8 @@ function addUsage(total, usage) {
  * @param {AbortSignal} [params.signal] - Cancellation signal (see specs/cancel.yaml).
  *   Checked at the top of each attempt and again after the build, so one Ctrl-C
  *   ends the goal instead of being absorbed by a single attempt.
+ * @param {number} [params.retryBackoffMs] - Wait before retrying a build that
+ *   ended in a transient error (see loopRetryBackoffMs).
  * @param {import('./reporter.mjs').Reporter} [params.reporter]
  * @returns {Promise<GoalResult>}
  */
@@ -332,6 +335,7 @@ export async function runGoal(params) {
   const { goal, runTask, evaluate, signal } = params;
   const reporter = params.reporter || createNullReporter();
   const maxAttempts = goalMaxAttempts(params.maxAttempts);
+  const backoffMs = loopRetryBackoffMs(params.retryBackoffMs);
 
   const verdicts = [];
   const usage = { prompt: 0, completion: 0, cost: 0 };
@@ -365,7 +369,7 @@ export async function runGoal(params) {
     reporter.notice(`goal attempt ${attempt}/${maxAttempts}`);
 
     let prompt = goal;
-    if (attempt > 1) {
+    if (verdicts.length > 0) {
       prompt = buildRetryPrompt(goal, verdicts[verdicts.length - 1].feedback);
     }
 
@@ -385,6 +389,20 @@ export async function runGoal(params) {
         usage,
         retries,
       );
+    }
+
+    if (result.stoppedReason === 'error' && attempt < maxAttempts) {
+      // A transient provider failure says nothing about the work, so it is
+      // neither judged nor terminal while attempts remain (BACKLOG #14). It
+      // still spends the attempt, so a dead backend ends the goal.
+      reporter.notice(
+        `goal attempt ${attempt} ended in a transient error -- backing off ${backoffMs}ms before retry`,
+      );
+      if (backoffMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      }
+      continuation = continuationAfterError(result, continuation);
+      continue;
     }
 
     if (result.stoppedReason === 'error') {
@@ -464,6 +482,18 @@ export async function runGoal(params) {
     usage,
     retries,
   );
+}
+
+// An errored attempt may carry no transcript (a timeout logs 0 tokens); keep
+// the prior continuation rather than replacing it with nothing.
+function continuationAfterError(result, prior) {
+  if (!result.messages || result.messages.length === 0) {
+    return prior;
+  }
+  return {
+    priorMessages: result.messages,
+    priorFilesChanged: result.filesChanged || [],
+  };
 }
 
 function finish(

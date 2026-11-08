@@ -40,6 +40,13 @@ inputs:
       Cap on build+judge iterations (default 3 — KODR_GOAL_MAX_ATTEMPTS, CLI
       --max-attempts). The loop's coarse budget; each run() still honors its own
       maxRunMs.
+  retryBackoffMs:
+    type: number
+    required: false
+    description: >
+      Wait before retrying a build attempt that ended in a transient error
+      (default 5000 — KODR_LOOP_RETRY_BACKOFF_MS, --retry-backoff-ms; 0
+      disables). The same knob as the loop's plain-task retry.
   judgeMinToolCalls:
     type: number
     required: false
@@ -128,10 +135,18 @@ constraints:
     with reason "stalled" instead of spending the remaining attempts thrashing. The
     cross-run sibling of noOpCompletion; logged via a notice, never silent.
   - >
-    A build attempt whose stoppedReason is "error" stops the loop with reason
-    "build-error" — a crashing backend is not fixed by another attempt. A
-    tool-limit or budget-exceeded build is still judged, since it may hold partial
-    progress worth assessing.
+    A build attempt whose stoppedReason is "error" is a transient provider
+    failure (a request timeout, a 5xx), not a verdict on the work, so it is not
+    judged and does not end the goal while attempts remain: runGoal notices it,
+    waits retryBackoffMs (the loop's knob -- KODR_LOOP_RETRY_BACKOFF_MS,
+    --retry-backoff-ms; 0 disables), and runs the next attempt with the same
+    prompt (there is no judge feedback to frame) and the prior continuation. The
+    errored attempt spends one of maxAttempts, as it does for a plain loop task,
+    so a dead backend still ends the goal. Only an error on the last attempt
+    finishes with reason "build-error". Before this, one "Request timed out"
+    retired a judged phase with attempts unspent (BACKLOG #14, found in the third
+    CRM dogfooding run). A tool-limit or budget-exceeded build is still judged,
+    since it may hold partial progress worth assessing.
   - >
     A cancel is terminal for the whole goal, not just the attempt that saw it:
     runGoal checks the signal at the top of each attempt and checks
@@ -202,7 +217,10 @@ tests:
     - runGoal does not stop on an ungrounded "met" verdict, it keeps iterating
     - runGoal preserves an ungrounded final verdict but reports the overall result met:false
     - runGoal stops with reason "stalled" after two consecutive no-file-change attempts
-    - runGoal stops with reason "build-error" without judging when a build attempt errors
+    - runGoal stops with reason "build-error" without judging when the final build attempt errors
+    - runGoal backs off and retries a build error while attempts remain, without judging it or spending the judge
+    - runGoal waits retryBackoffMs before retrying a build error
+    - runGoal retries an errored first attempt with the original goal prompt, not a feedback prompt
     - runGoal stops with reason "judge-error" and preserves the build when the judge throws
     - runGoal truncates a long judge error message in the reporter notice but keeps it in full on the result
     - runGoal sums build and judge usage and retries

@@ -225,6 +225,8 @@ later request, and said so. It was output.
 
 #### `kodr goal` treats a transient provider error as terminal
 
+*Fixed after this run (BACKLOG #14): a goal build error now backs off and retries while attempts remain. The text below describes the behaviour during the run.*
+
 The plain-task branch classifies a request timeout as transient, backs off and
 retries. The goal branch does not: `src/goal.mjs` maps `stoppedReason ===
 'error'` straight to `goal stopped: build error` and returns.

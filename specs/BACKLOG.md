@@ -9,23 +9,6 @@ Line references are approximate — treat them as anchors, not addresses.
 
 ## Open
 
-- **#14** a transient provider error is terminal inside `kodr goal`. The
-  plain-task branch of `kodr loop` classifies a request timeout as transient,
-  backs off and retries (#10). `runGoal` does not: `src/goal.mjs` maps
-  `stoppedReason === 'error'` straight to `goal stopped: build error` and
-  returns, so one `Request timed out after 1200000ms` ends the whole judged
-  item with attempts still unspent, and the loop parks it. Found in the third
-  CRM dogfooding run (`docs/openshell-crm-postmortem.md`): phase 6's fourth
-  goal attempt hit a request timeout, logged `tokens: 0 in / 0 out`, and the
-  phase parked after 7573s. In that instance the outcome would very probably
-  have been the same — attempts 1 to 3 had each run out the clock — but on a
-  healthier run one timeout is enough to retire a judged phase, which is the
-  most expensive kind. The fix is probably the same classification and
-  back-off the plain branch already has, applied before `build-error` is
-  returned, and it wants a spec change to `specs/goal.yaml` first. Whether a
-  transient attempt should spend one of the goal's attempts, as it does for a
-  plain task, is part of that call.
-
 - **#15** nothing bounds the length of a model response except the wall
   clock. The request body `src/model.mjs` builds is `{ model, messages,
   stream, stream_options, tools }` — no `max_tokens` — so a long generation
@@ -56,6 +39,28 @@ Line references are approximate — treat them as anchors, not addresses.
   first `SIGINT` does. Untested: `SIGINT` against a loop inside a sandbox.
 
 ## Fixed
+
+- **#14** a transient provider error is terminal inside `kodr goal`. The
+  plain-task branch of `kodr loop` classifies a request timeout as transient,
+  backs off and retries (#10). `runGoal` does not: `src/goal.mjs` maps
+  `stoppedReason === 'error'` straight to `goal stopped: build error` and
+  returns, so one `Request timed out after 1200000ms` ends the whole judged
+  item with attempts still unspent, and the loop parks it. Found in the third
+  CRM dogfooding run (`docs/openshell-crm-postmortem.md`): phase 6's fourth
+  goal attempt hit a request timeout, logged `tokens: 0 in / 0 out`, and the
+  phase parked after 7573s. In that instance the outcome would very probably
+  have been the same — attempts 1 to 3 had each run out the clock — but on a
+  healthier run one timeout is enough to retire a judged phase, which is the
+  most expensive kind. The fix is probably the same classification and
+  back-off the plain branch already has, applied before `build-error` is
+  returned, and it wants a spec change to `specs/goal.yaml` first. Whether a
+  transient attempt should spend one of the goal's attempts, as it does for a
+  plain task, is part of that call.
+
+  Fixed: `runGoal` now notices a build error, waits `retryBackoffMs` and runs
+  the next attempt unjudged while attempts remain; the errored attempt spends
+  one, and only an error on the last attempt is `build-error`. Spec:
+  `specs/goal.yaml`.
 
 - **#13** `kodr loop` printed no per-task marker, so an unattended run was
   opaque while it mattered — three lines per task now reach the reporter's
