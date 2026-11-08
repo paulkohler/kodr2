@@ -65,6 +65,19 @@ validation: >
   termination was observed on all three exits (backlog-empty, budget,
   parked). That run also surfaced BACKLOG #8, a host-side park-path bug
   unrelated to the sandbox.
+  The fifteen-phase CRM plan (examples/crm) was then run three times in
+  sandboxes against qwen3.8-27b-mlx, 2026-11-07 and 2026-11-08, and finished
+  none of them, each for a different reason: a provider HTTP 500 parked a
+  phase (BACKLOG #10), the model ticking its own checklist line halted the run
+  (#12), and in the third, ~6 hours, five phases went green with no failed
+  test gate, one `GOAL:` phase parked, and the run was stopped by hand. All of
+  it ran inside the sandbox without a wrapper fault; every finding was a
+  harness or configuration one. The park was observed live (tree rewound,
+  --reset-paths directory recreated empty, checklist line marked), a SIGTERM
+  inside the sandbox was followed by a normal download, and a mid-run
+  `sandbox download` read the workspace without disturbing the loop. The
+  judge, the heal loop and `kodr tui` were not exercised in a sandbox. Full
+  account in docs/openshell-crm-postmortem.md.
 
 inputs:
   args:
@@ -435,6 +448,7 @@ deliverables:
   - specs/openshell-isolation.yaml
   - test/openshell-isolation.test.mjs
   - docs/openshell-isolation.md
+  - docs/openshell-crm-postmortem.md
 
 tests:
   unit:
@@ -475,3 +489,6 @@ tests:
     - edits made in the sandbox come back intact through the download step
     - commits made in the sandbox come back with history intact and a clean status
     - a loop checklist runs unattended to backlog-empty with every task marked
+    - a multi-hour loop that parks a task has its tree rewound and a --reset-paths directory recreated empty inside the sandbox, and carries on to the next task when stop-on-park is off
+    - a loop stopped with SIGTERM inside the sandbox is still followed by the workspace download, with history intact
+    - a snapshot taken with `openshell sandbox download` while the loop runs reads the workspace without disturbing it

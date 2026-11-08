@@ -86,6 +86,109 @@ which the shell runner's allowlist forwards (see
 has no `~/.gitconfig`, so without that the loop would do all its work and then
 fail on its first commit with "Author identity unknown".
 
+## Long unattended runs
+
+A multi-hour `kodr loop` in a sandbox needs more care than a short one. What
+follows comes from three attempts at the fifteen-phase CRM plan, written up in
+the [post-mortem](openshell-crm-postmortem.md).
+
+### Size the limits from your model's speed
+
+The defaults suit a fast model. A 27B model on a laptop generated about 11
+tokens per second end to end, so one response of 15,000 to 20,000 tokens, a
+model writing several large files in a single turn, takes 20 to 30 minutes.
+
+- `--request-timeout-ms` must cover your **longest single response**. When it
+  fires, the response in flight is discarded whole, tool calls and all.
+- `--max-run-ms` is the budget for a whole attempt, many responses. Keep the
+  request timeout to **about a third of it or less**. A 20 minute request
+  ceiling inside a 30 minute attempt budget let one response use two thirds of
+  the attempt, and seven of twelve attempts were lost that way.
+- Tell the two apart in the log: `Request timed out after 1200000ms` is the
+  first, `stopped after run budget` the second. The first is retried after a
+  back-off, the second at once.
+- A lost attempt costs time, not work: the retry resumes the previous
+  conversation with its files still on disk. It does use up one of the task's
+  attempts, so a phase that loses its first attempt to the clock has one fewer
+  for a genuinely red build.
+- `GOAL:` items need the most headroom: a build budget per attempt, plus a
+  judge call, up to four deep.
+
+Something like `--request-timeout-ms 3600000 --max-run-ms 5400000` would be
+the next thing to try for a model of that size. That pairing has **not been run**;
+the one that was (20 and 30 minutes) is the cautionary example.
+
+`KODR_SHELL_KEEPALIVE` also has to outlast the run. The default is four hours,
+and a run that outlives it loses its sandbox and everything not downloaded.
+The CRM runs used `172800` (48 hours).
+
+### Launch it detached
+
+A foreground shell is culled long before six hours. Use `nohup` and `disown`,
+and redirect both streams:
+
+```bash
+nohup env KODR_SHELL_SANDBOX=crm KODR_SHELL_WORKSPACE=/path/to/crm \
+  KODR_SHELL_KEEP=1 KODR_SHELL_DOWNLOAD=1 KODR_SHELL_KEEPALIVE=172800 \
+  scripts/kodr-shell.sh loop --test "npm test" --reset-paths data \
+  > crm.log 2>&1 < /dev/null & disown
+```
+
+### Watching it, and where the files are
+
+The workspace lives **in the sandbox**. The directory you launched from stays
+exactly as it was uploaded, and `<workspace>.returned` does not exist until the
+run ends. To look mid-run:
+
+```bash
+openshell sandbox exec -n NAME --no-tty -- git -C /sandbox/WORKSPACE log --oneline
+openshell sandbox download NAME /sandbox/WORKSPACE ./snapshot
+```
+
+A download reads without disturbing the run. Take one before a phase you expect
+to park, because the park rewinds the tree and deletes untracked files.
+
+The loop prints a marker per task and per attempt (see [Watching it
+run](loop.md#watching-it-run)). They are `notice` lines with ANSI colour, so a
+filter anchored on `^kodr loop:` or on the literal text `verify: pass` matches
+nothing. Match the text after the escape, and be careful with bare words: a
+filter on `verify` also matches the model's own streamed prose.
+
+### Stopping it
+
+Signal the kodr process **inside the sandbox**; the wrapper then carries on
+and downloads the workspace as usual. Find the pid first:
+
+```bash
+openshell sandbox exec -n NAME --no-tty -- sh -c 'ps -eo pid,args | grep "[k]odr.mjs"'
+openshell sandbox exec -n NAME --no-tty -- kill -TERM PID
+```
+
+`SIGTERM` worked: the loop ended, the download ran and history came back
+intact. Kodr has no `SIGTERM` handler, though, so the loop record is left
+without a `reason` and without the task in flight (BACKLOG #16). `SIGINT` is
+the path kodr documents ([`specs/cancel.yaml`](../specs/cancel.yaml)) and
+should be preferred; it was **not tried** against a sandboxed loop. Whether
+killing only the local wrapper stops the process in the sandbox was also not
+tested, so do not assume it does.
+
+### Carrying on past a park
+
+`kodr loop` stops on the first park by default, and that is right for a plan
+whose phases build on each other. `--no-stop-on-park` is for when you want to
+reach later phases regardless, for instance to exercise the `GOAL:` ones. The
+cost is that everything after a park builds on a foundation that was just
+rewound, so a later phase that depends on the parked one proves little about
+the model. Read the park reasons, not the green and parked tally.
+
+### What has not been run in a sandbox
+
+- `kodr goal`'s **judge**: the one `GOAL:` phase reached parked before any
+  build finished inside its budget.
+- The heal loop.
+- `kodr tui`. An interactive terminal program has nowhere to go in an
+  unattended sandboxed run, and it was not attempted.
+
 ## Other languages need their own image
 
 `docker/openshell/Dockerfile` is **node-only** — node, `procps`, `git` and
