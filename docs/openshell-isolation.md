@@ -158,9 +158,15 @@ Everything is overridable by environment variable.
 | `KODR_SHELL_ENV` | — | Comma-separated `NAME=VALUE` pairs to set for the run |
 | `KODR_SHELL_IMAGE_DIR` | `docker/openshell` | Build context for `KODR_SHELL_BUILD=1` |
 | `KODR_SHELL_POLICY` | — | Use this policy file instead of the generated one |
-| `KODR_SHELL_KEEPALIVE` | `14400` | Seconds the sandbox is held open |
+| `KODR_SHELL_KEEPALIVE` | `14400` | Seconds the sandbox is held open (four hours); a longer run loses its sandbox, so raise it |
 | `KODR_SHELL_READY_TIMEOUT` | `120` | Seconds to wait for `Ready` |
 | `KODR_SHELL_OPENSHELL` | `openshell` | Path to the CLI |
+| `KODR_SHELL_SANDBOX_ROOT` | `/sandbox` | Writable root inside the sandbox; uploads land at `<root>/<basename>` |
+| `KODR_SHELL_DEST` | the workspace's parent | Where `KODR_SHELL_DOWNLOAD=1` writes `<workspace>.returned` |
+| `KODR_SHELL_GIT_NAME` | `Kodr Sandbox` | Git author and committer name, passed as environment |
+| `KODR_SHELL_GIT_EMAIL` | `kodr@sandbox.invalid` | Git author and committer email, passed as environment |
+| `KODR_SHELL_OPEN_HOST` | `openrouter.ai` | Public host `KODR_SHELL_NETWORK=open` also allows |
+| `KODR_SHELL_OPEN_PORT` | `443` | Port for `KODR_SHELL_OPEN_HOST` |
 
 The policy is **generated**, not shipped as a fixture, so it cannot disagree
 with the base URL: overriding the host or port has to move the allowed

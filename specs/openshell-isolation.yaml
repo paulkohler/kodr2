@@ -123,8 +123,8 @@ inputs:
     type: string
     required: false
     description: >
-      When 1, omit --no-keep so the sandbox outlives the run and edits can be
-      downloaded
+      When 1, leave the sandbox running after the run instead of deleting it
+      on exit, so the workspace can be downloaded
   KODR_SHELL_DOWNLOAD:
     type: string
     required: false
@@ -133,14 +133,65 @@ inputs:
     type: string
     required: false
     description: Path to a policy file to use instead of the generated one
-  KODR_SHELL_POLICY_TIMEOUT_S:
-    type: number
-    required: false
-    description: Seconds for `openshell policy update --wait` (default 60, OpenShell's own)
   KODR_SHELL_DRYRUN:
     type: string
     required: false
     description: When 1, print the generated policy and assembled commands and run nothing
+  KODR_SHELL_BUILD:
+    type: string
+    required: false
+    description: When 1, run `docker build` of KODR_SHELL_IMAGE_DIR into KODR_SHELL_IMAGE first
+  KODR_SHELL_IMAGE:
+    type: string
+    required: false
+    description: Image reference the sandbox is created from (default kodr-shell:latest)
+  KODR_SHELL_IMAGE_DIR:
+    type: string
+    required: false
+    description: Build context for KODR_SHELL_BUILD=1 (default docker/openshell in the repo)
+  KODR_SHELL_KEEPALIVE:
+    type: number
+    required: false
+    description: >
+      Seconds the sandbox is held open by its keepalive command (default
+      14400, four hours). A run longer than this loses its sandbox mid-run
+  KODR_SHELL_READY_TIMEOUT:
+    type: number
+    required: false
+    description: Seconds to wait for the sandbox to reach Ready before giving up (default 120)
+  KODR_SHELL_ENV:
+    type: string
+    required: false
+    description: >
+      Comma-separated NAME=VALUE pairs set on kodr's own process and also
+      declared to kodr with --env, so its children see them; values cannot
+      contain a comma
+  KODR_SHELL_GIT_NAME:
+    type: string
+    required: false
+    description: Git author and committer name passed as environment (default "Kodr Sandbox")
+  KODR_SHELL_GIT_EMAIL:
+    type: string
+    required: false
+    description: Git author and committer email passed as environment (default kodr@sandbox.invalid)
+  KODR_SHELL_DEST:
+    type: string
+    required: false
+    description: >
+      Directory the downloaded workspace lands beside, as <name>.returned
+      (default the workspace's parent directory)
+  KODR_SHELL_OPEN_HOST:
+    type: string
+    required: false
+    description: Provider host the open network posture also allows (default openrouter.ai)
+  KODR_SHELL_OPEN_PORT:
+    type: number
+    required: false
+    description: Port for KODR_SHELL_OPEN_HOST (default 443)
+  KODR_SHELL_OPENSHELL:
+    type: string
+    required: false
+    description: Path or name of the openshell CLI (default openshell)
 
 outputs:
   exitCode:
@@ -189,17 +240,18 @@ constraints:
     text will break across versions: treat any non-success as denied and read
     the gateway's own log for the reason
   - >
-    Exactly one egress rule in locked mode, scoped with --binary to the node
-    path, written as `--add-endpoint host:port:full`. The per-binary scope is
+    Exactly one egress rule in locked mode, scoped by its `binaries` entry to
+    the node path, with `access: full` on the host and port. The per-binary
+    scope is
     the whole reason to reach for OpenShell over docker-isolation's iptables
     allowlist and is confirmed working: node fetching the model endpoint
     returned 200 while /usr/bin/curl against the identical URL returned
-    403 policy_denied. A rule that omits --binary is a bug, not a
+    403 policy_denied. A rule with no `binaries` entry is a bug, not a
     simplification
   - >
     The node path default is /usr/local/bin/node, which is where the official
-    node images put it; /usr/bin/node does not exist there. A --binary scope
-    naming a path that does not exist denies everything, and the symptom is
+    node images put it; /usr/bin/node does not exist there. A `binaries`
+    scope naming a path that does not exist denies everything, and the symptom is
     an egress failure that reads like a bad base URL
   - >
     Credentials are attached as an `openshell provider` record and never
@@ -225,15 +277,16 @@ constraints:
     reachable, because Docker Desktop proxies the host alias to host
     loopback. Treat binding beyond loopback as a per-platform *may be
     required* -- on Linux Docker or a non-Docker-Desktop driver it likely is,
-    untested here -- and have the wrapper probe reachability and report which
-    switch is off rather than asserting the requirement up front
+    untested here -- and say which switch to check in the docs rather than
+    asserting the requirement up front. The wrapper does not probe
+    reachability itself
   - >
     `--upload LOCAL[:DEST]` places the directory at DEST/<basename(LOCAL)>,
     not at DEST. Uploading the checkout to /sandbox/kodr yielded
     /sandbox/kodr/kodr2/bin/kodr.mjs and a MODULE_NOT_FOUND on the first
     attempt; plan every sandbox path as DEST/<basename>. .gitignore filtering
-    is on by default, which is correct here -- node_modules/ is gitignored and
-    not needed
+    is on by default and has to be switched off for this wrapper -- see the
+    --no-git-ignore constraint below
   - >
     The writable set is the workdir plus /tmp, and which paths those are
     depends on the policy, so never hardcode them. 0.1.7's default grants
@@ -247,11 +300,12 @@ constraints:
     /usr, /etc and /var/tmp are denied either way, and /var/tmp is mode 1777,
     so these are Landlock denials no chmod can lift
   - >
-    `--no-keep` deletes the sandbox when the command exits, which destroys
-    the workspace and every edit in it. The wrapper defaults to it for
-    one-shot runs and requires KODR_SHELL_KEEP=1 with
-    KODR_SHELL_DOWNLOAD=1 to bring results back; a run abandoned without a
-    download loses both the edits and .kodr/runs
+    The sandbox is deleted when the wrapper exits (its cleanup trap), which
+    destroys the workspace and every edit in it. That is the default for
+    one-shot runs; KODR_SHELL_KEEP=1 with KODR_SHELL_DOWNLOAD=1 is what brings
+    results back, and DOWNLOAD without KEEP is refused because the sandbox
+    would be gone before the download. A run abandoned without a download
+    loses both the edits and .kodr/runs
   - >
     `--from` builds a Dockerfile or directory into the local engine on 0.0.56
     but not on 0.1.7, which wants an image reference and prints build
@@ -347,7 +401,7 @@ constraints:
     `getent ahosts host.openshell.internal` before touching the base URL
   - >
     Sandbox name, host alias, ports, node path, sandbox root, workspace,
-    network posture, provider record and the policy --wait timeout are all
+    network posture, provider record, keepalive and Ready timeout are all
     overridable by KODR_SHELL_* variables -- no fixed operational limit the
     caller cannot change. The CLI's own `--timeout` is in seconds, not
     milliseconds
@@ -410,6 +464,7 @@ tests:
     - refuses a download that would be deleted with the sandbox
     - emits no download by default
     - dry-run prints the policy and commands while invoking nothing
+    - every KODR_SHELL_* variable the script reads is in the docs table and the spec inputs, and neither names one the script ignores
   eval:
     - kodr doctor passes inside the sandbox against the host model server
     - a locked run completes a read/edit/verify task in the sandbox workspace

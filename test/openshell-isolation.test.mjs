@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -298,5 +298,43 @@ describe('kodr-shell dry-run is inert', () => {
     assert.match(out, /--- generated policy/);
     assert.match(out, /sandbox create --name test-box/);
     assert.doesNotMatch(out, /No such file|not found/);
+  });
+});
+
+describe('kodr-shell configuration stays documented', () => {
+  // The wrapper grew twenty-six KODR_SHELL_* variables across several rounds,
+  // and the spec's inputs and the docs table each drifted from it in
+  // different directions: twelve missing from the spec, six from the docs,
+  // and one documented that the script never read at all. Nothing noticed
+  // until someone diffed them by hand.
+  const read = (rel) =>
+    readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
+  const names = (text) => new Set(text.match(/KODR_SHELL_[A-Z_]+/g) ?? []);
+
+  const scriptVars = names(read('../scripts/kodr-shell.sh'));
+
+  it('documents every variable the script reads, in the docs table', () => {
+    const doc = read('../docs/openshell-isolation.md');
+    const missing = [...scriptVars].filter((v) => !doc.includes(`\`${v}\``));
+    assert.deepEqual(missing, [], 'in the script but not the docs table');
+  });
+
+  it('lists every variable the script reads as a spec input', () => {
+    const spec = read('../specs/openshell-isolation.yaml');
+    const inputs = new Set(
+      [...spec.matchAll(/^ {2}(KODR_SHELL_[A-Z_]+):/gm)].map((m) => m[1]),
+    );
+    const missing = [...scriptVars].filter((v) => !inputs.has(v));
+    assert.deepEqual(missing, [], 'in the script but not the spec inputs');
+  });
+
+  it('documents no variable the script does not read', () => {
+    for (const rel of [
+      '../docs/openshell-isolation.md',
+      '../specs/openshell-isolation.yaml',
+    ]) {
+      const stale = [...names(read(rel))].filter((v) => !scriptVars.has(v));
+      assert.deepEqual(stale, [], `${rel} names variables the script ignores`);
+    }
   });
 });
