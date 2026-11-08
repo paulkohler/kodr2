@@ -9,7 +9,51 @@ Line references are approximate — treat them as anchors, not addresses.
 
 ## Open
 
-Nothing open.
+- **#14** a transient provider error is terminal inside `kodr goal`. The
+  plain-task branch of `kodr loop` classifies a request timeout as transient,
+  backs off and retries (#10). `runGoal` does not: `src/goal.mjs` maps
+  `stoppedReason === 'error'` straight to `goal stopped: build error` and
+  returns, so one `Request timed out after 1200000ms` ends the whole judged
+  item with attempts still unspent, and the loop parks it. Found in the third
+  CRM dogfooding run (`docs/openshell-crm-postmortem.md`): phase 6's fourth
+  goal attempt hit a request timeout, logged `tokens: 0 in / 0 out`, and the
+  phase parked after 7573s. In that instance the outcome would very probably
+  have been the same — attempts 1 to 3 had each run out the clock — but on a
+  healthier run one timeout is enough to retire a judged phase, which is the
+  most expensive kind. The fix is probably the same classification and
+  back-off the plain branch already has, applied before `build-error` is
+  returned, and it wants a spec change to `specs/goal.yaml` first. Whether a
+  transient attempt should spend one of the goal's attempts, as it does for a
+  plain task, is part of that call.
+
+- **#15** nothing bounds the length of a model response except the wall
+  clock. The request body `src/model.mjs` builds is `{ model, messages,
+  stream, stream_options, tools }` — no `max_tokens` — so a long generation
+  can only be ended by `--request-timeout-ms`, and that fails in the
+  expensive direction: the response in flight is discarded whole, tool calls
+  and all, where a token ceiling would end it cleanly with them intact. The
+  third CRM run lost three attempts to the request timeout, and one response
+  that did land had about 20 seconds to spare. Generation ran at roughly 11
+  tokens per second wall-average on `qwen3.8-27b-mlx`, so 1200s is on the
+  order of 13,000 tokens or more, and one was watched at about 21,000 while
+  still running. It is also the shape `AGENTS.md` rules out, an operational
+  limit the caller cannot set, except that here there is no limit to set. A
+  ceiling needs to be configurable, off or generous by default, and the loop
+  needs to decide what a truncated response means — a `finish_reason` of
+  `length` is not an error and the model should be able to continue.
+
+- **#16** `kodr` handles `SIGINT` (`specs/cancel.yaml`) but has no `SIGTERM`
+  handler, so a loop stopped that way ends without finishing its record. In
+  the third CRM run the loop was stopped with `kill -TERM` inside the
+  sandbox. The wrapper then downloaded the workspace as normal, but the loop
+  record read `"reason": null` and did not include the task in flight (the
+  record is written after each task, so phase 7 was simply absent). Nothing
+  was lost that a `SIGINT` would have kept, but `SIGTERM` is what `docker
+  stop`, a service manager and most orchestration send, and an unattended
+  multi-hour run is exactly the case that gets stopped that way. Open
+  questions: whether the end-of-run orphan sweep (#11) runs on that path,
+  which was not checked, and whether `SIGTERM` should simply behave as the
+  first `SIGINT` does. Untested: `SIGINT` against a loop inside a sandbox.
 
 ## Fixed
 
