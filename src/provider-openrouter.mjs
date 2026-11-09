@@ -147,6 +147,7 @@ function buildProviderRouting(options) {
  * @param {string} [options.model] - Model identifier. Required (directly or
  *   via KODR_MODEL) -- there is no "currently loaded model" to fall back to
  * @param {number} [options.timeout] - Request timeout in ms
+ * @param {number} [options.maxOutputTokens] - Per-response output limit
  * @param {number} [options.maxRetries] - Retries for a 5xx chat response
  * @param {boolean} [options.reasoning] - Request reasoning tokens
  * @param {boolean} [options.noZdr] - Disable Zero Data Retention routing (on by default)
@@ -177,6 +178,7 @@ export function createOpenRouterProvider(options = {}) {
     baseUrl: options.baseUrl || DEFAULT_OPENROUTER_BASE_URL,
     model: options.model,
     timeout: options.timeout,
+    maxOutputTokens: options.maxOutputTokens,
     maxRetries: options.maxRetries ?? DEFAULT_MAX_RETRIES,
     headers: { Authorization: `Bearer ${apiKey}` },
     extraBody: {

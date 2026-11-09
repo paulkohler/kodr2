@@ -21,6 +21,9 @@ description: >
   tool-calling is untouched.
 
 inputs:
+  maxOutputTokens:
+    type: number
+    description: Shared max_tokens cap, passed unchanged to model.mjs by every provider
   provider:
     type: string
     description: >

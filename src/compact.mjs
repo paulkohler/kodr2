@@ -426,6 +426,15 @@ export async function compactMessages(params) {
     };
   }
 
+  if (response.finishReason === 'length') {
+    return {
+      messages: messages.slice(),
+      summary: '',
+      usage: response.usage || zeroUsage(),
+      retries: response.retries || 0,
+      error: 'summary reached the output token limit; keeping prior history',
+    };
+  }
   const summary = (response.message.content || '').trim();
   if (!summary) {
     return {

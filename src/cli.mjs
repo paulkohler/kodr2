@@ -87,6 +87,7 @@ const RUN_RECORD_FILENAME =
  * @property {number} maxToolTurns
  * @property {number|null} maxRepeatToolErrors
  * @property {number|null} requestTimeoutMs
+ * @property {number|null} maxOutputTokens
  * @property {number|null} commandTimeoutMs
  * @property {number} maxAttempts
  * @property {string|null} tasksFile
@@ -170,6 +171,17 @@ async function dispatch(args) {
 
   if (args.version) {
     await printVersion();
+    return;
+  }
+
+  if (
+    args.maxOutputTokens !== null &&
+    (!Number.isSafeInteger(args.maxOutputTokens) || args.maxOutputTokens < 0)
+  ) {
+    process.stderr.write(
+      '--max-output-tokens must be a non-negative safe integer.\n',
+    );
+    process.exitCode = 1;
     return;
   }
 
@@ -382,6 +394,7 @@ async function dispatch(args) {
     maxToolTurns: args.maxToolTurns,
     maxRepeatToolErrors: args.maxRepeatToolErrors,
     requestTimeoutMs: args.requestTimeoutMs,
+    maxOutputTokens: args.maxOutputTokens,
     commandTimeoutMs: args.commandTimeoutMs,
     heartbeatMs: args.heartbeatMs,
     incidentHeartbeatMs: args.incidentHeartbeatMs,
@@ -756,6 +769,7 @@ export function buildRunOptions(args, cwd, quiet) {
     maxToolTurns: args.maxToolTurns,
     maxRepeatToolErrors: args.maxRepeatToolErrors,
     requestTimeoutMs: args.requestTimeoutMs,
+    maxOutputTokens: args.maxOutputTokens,
     commandTimeoutMs: args.commandTimeoutMs,
     heartbeatMs: args.heartbeatMs,
     incidentHeartbeatMs: args.incidentHeartbeatMs,
@@ -853,6 +867,7 @@ export function parseArgs(argv) {
     // null so KODR_REQUEST_TIMEOUT_MS still reaches the resolver when the flag
     // isn't passed (same reasoning as maxRepeatToolErrors above).
     requestTimeoutMs: null,
+    maxOutputTokens: null,
     // null so KODR_COMMAND_TIMEOUT_MS remains reachable when the CLI flag is
     // omitted; the registry resolves option -> env -> shell default.
     commandTimeoutMs: null,
@@ -1086,6 +1101,11 @@ export function parseArgs(argv) {
     if (arg === '--max-repeat-tool-errors' && argv[i + 1]) {
       args.maxRepeatToolErrors = parseInt(argv[++i], 10);
       i++;
+      continue;
+    }
+    if (arg === '--max-output-tokens') {
+      args.maxOutputTokens = Number(argv[i + 1]);
+      i += 2;
       continue;
     }
     if (arg === '--request-timeout-ms' && argv[i + 1]) {
@@ -1351,9 +1371,12 @@ Options:
                                   KODR_MAX_COST_USD). Hosted providers only -- LM Studio and
                                   Ollama report no cost, so it is inert there. A backstop for
                                   one runaway run; set an account-level cap as well.
-  --max-tool-turns <n>            Tool-turn ceiling per loop (default: 50)
+  --max-tool-turns <n>            Model-response ceiling per loop, including truncated
+                                  continuations (default: 50)
   --max-repeat-tool-errors <n>    Stop after the same tool call fails this many times in a
                                   row (default: 3, or KODR_MAX_REPEAT_TOOL_ERRORS; 0 disables)
+  --max-output-tokens <n>         Per-response token cap (0 = provider default)
+                                  (or KODR_MAX_OUTPUT_TOKENS)
   --request-timeout-ms <n>        Hard per-request timeout ceiling, independent of --max-run-ms,
                                   so a stalled backend fails one request instead of hanging
                                   (default: 600000 = 10 min, or KODR_REQUEST_TIMEOUT_MS)
@@ -1540,6 +1563,7 @@ export async function runConsolidateCommand(args) {
       baseUrl: args.baseUrl,
       model: args.model,
       timeout: resolveRequestTimeoutMs(args.requestTimeoutMs),
+      maxOutputTokens: args.maxOutputTokens,
       maxRetries: args.modelRetries,
       reasoning: args.reasoning,
       noZdr: args.openrouterNoZdr,
@@ -1761,6 +1785,7 @@ export async function runGoalCommand(args) {
       baseUrl: args.baseUrl,
       model: args.model,
       timeout: resolveRequestTimeoutMs(args.requestTimeoutMs),
+      maxOutputTokens: args.maxOutputTokens,
       maxRetries: args.modelRetries,
       reasoning: args.reasoning,
       noZdr: args.openrouterNoZdr,
@@ -1939,6 +1964,7 @@ export async function runLoopCommand(args) {
       baseUrl: args.baseUrl,
       model: args.model,
       timeout: resolveRequestTimeoutMs(args.requestTimeoutMs),
+      maxOutputTokens: args.maxOutputTokens,
       maxRetries: args.modelRetries,
       reasoning: args.reasoning,
       noZdr: args.openrouterNoZdr,
@@ -2056,6 +2082,47 @@ export async function runLoopCommand(args) {
 }
 
 /**
+ * Build the ACP run options independently of its stdio server.
+ * @param {CliArgs} args
+ * @returns {import('./harness.mjs').RunOptions & { continueSeed?: { priorMessages: Array, priorFilesChanged: string[] } }}
+ */
+export function buildAcpOptions(args) {
+  const options = {
+    cwd: resolve(args.cwd || '.'),
+    provider: args.provider,
+    baseUrl: args.baseUrl,
+    model: args.model,
+    reasoning: args.reasoning,
+    vision: visionEnabled(args),
+    noZdr: args.openrouterNoZdr,
+    allowDataCollection: args.openrouterAllowDataCollection,
+    providerOrder: args.openrouterProviderOnly,
+    cache: args.cache,
+    testCommand: args.test,
+    maxHealTurns: args.healTurns,
+    maxRunMs: args.maxRunMs,
+    maxCostUsd: args.maxCostUsd,
+    maxToolTurns: args.maxToolTurns,
+    maxRepeatToolErrors: args.maxRepeatToolErrors,
+    requestTimeoutMs: args.requestTimeoutMs,
+    maxOutputTokens: args.maxOutputTokens,
+    commandTimeoutMs: args.commandTimeoutMs,
+    heartbeatMs: args.heartbeatMs,
+    incidentHeartbeatMs: args.incidentHeartbeatMs,
+    maxRetries: args.modelRetries,
+    envPassthrough: args.env,
+    runsDir: args.runsDir,
+    noSave: args.noSave,
+    debug: args.debug,
+  };
+  if (args.contextWindow !== null) {
+    options.contextWindow = args.contextWindow;
+  }
+
+  return options;
+}
+
+/**
  * `kodr acp` — launch the Agent Client Protocol front-end over stdio
  * (specs/acp.yaml). It owns stdin/stdout as a JSON-RPC channel, so it is
  * mutually exclusive with the output modes that scrape or silence them, and
@@ -2081,36 +2148,7 @@ export async function runAcpCommand(args) {
     return;
   }
 
-  const options = {
-    cwd: resolve(args.cwd || '.'),
-    provider: args.provider,
-    baseUrl: args.baseUrl,
-    model: args.model,
-    reasoning: args.reasoning,
-    vision: visionEnabled(args),
-    noZdr: args.openrouterNoZdr,
-    allowDataCollection: args.openrouterAllowDataCollection,
-    providerOrder: args.openrouterProviderOnly,
-    cache: args.cache,
-    testCommand: args.test,
-    maxHealTurns: args.healTurns,
-    maxRunMs: args.maxRunMs,
-    maxCostUsd: args.maxCostUsd,
-    maxToolTurns: args.maxToolTurns,
-    maxRepeatToolErrors: args.maxRepeatToolErrors,
-    requestTimeoutMs: args.requestTimeoutMs,
-    commandTimeoutMs: args.commandTimeoutMs,
-    heartbeatMs: args.heartbeatMs,
-    incidentHeartbeatMs: args.incidentHeartbeatMs,
-    maxRetries: args.modelRetries,
-    envPassthrough: args.env,
-    runsDir: args.runsDir,
-    noSave: args.noSave,
-    debug: args.debug,
-  };
-  if (args.contextWindow !== null) {
-    options.contextWindow = args.contextWindow;
-  }
+  const options = buildAcpOptions(args);
 
   // `--continue <ref>` seeds the first ACP session with a prior run's
   // conversation (specs/acp.yaml), so the model resumes it across an editor

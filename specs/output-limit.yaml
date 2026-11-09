@@ -1,0 +1,72 @@
+name: output-limit
+status: implemented
+description: >
+  Bound generation per request without losing a whole response to the request
+  timeout (BACKLOG #15). A length-terminated response is incomplete progress,
+  not successful completion. Continue safely within the existing run budgets.
+
+inputs:
+  maxOutputTokens:
+    type: number
+    description: >
+      Non-negative safe integer, resolved from an explicit option, then
+      KODR_MAX_OUTPUT_TOKENS, then 0. CLI --max-output-tokens. Zero omits
+      max_tokens so the provider keeps its own default. Positive values send
+      max_tokens through every provider and every model phase, including a
+      separate reviewer, judges, compaction and memory. Reasoning tokens may
+      consume the provider's output allowance too.
+
+outputs:
+  finishReason:
+    type: string
+    description: >
+      The last non-null choices[0].finish_reason from the stream, or null when
+      absent, on the chat result alongside message, usage and retries.
+
+constraints:
+  - >
+    The output cap uses the shared OpenAI-compatible max_tokens field. The
+    configured positive cap wins over extraBody. The request timeout remains
+    an independent hard backstop; this limit does not change HTTP retry rules.
+  - >
+    The assembler captures finish_reason even on a chunk with no delta,
+    retaining it across subsequent usage-only chunks. It retains all partial
+    text, reasoning, opaque reasoning_details and token/cost accounting.
+  - >
+    A tool-loop response ending in length never completes the run and never
+    executes native or recovered text calls, even if some appear complete.
+    Native drafts are preserved as quoted data in assistant content instead
+    of replaying malformed tool_calls. No tool results are fabricated. A user
+    continuation explains that no calls from this response ran and asks for
+    shorter complete calls, preserving earlier successful work.
+  - >
+    Every response, including a truncated one with no visible text, spends
+    one of maxToolTurns. Only actual tool turns count towards grounding.
+    Cancellation, time, cost, compaction and turn limits still apply between
+    continuations. Exhaustion returns tool-limit with completed false and no
+    final verdict text; a repeated length response cannot run indefinitely.
+  - >
+    One-shot compaction and memory calls do not retry truncation: they return
+    an error with usage and retry counts. Compaction keeps the prior messages;
+    memory does not propose or apply an incomplete replacement.
+  - >
+    Invalid explicit CLI values (including missing values) fail validation.
+    Invalid environment values fall back to 0; explicit 0 overrides the env.
+    No new dependencies and no extra fixed continuation limit.
+
+tests:
+  unit:
+    - output limit resolves option over environment over disabled default
+    - CLI parses zero and positive limits and rejects missing, negative, fractional and unsafe values
+    - run and ACP options and all provider constructors carry the limit
+    - request serialization includes max_tokens only for a positive configured limit
+    - stream assembly preserves finish reasons with and without deltas and across usage chunks
+    - truncated prose, reasoning-only replies and apparent verdicts require continuation
+    - truncated native and text calls never touch real workspace files
+    - native drafts are replay-safe quoted data and reasoning details remain intact
+    - complete responses still execute validated tools and complete normally
+  eval:
+    - a real provider enforces a small output cap and the loop stops within its turn budget
+    - the real CLI forwards its cap and returns a non-successful tool-limit stop
+    - response turns bound continuations without counting truncation towards grounding
+    - truncated compaction keeps history and truncated memory cannot replace its file

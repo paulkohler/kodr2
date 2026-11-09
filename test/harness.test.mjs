@@ -1369,6 +1369,7 @@ describe('review pass wiring', () => {
       client: modelLifecycleClient,
       reviewModel: 'reviewer',
       reviewBaseUrl: 'http://localhost:1235/v1',
+      maxOutputTokens: 1024,
       buildProvider: 'lmstudio',
       buildBaseUrl: 'http://localhost:1234/v1',
       buildContextWindow: 8192,
@@ -1389,6 +1390,7 @@ describe('review pass wiring', () => {
     assert.equal(createdWith.baseUrl, 'http://localhost:1235/v1');
     assert.equal(createdWith.provider, 'lmstudio');
     assert.equal(createdWith.model, 'reviewer');
+    assert.equal(createdWith.maxOutputTokens, 1024);
     // The review runs against the second endpoint, not the build's client.
     assert.equal(reviewClient, secondEndpoint);
   });

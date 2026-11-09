@@ -378,6 +378,9 @@ export async function runMemoryRetrospective(params) {
     return { proposed: false, error: err.message, retries: err.retries ?? 0 };
   }
 
+  if (response.finishReason === 'length') {
+    return truncatedMemoryResult(response);
+  }
   const notes = (response.message.content || '').trim();
   const usage = response.usage || { prompt: 0, completion: 0, cost: 0 };
   const retries = response.retries || 0;
@@ -546,6 +549,9 @@ export async function runMemoryConsolidation(params) {
     return { proposed: false, error: err.message, retries: err.retries ?? 0 };
   }
 
+  if (response.finishReason === 'length') {
+    return truncatedMemoryResult(response);
+  }
   // A reasoning model's scratchpad must never be written into MEMORY.md --
   // only the visible reply is the proposed file content.
   const notes = splitThinking(response.message.content || '').visible.trim();
@@ -693,4 +699,14 @@ async function persistConsolidation(runsDir, notes, noSave) {
     return null;
   }
   return writeConsolidationProposal(runsDir, notes);
+}
+
+function truncatedMemoryResult(response) {
+  return {
+    proposed: false,
+    error:
+      'memory response reached the output token limit; incomplete output was not applied',
+    usage: response.usage || { prompt: 0, completion: 0, cost: 0 },
+    retries: response.retries || 0,
+  };
 }

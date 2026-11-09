@@ -46,6 +46,7 @@ import {
   DEFAULT_BASE_URL,
   DEFAULT_MAX_RETRIES,
   hasContextHeadroom,
+  maxOutputTokens,
 } from './model.mjs';
 import { createProvider, resolveProviderName } from './provider.mjs';
 import { DEFAULT_OLLAMA_BASE_URL } from './provider-ollama.mjs';
@@ -99,6 +100,7 @@ export {
  * @property {number} maxRunMs
  * @property {number} maxCostUsd
  * @property {number} maxToolTurns
+ * @property {number} [maxOutputTokens]
  * @property {string[]} envPassthrough
  * @property {number} contextWindow
  * @property {string} startedAt
@@ -157,6 +159,7 @@ export {
  *   checklist this harness marks itself, named to the model as not its to
  *   edit (specs/loop.yaml, BACKLOG #12). Set by `kodr loop`; omitted by every
  *   other front-end.
+ * @param {number} [options.maxOutputTokens] - Per-response output token cap (0 uses provider default)
  * @param {number} [options.maxHealTurns] - Max heal turns (default 3)
  * @param {number} [options.maxRunMs] - Stop between turns after this many ms (0 disables)
  * @param {number} [options.requestTimeoutMs] - Hard per-request timeout ceiling,
@@ -307,6 +310,7 @@ export async function run(prompt, options) {
       // A hard per-request ceiling; the run budget (maxRunMs) still shortens a
       // near-deadline request via the per-call timeoutMs the loop passes.
       timeout: resolveRequestTimeoutMs(options.requestTimeoutMs),
+      maxOutputTokens: options.maxOutputTokens,
       maxRetries: modelMaxRetries(options.maxRetries),
       reasoning: options.reasoning,
       noZdr: options.noZdr,
@@ -367,6 +371,7 @@ export async function run(prompt, options) {
     maxRunMs,
     commandTimeoutMs,
     maxCostUsd: costCeilingUsd,
+    maxOutputTokens: maxOutputTokens(options.maxOutputTokens),
     maxToolTurns,
     envPassthrough,
     contextWindow,
@@ -772,6 +777,7 @@ export async function run(prompt, options) {
           buildProvider: options.provider,
           buildBaseUrl: options.baseUrl,
           timeout: resolveRequestTimeoutMs(options.requestTimeoutMs),
+          maxOutputTokens: options.maxOutputTokens,
           maxRetries: options.maxRetries,
           buildContextWindow: contextWindow,
           filesChanged: tools.filesChanged(),
@@ -1280,6 +1286,7 @@ export function memorySkippedForCostBudget(ceilingUsd) {
  * @param {string} [params.buildProvider]
  * @param {string} [params.buildBaseUrl]
  * @param {number} [params.timeout]
+ * @param {number} [params.maxOutputTokens]
  * @param {number} [params.maxRetries]
  * @param {function} [params.createProviderFn]
  * @param {function} [params.ensureModelLoadedFn]
@@ -1301,6 +1308,7 @@ export function memorySkippedForCostBudget(ceilingUsd) {
  * @param {string} [params.buildBaseUrl]
  * @param {string} [params.reviewModel]
  * @param {number} [params.timeout]
+ * @param {number} [params.maxOutputTokens]
  * @param {number} [params.maxRetries]
  * @param {function} [params.createProviderFn]
  * @returns {{ client?: import('./provider.mjs').Provider, error?: string }}
@@ -1326,6 +1334,7 @@ function resolveReviewClient(params) {
         baseUrl: endpoint.baseUrl,
         model: params.reviewModel,
         timeout: params.timeout,
+        maxOutputTokens: params.maxOutputTokens,
         maxRetries: params.maxRetries,
       }),
     };

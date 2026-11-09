@@ -26,6 +26,7 @@ export const CAPABILITIES = {
  * @param {string} [options.baseUrl] - LM Studio API base URL (default localhost:1234)
  * @param {string} [options.model] - Model identifier (auto-detected if omitted)
  * @param {number} [options.timeout] - Request timeout in ms
+ * @param {number} [options.maxOutputTokens] - Per-response output limit
  * @param {number} [options.maxRetries] - Retries for a 5xx chat response
  * @returns {Provider}
  */
@@ -34,6 +35,7 @@ export function createLMStudioProvider(options = {}) {
     baseUrl: options.baseUrl || DEFAULT_BASE_URL,
     model: options.model,
     timeout: options.timeout,
+    maxOutputTokens: options.maxOutputTokens,
     maxRetries: options.maxRetries ?? DEFAULT_MAX_RETRIES,
   });
 

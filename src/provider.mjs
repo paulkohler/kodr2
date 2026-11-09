@@ -68,6 +68,7 @@ export function reasoningEnabled(option) {
  * @param {string} [options.baseUrl]
  * @param {string} [options.model]
  * @param {number} [options.timeout]
+ * @param {number} [options.maxOutputTokens]
  * @param {number} [options.maxRetries]
  * @param {boolean} [options.reasoning] - Only honored by openrouter
  * @param {boolean} [options.noZdr] - Disable OpenRouter Zero Data Retention routing

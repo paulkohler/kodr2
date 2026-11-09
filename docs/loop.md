@@ -122,7 +122,9 @@ park anything. See [Choosing a reviewer](review.md#choosing-a-reviewer).
 
 All of the ordinary run options work here too and are passed through per task
 (`--provider`, `--model`, `--test`, `--cwd`, `--context-window`,
-`--max-tool-turns`, `--max-run-ms`, `--memory`, …). Loop-specific:
+`--max-tool-turns`, `--max-output-tokens`, `--max-run-ms`, `--memory`, …).
+The output cap is per response; a truncated response continues within the
+same attempt and spends its turn budget. Loop-specific:
 
 | Flag                                  | Env var                       | Default    | What it does                                                             |
 | -------------------------------------- | ------------------------------ | ---------- | -------------------------------------------------------------------------- |

@@ -66,6 +66,18 @@ kodr "fix the failing test" --test "npm test" --json
 summary; `--events` streams JSON events for integrations. Inspect both
 `git diff` and `git status` after a run so you also notice new files.
 
+Use `--max-output-tokens 4096` (or `KODR_MAX_OUTPUT_TOKENS=4096`) to cap each
+model response. The default, `0`, keeps the provider's own default; explicit
+`0` also overrides the environment. The cap applies to builds, judges,
+reviewers, compaction, and memory calls. Reasoning may consume the allowance.
+
+A response ending with `finish_reason: "length"` is incomplete. Kodr retains
+its partial text and reasoning and requests a shorter complete response.
+None of that response's tool calls execute; they must be resent in full.
+Continuations consume `--max-tool-turns` and obey the time and cost budgets.
+Truncated compaction or memory output leaves existing history and memory
+intact. The request timeout remains a separate backstop.
+
 ## Verify and repair
 
 Give Kodr your project's test command:

@@ -9,23 +9,22 @@ Line references are approximate — treat them as anchors, not addresses.
 
 ## Open
 
-- **#15** nothing bounds the length of a model response except the wall
-  clock. The request body `src/model.mjs` builds is `{ model, messages,
-  stream, stream_options, tools }` — no `max_tokens` — so a long generation
-  can only be ended by `--request-timeout-ms`, and that fails in the
-  expensive direction: the response in flight is discarded whole, tool calls
-  and all, where a token ceiling would end it cleanly with them intact. The
-  third CRM run lost three attempts to the request timeout, and one response
-  that did land had about 20 seconds to spare. Generation ran at roughly 11
-  tokens per second wall-average on `qwen3.8-27b-mlx`, so 1200s is on the
-  order of 13,000 tokens or more, and one was watched at about 21,000 while
-  still running. It is also the shape `AGENTS.md` rules out, an operational
-  limit the caller cannot set, except that here there is no limit to set. A
-  ceiling needs to be configurable, off or generous by default, and the loop
-  needs to decide what a truncated response means — a `finish_reason` of
-  `length` is not an error and the model should be able to continue.
+No open items.
 
 ## Fixed
+
+- **#15** `--max-output-tokens` / `KODR_MAX_OUTPUT_TOKENS` now supplies a
+  per-request `max_tokens` cap to every model phase and provider (default 0
+  preserves the provider default). The client retains `finish_reason`; a
+  length-terminated turn preserves partial output, executes no tool calls,
+  and requests a shorter complete response within the existing turn/time/cost
+  budgets. Native call drafts are quoted as data rather than replayed as
+  malformed calls. Truncated summaries retain prior history and truncated
+  memory responses cannot write proposals or replacements. Five real LM Studio
+  evals verify request/CLI limits, bounded continuation, and compaction/memory
+  safety, alongside deterministic configuration, assembly and real-tool unit
+  tests. The original third CRM run lost three attempts to request timeouts;
+  the timeout remains an independent backstop. Spec: `output-limit.yaml`.
 
 - **#16** SIGTERM now uses the graceful cancellation path for foreground
   run, goal, loop and consolidate commands. The loop saves reason

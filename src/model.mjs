@@ -13,8 +13,24 @@ const DEFAULT_TIMEOUT = 600_000; // 10 minutes
 export const DEFAULT_MAX_RETRIES = 1;
 
 /**
+ * Per-request output limit. Explicit 0 keeps the provider default.
+ * @param {number} [option]
+ * @returns {number}
+ */
+export function maxOutputTokens(option) {
+  if (Number.isSafeInteger(option) && option >= 0) {
+    return option;
+  }
+  const fromEnv = Number(process.env.KODR_MAX_OUTPUT_TOKENS);
+  if (Number.isSafeInteger(fromEnv) && fromEnv >= 0) {
+    return fromEnv;
+  }
+  return 0;
+}
+
+/**
  * @typedef {object} ModelClient
- * @property {(params: object) => Promise<{ message: object, usage: object, retries: number }>} chat
+ * @property {(params: object) => Promise<{ message: object, usage: object, retries: number, finishReason: string|null }>} chat
  * @property {() => Promise<Array<{ id: string, context_length?: number }>>} models
  * @property {() => Promise<string>} resolveModel
  * @property {() => Promise<Array>} richModels
@@ -30,6 +46,7 @@ export const DEFAULT_MAX_RETRIES = 1;
  * @param {string} [options.baseUrl] - API base URL
  * @param {string} [options.model] - Model identifier
  * @param {number} [options.timeout] - Request timeout in ms
+ * @param {number} [options.maxOutputTokens] - Per-response output limit (0 uses provider default)
  * @param {number} [options.maxRetries] - Retries for a 5xx chat response
  *   (transient local-backend crashes), default 1. 4xx and timeouts are
  *   never retried -- a 4xx would fail identically again, and a timeout
@@ -47,6 +64,7 @@ export function createClient(options = {}) {
   const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
   const headers = options.headers || {};
   const extraBody = options.extraBody || {};
+  const outputLimit = maxOutputTokens(options.maxOutputTokens);
 
   return { chat, models, resolveModel, contextInfo, richModels };
 
@@ -81,10 +99,10 @@ export function createClient(options = {}) {
    *   fires the underlying socket is destroyed and the call rejects with an
    *   abort error (isAbortError), which the tool loop maps to a clean cancelled
    *   stop rather than a crash. Not retried.
-   * @returns {Promise<{ message: object, usage: object, retries: number }>}
+   * @returns {Promise<{ message: object, usage: object, retries: number, finishReason: string|null }>}
    */
   async function chat(params) {
-    /** @type {{ model: string, messages: Array, stream: boolean, stream_options: { include_usage: boolean }, tools?: Array }} */
+    /** @type {{ model: string, messages: Array, stream: boolean, stream_options: { include_usage: boolean }, tools?: Array, max_tokens?: number }} */
     const body = {
       model: params.model || model,
       messages: params.messages,
@@ -92,6 +110,12 @@ export function createClient(options = {}) {
       stream_options: { include_usage: true },
       ...extraBody,
     };
+
+    if (outputLimit > 0) {
+      body.max_tokens = outputLimit;
+    } else {
+      delete body.max_tokens;
+    }
 
     if (params.tools && params.tools.length > 0) {
       body.tools = params.tools.map((t) => ({
@@ -256,6 +280,7 @@ function createAssembler(onToken, onToolCall) {
   let reasoning = '';
   const reasoningDetails = [];
   const toolCalls = [];
+  let finishReason = null;
   let usage = { prompt: 0, completion: 0, cost: 0 };
 
   function push(chunk) {
@@ -274,7 +299,11 @@ function createAssembler(onToken, onToolCall) {
       };
     }
 
-    const delta = chunk.choices?.[0]?.delta;
+    const choice = chunk.choices?.[0];
+    if (typeof choice?.finish_reason === 'string') {
+      finishReason = choice.finish_reason;
+    }
+    const delta = choice?.delta;
     if (!delta) {
       return;
     }
@@ -343,7 +372,7 @@ function createAssembler(onToken, onToolCall) {
         function: { name: tc.name, arguments: tc.arguments },
       }));
     }
-    return { message, usage };
+    return { message, usage, finishReason };
   }
 
   return { push, result };
@@ -430,7 +459,7 @@ function parseSseLine(line) {
  * a transient crash), and a timeout already means the model used the full
  * budget on that attempt.
  * @param {number} maxRetries - Extra attempts after the first (0 disables)
- * @returns {Promise<{ message: object, usage: object, retries: number }>} The
+ * @returns {Promise<{ message: object, usage: object, retries: number, finishReason: string|null }>} The
  *   `retries` field reports how many retries were actually used (0 when the
  *   first attempt succeeded), so a flaky-backend pattern is visible in the
  *   run record rather than only in live stderr. When every attempt fails,

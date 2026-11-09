@@ -37,6 +37,7 @@ export const CAPABILITIES = {
  * @param {string} [options.model] - Model identifier (auto-detected from
  *   the local/remote model listing if omitted)
  * @param {number} [options.timeout] - Request timeout in ms
+ * @param {number} [options.maxOutputTokens] - Per-response output limit
  * @param {number} [options.maxRetries] - Retries for a 5xx chat response
  * @param {string} [options.apiKey] - Overridable for tests; defaults to
  *   OLLAMA_API_KEY. Optional, unlike openrouter's -- a local install needs
@@ -51,6 +52,7 @@ export function createOllamaProvider(options = {}) {
     baseUrl: options.baseUrl || DEFAULT_OLLAMA_BASE_URL,
     model: options.model,
     timeout: options.timeout,
+    maxOutputTokens: options.maxOutputTokens,
     maxRetries: options.maxRetries ?? DEFAULT_MAX_RETRIES,
     headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
   });

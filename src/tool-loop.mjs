@@ -4,7 +4,7 @@
  *
  * Each turn: ask the model, stream its text, execute any tool calls (native
  * API calls first, then the text-form recovery fallback), and stop when the
- * model answers with no tool call, the run budget is spent, or the turn
+ * model finishes an untruncated answer with no tool call, the run budget is spent, or the turn
  * ceiling is hit. Native API tool calls are the primary path; text-form
  * recovery is a narrow compatibility fallback for models that emit
  * `tool_name[ARGS]{...}` as assistant text after receiving tool results.
@@ -17,8 +17,8 @@ import {
   needsCompaction,
 } from './compact.mjs';
 import { runPostToolHooks, runPreToolHooks } from './hooks.mjs';
-import { createNullReporter } from './reporter.mjs';
 import { isAbortError, isTimeoutError } from './model.mjs';
+import { createNullReporter } from './reporter.mjs';
 import {
   isUnparseableArgs,
   recoverToolCalls,
@@ -119,7 +119,8 @@ export function isCostBudgetExceeded(spentUsd, ceilingUsd) {
  *   defaults to a null (silent) reporter
  * @param {Date} [params.startedAt] - Run start, for the budget check
  * @param {number} [params.maxRunMs] - Stop between turns after this many ms (0 disables)
- * @param {number} [params.maxToolTurns] - Tool-turn ceiling (default MAX_TOOL_TURNS)
+ * @param {number} [params.maxToolTurns] - Response-turn ceiling, including
+ *   truncated continuations (default MAX_TOOL_TURNS). Grounding counts tool turns only.
  * @param {number} [params.maxRepeatToolErrors] - Consecutive identical (tool,
  *   error) failures before the loop gives up with stoppedReason "stuck"
  *   (default DEFAULT_MAX_REPEAT_TOOL_ERRORS; 0 disables, also
@@ -181,6 +182,8 @@ export async function runToolLoop(params) {
 
   const usage = { prompt: 0, completion: 0, cost: 0 };
   let toolTurns = 0;
+  // Truncated responses spend the loop budget without buying grounding.
+  let responseTurns = 0;
   let compactions = 0;
   let retries = 0;
   let finalText = '';
@@ -265,7 +268,7 @@ export async function runToolLoop(params) {
     // already gone out uncompacted.
     await compactIfNeeded(estimateTokens(messages));
 
-    while (toolTurns < maxToolTurns) {
+    while (responseTurns < maxToolTurns) {
       // Cancelled before starting a new turn: stop cleanly rather than begin
       // another (paid) model request. An abort mid-request is caught by the
       // try/catch above; this covers a cancel that landed between turns (e.g.
@@ -286,11 +289,7 @@ export async function runToolLoop(params) {
         break;
       }
 
-      const {
-        message,
-        usage: turnUsage,
-        retries: turnRetries,
-      } = await client.chat({
+      const response = await client.chat({
         model: modelId,
         messages,
         tools: tools.definitions(),
@@ -302,6 +301,8 @@ export async function runToolLoop(params) {
         onDebug,
         signal,
       });
+      responseTurns += 1;
+      const { usage: turnUsage, retries: turnRetries } = response;
 
       usage.prompt += turnUsage.prompt;
       usage.completion += turnUsage.completion;
@@ -311,37 +312,24 @@ export async function runToolLoop(params) {
       // (e.g. Ollama), so compaction can still trigger instead of letting the
       // context grow unbounded until the backend errors.
       const lastPromptTokens = turnUsage.prompt || estimateTokens(messages);
-      messages.push(message);
-
-      const nativeCalls = await executeNativeToolCalls(
-        message,
+      const turn = await processModelResponse(response, {
         tools,
         messages,
         reporter,
         hookCtx,
         gate,
         repeatTracker,
-      );
-      if (nativeCalls === 0) {
-        const recovered = await executeRecoveredTextToolCall(
-          message,
-          tools,
-          messages,
-          reporter,
-          hookCtx,
-          gate,
-          repeatTracker,
-        );
-        if (!recovered) {
-          finalText = message.content || '';
-          completed = true;
-          stoppedReason = 'complete';
-          reporter.turnEnd({ completed: true, finalText });
-          break;
-        }
+      });
+      if (turn.completed) {
+        finalText = turn.finalText;
+        completed = true;
+        stoppedReason = 'complete';
+        reporter.turnEnd({ completed: true, finalText });
+        break;
       }
-
-      toolTurns++;
+      if (turn.usedTools) {
+        toolTurns++;
+      }
       // The model kept re-sending a call that fails the same way. It was warned
       // (the error escalated as the count rose); stop rather than burn the rest
       // of the budget on an identical broken call.
@@ -370,6 +358,76 @@ export async function runToolLoop(params) {
       );
     }
   }
+}
+
+/**
+ * Consume one assembled response without making a model request. Kept separate
+ * so truncation safety can be exercised against real tools and transcript data.
+ * @param {{ message: Message & { reasoning?: string, reasoning_details?: Array }, finishReason?: string|null }} response
+ * @param {object} ctx
+ * @param {import('./tools/index.mjs').ToolRegistry} ctx.tools
+ * @param {Array} ctx.messages
+ * @param {import('./reporter.mjs').Reporter} ctx.reporter
+ * @param {object} [ctx.hookCtx]
+ * @param {object} [ctx.gate]
+ * @param {RepeatTracker} [ctx.repeatTracker]
+ * @returns {Promise<{ completed: boolean, finalText: string, usedTools: boolean }>}
+ */
+export async function processModelResponse(response, ctx) {
+  const { message } = response;
+  const { tools, messages, reporter, hookCtx, gate, repeatTracker } = ctx;
+  if (response.finishReason === 'length') {
+    appendTruncatedResponse(message, messages);
+    reporter.notice(
+      'model response reached its token limit -- continuing with shorter output',
+    );
+    return { completed: false, finalText: '', usedTools: false };
+  }
+  messages.push(message);
+  const native = await executeNativeToolCalls(
+    message,
+    tools,
+    messages,
+    reporter,
+    hookCtx,
+    gate,
+    repeatTracker,
+  );
+  let recovered = false;
+  if (native === 0) {
+    recovered = await executeRecoveredTextToolCall(
+      message,
+      tools,
+      messages,
+      reporter,
+      hookCtx,
+      gate,
+      repeatTracker,
+    );
+  }
+  if (native > 0 || recovered) {
+    return { completed: false, finalText: '', usedTools: true };
+  }
+  return {
+    completed: true,
+    finalText: /** @type {string} */ (message.content) || '',
+    usedTools: false,
+  };
+}
+
+function appendTruncatedResponse(message, messages) {
+  const { tool_calls: drafts, ...partial } = message;
+  let content = partial.content || '';
+  if (drafts?.length > 0) {
+    content += `\n\nUnexecuted tool-call drafts (incomplete response):\n${JSON.stringify(drafts)}`;
+  }
+  partial.content = content || '[Response ended at the token limit.]';
+  messages.push(partial);
+  messages.push({
+    role: 'user',
+    content:
+      'Your response reached the token limit before completion. No tool calls from that response were executed. Continue the task with shorter output and smaller complete tool calls; resend any intended calls in full. Preserve earlier successful work. When finished, provide a complete final answer.',
+  });
 }
 
 /**
