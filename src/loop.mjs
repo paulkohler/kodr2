@@ -18,6 +18,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { createLoopRecord } from './loop-record.mjs';
 import { createNullReporter } from './reporter.mjs';
+import { waitForRetry } from './retry-wait.mjs';
 import {
   buildReviewRetryPrompt,
   failOnReviewEnabled,
@@ -460,7 +461,8 @@ function addUsage(total, usage) {
  * @param {(text: string, continuation: object|null) => Promise<import('./harness.mjs').RunResult>} ctx.buildTask
  * @param {number} ctx.maxAttempts
  * @param {number} ctx.backoffMs
- * @param {{ now: () => number, wait: (ms: number) => Promise<void> }} ctx.clock
+ * @param {{ now: () => number, wait: (ms: number, signal?: AbortSignal) => Promise<void> }} ctx.clock
+ * @param {AbortSignal} [ctx.signal]
  * @param {import('./reporter.mjs').Reporter} ctx.reporter
  * @param {(result: import('./harness.mjs').RunResult) => void} ctx.onAttempt
  * @param {string} [ctx.label] - How this task is named in the output ("task 3/15")
@@ -480,6 +482,9 @@ async function attemptTask(text, ctx) {
   const usage = { prompt: 0, completion: 0, cost: 0 };
 
   while (attempt < maxAttempts) {
+    if (ctx.signal?.aborted) {
+      break;
+    }
     attempt += 1;
     // Announced *before* the build, not after: this is the line that tells an
     // operator watching a log whether the next few minutes are a new task or
@@ -496,7 +501,7 @@ async function attemptTask(text, ctx) {
     if (isGreen) {
       break;
     }
-    if (taskWasCancelled(result)) {
+    if (ctx.signal?.aborted || taskWasCancelled(result)) {
       // A Ctrl-C mid-attempt (specs/cancel.yaml) is not a build failure --
       // burning the remaining attempts against an already-aborted signal, or
       // parking (reset --hard + clean -fd) over whatever the operator just
@@ -525,7 +530,7 @@ async function attemptTask(text, ctx) {
         `attempt ${attempt} ended in a transient error -- backing off ${backoffMs}ms before retry`,
       );
       if (backoffMs > 0) {
-        await clock.wait(backoffMs);
+        await clock.wait(backoffMs, ctx.signal);
       }
     }
   }
@@ -618,7 +623,8 @@ function goalWasCancelled(goalResult) {
  * @param {(text: string, continuation: object|null) => Promise<import('./harness.mjs').RunResult>} params.buildTask
  * @param {(goalText: string) => Promise<import('./goal.mjs').GoalResult>} params.buildGoal
  * @param {{ commitGreen: (message: string) => Promise<{ok: boolean, sha?: string, error?: string, reason?: string}>, park: (resetPaths: string[], resetTo?: string|null) => Promise<{ok: boolean, error?: string, wiped?: string[], refused?: string[]}>, headSha?: () => Promise<string|null> }} params.git
- * @param {{ now: () => number, wait: (ms: number) => Promise<void> }} [params.clock]
+ * @param {{ now: () => number, wait: (ms: number, signal?: AbortSignal) => Promise<void> }} [params.clock]
+ * @param {AbortSignal} [params.signal]
  * @param {string[]} [params.resetPaths]
  * @param {number} [params.maxAttempts]
  * @param {number} [params.retryBackoffMs]
@@ -644,7 +650,7 @@ export async function runLoop(params) {
     git,
     clock = {
       now: () => Date.now(),
-      wait: (ms) => new Promise((r) => setTimeout(r, ms)),
+      wait: waitForRetry,
     },
     reporter = createNullReporter(),
     onRecord,
@@ -699,6 +705,10 @@ export async function runLoop(params) {
   });
 
   while (true) {
+    if (params.signal?.aborted) {
+      await emit('cancelled');
+      return finish('cancelled');
+    }
     if (maxTasks > 0 && tasksAttempted >= maxTasks) {
       await emit('budget');
       return finish('budget');
@@ -764,6 +774,7 @@ export async function runLoop(params) {
       };
     } else {
       const attemptOutcome = await attemptTask(text, {
+        signal: params.signal,
         buildTask,
         maxAttempts,
         backoffMs,
@@ -795,7 +806,7 @@ export async function runLoop(params) {
       };
     }
 
-    if (cancelled) {
+    if (params.signal?.aborted || cancelled) {
       // Leave the checklist and the workspace exactly as the cancelled
       // build/goal attempt left them -- no mark, no commit, no park (no
       // reset --hard, no clean -fd) over work the operator just interrupted.

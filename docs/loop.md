@@ -253,10 +253,13 @@ it reproduces.
   untracked file. Redirect outside the repo, or add it to
   `.git/info/exclude` yourself, the way the bash scripts do for their own
   `loop.out`/`loop.log`.
-- **Ctrl-C stops cleanly, it doesn't park.** A cancelled attempt (`stoppedReason:
+- **Ctrl-C and SIGTERM stop cleanly, without parking.** A cancelled attempt (`stoppedReason:
   "cancelled"`) is not treated as a build failure — the loop stops immediately
   with reason `cancelled` and touches nothing: no mark, no commit, no
-  `git reset --hard` over whatever you just interrupted.
+  `git reset --hard` over whatever you just interrupted. Cancellation also
+  interrupts retry backoff. The final record includes the interrupted task,
+  and the normal orphan sweep still runs. A second SIGINT or SIGTERM forces
+  exit if graceful shutdown hangs.
 
 ## `kodr loop` vs. the bash scripts
 

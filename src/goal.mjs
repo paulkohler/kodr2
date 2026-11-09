@@ -14,6 +14,7 @@
 import { loopRetryBackoffMs } from './loop.mjs';
 import { loadPrompt } from './prompts.mjs';
 import { createNullReporter } from './reporter.mjs';
+import { waitForRetry } from './retry-wait.mjs';
 import { reviewBlocks } from './review.mjs';
 import { runCancelled, runToolLoop } from './tool-loop.mjs';
 import { createToolRegistry } from './tools/index.mjs';
@@ -400,7 +401,7 @@ export async function runGoal(params) {
         `goal attempt ${attempt} ended in a transient error -- backing off ${backoffMs}ms before retry`,
       );
       if (backoffMs > 0) {
-        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        await waitForRetry(backoffMs, signal);
       }
       continuation = continuationAfterError(result, continuation);
       continue;
@@ -515,7 +516,8 @@ function finish(
     lastResult,
     usage,
     retries,
-    allErrored: reason === 'build-error' && attempts > 0 && verdicts.length === 0,
+    allErrored:
+      reason === 'build-error' && attempts > 0 && verdicts.length === 0,
   };
   if (judgeError) {
     result.judgeError = judgeError;

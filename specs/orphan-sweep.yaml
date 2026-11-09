@@ -109,6 +109,7 @@ constraints:
 
 tests:
   unit:
+    - graceful SIGTERM reaches the final sweep after saving the interrupted loop record
     - a command that cleanly detaches a child has it reaped by the end-of-run sweep
     - the sweep reports the pids it killed
     - a run with nothing left behind sweeps nothing and pays no grace delay

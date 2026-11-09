@@ -4,6 +4,7 @@ import {
   buildRunOptions,
   createSigintCanceller,
   exitCodeFor,
+  installCancellationHandlers,
   main,
   parseArgs,
   shouldFailProcess,
@@ -584,6 +585,52 @@ describe('shouldFailProcess', () => {
 });
 
 describe('createSigintCanceller', () => {
+  for (const signals of [
+    ['SIGTERM', 'SIGTERM'],
+    ['SIGINT', 'SIGTERM'],
+    ['SIGTERM', 'SIGINT'],
+  ]) {
+    it(`cancels on ${signals[0]} and forces exit on ${signals[1]}`, () => {
+      const controller = new AbortController();
+      const notices = [];
+      const exits = [];
+      const cancel = createSigintCanceller(
+        controller,
+        { write: (s) => notices.push(s) },
+        (code) => exits.push(code),
+      );
+      cancel(signals[0]);
+      assert.equal(controller.signal.aborted, true);
+      assert.deepEqual(exits, []);
+      cancel(signals[1]);
+      let code = 130;
+      if (signals[1] === 'SIGTERM') {
+        code = 143;
+      }
+      assert.deepEqual(exits, [code]);
+      assert.match(notices.join(''), /Cancelling/);
+    });
+  }
+
+  it('disposes both termination handlers without disturbing existing listeners', () => {
+    const before = ['SIGINT', 'SIGTERM'].map((name) =>
+      process.listenerCount(name),
+    );
+    const dispose = installCancellationHandlers(new AbortController());
+    try {
+      assert.deepEqual(
+        ['SIGINT', 'SIGTERM'].map((name) => process.listenerCount(name)),
+        before.map((n) => n + 1),
+      );
+    } finally {
+      dispose();
+    }
+    assert.deepEqual(
+      ['SIGINT', 'SIGTERM'].map((name) => process.listenerCount(name)),
+      before,
+    );
+  });
+
   it('aborts the controller on the first Ctrl-C and does not exit', () => {
     const controller = new AbortController();
     const notices = [];

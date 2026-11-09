@@ -459,13 +459,12 @@ async function dispatch(args) {
     // result; a second forces a hard exit if the graceful stop hangs.
     const controller = new AbortController();
     options.signal = controller.signal;
-    const onSigint = createSigintCanceller(controller);
-    process.on('SIGINT', onSigint);
+    const disposeSignals = installCancellationHandlers(controller);
     let result;
     try {
       result = await run(args.prompt, options);
     } finally {
-      process.removeListener('SIGINT', onSigint);
+      disposeSignals();
     }
     if (args.json) {
       process.stdout.write(`${JSON.stringify(summarizeResult(result))}\n`);
@@ -486,29 +485,54 @@ async function dispatch(args) {
 }
 
 /**
- * A SIGINT handler that cancels the in-flight run gracefully on the first
- * Ctrl-C (aborting the current model request via the run's AbortController) and
- * force-quits on the second, in case the graceful unwind itself hangs. Returned
+ * A signal handler that cancels gracefully on the first SIGINT or SIGTERM
+ * and force-quits on the second, in case graceful unwinding hangs. Returned
  * as a closure over a per-run controller and press counter so it is unit-
  * testable without sending real signals. `exit` is injectable for the same
  * reason (defaults to process.exit).
  * @param {AbortController} controller
  * @param {{ write: (s: string) => void }} [err] - Where notices go (default stderr)
  * @param {(code: number) => void} [exit] - Hard-exit fn (default process.exit)
- * @returns {() => void}
+ * @returns {(signalName?: string) => void}
  */
 export function createSigintCanceller(controller, err = process.stderr, exit) {
   const hardExit = exit || ((code) => process.exit(code));
   let presses = 0;
-  return () => {
+  return (signalName = 'SIGINT') => {
     presses++;
     if (presses === 1) {
-      err.write('\nCancelling — press Ctrl-C again to force quit.\n');
+      if (signalName === 'SIGTERM') {
+        err.write(
+          '\nCancelling (SIGTERM) — send another signal to force quit.\n',
+        );
+      } else {
+        err.write('\nCancelling — press Ctrl-C again to force quit.\n');
+      }
       controller.abort();
       return;
     }
     err.write('\nForce quit.\n');
-    hardExit(130);
+    if (signalName === 'SIGTERM') {
+      hardExit(143);
+    } else {
+      hardExit(130);
+    }
+  };
+}
+
+/** Install paired signal handlers; dispose both when the command finishes.
+ * @param {AbortController} controller
+ * @returns {() => void}
+ */
+export function installCancellationHandlers(controller) {
+  const cancel = createSigintCanceller(controller);
+  const onSigint = () => cancel('SIGINT');
+  const onSigterm = () => cancel('SIGTERM');
+  process.on('SIGINT', onSigint);
+  process.on('SIGTERM', onSigterm);
+  return () => {
+    process.removeListener('SIGINT', onSigint);
+    process.removeListener('SIGTERM', onSigterm);
   };
 }
 
@@ -1535,8 +1559,7 @@ export async function runConsolidateCommand(args) {
   // Consolidation is a single model call, but on a long MEMORY.md with a
   // reasoning model it is not a quick one -- Ctrl-C has to reach it.
   const controller = new AbortController();
-  const onSigint = createSigintCanceller(controller);
-  process.on('SIGINT', onSigint);
+  const disposeSignals = installCancellationHandlers(controller);
   let result;
   try {
     result = await runMemoryConsolidation({
@@ -1550,7 +1573,7 @@ export async function runConsolidateCommand(args) {
       signal: controller.signal,
     });
   } finally {
-    process.removeListener('SIGINT', onSigint);
+    disposeSignals();
   }
 
   if (args.json) {
@@ -1768,8 +1791,7 @@ export async function runGoalCommand(args) {
 
   const controller = new AbortController();
   runOptions.signal = controller.signal;
-  const onSigint = createSigintCanceller(controller);
-  process.on('SIGINT', onSigint);
+  const disposeSignals = installCancellationHandlers(controller);
   try {
     const goalResult = await runGoal({
       goal,
@@ -1825,7 +1847,7 @@ export async function runGoalCommand(args) {
       process.exitCode = 1;
     }
   } finally {
-    process.removeListener('SIGINT', onSigint);
+    disposeSignals();
   }
 }
 
@@ -1985,14 +2007,14 @@ export async function runLoopCommand(args) {
       signal: controller.signal,
     });
 
-  const onSigint = createSigintCanceller(controller);
-  process.on('SIGINT', onSigint);
+  const disposeSignals = installCancellationHandlers(controller);
   try {
     const result = await runLoop({
       // Both collaborators are built by loop-adapters.mjs rather than inline:
       // BACKLOG #8 was a bug in exactly this wiring, and inline here it was
       // reachable only by running the real CLI against a real model
       // (specs/loop-adapters.yaml).
+      signal: controller.signal,
       checklist: checklistAdapter(tasksFile),
       buildTask,
       buildGoal,
@@ -2029,7 +2051,7 @@ export async function runLoopCommand(args) {
       process.exitCode = 1;
     }
   } finally {
-    process.removeListener('SIGINT', onSigint);
+    disposeSignals();
   }
 }
 

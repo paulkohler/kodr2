@@ -58,7 +58,9 @@ describe('runGoal', () => {
         maxAttempts,
         retryBackoffMs: 0,
         runTask: async () => fakeResult({ stoppedReason: 'error' }),
-        evaluate: async () => { throw new Error('an errored build must not be judged'); },
+        evaluate: async () => {
+          throw new Error('an errored build must not be judged');
+        },
       });
       assert.equal(result.reason, 'build-error');
       assert.equal(result.allErrored, true);
@@ -70,10 +72,14 @@ describe('runGoal', () => {
   it('does not classify a judged attempt followed by an error as allErrored', async () => {
     let calls = 0;
     const result = await runGoal({
-      goal: 'g', maxAttempts: 2, retryBackoffMs: 0,
+      goal: 'g',
+      maxAttempts: 2,
+      retryBackoffMs: 0,
       runTask: async () => {
         calls += 1;
-        if (calls === 1) return fakeResult();
+        if (calls === 1) {
+          return fakeResult();
+        }
         return fakeResult({ stoppedReason: 'error' });
       },
       evaluate: async () => verdict(),

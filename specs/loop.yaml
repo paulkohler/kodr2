@@ -235,6 +235,11 @@ outputs:
 
 constraints:
   - >
+    runLoop accepts an optional AbortSignal, forwarded to retry waits and
+    checked between tasks and after attempts. Cancellation during backoff
+    records the active task as cancelled, with the last build's usage, and
+    preserves its work instead of parking it.
+  - >
     GOAL: items whose runGoal result reports allErrored follow the same
     attempts-errored path as plain tasks: rewind, leave unchecked, record the
     last error and stop regardless of stopOnPark. A goal with any judged

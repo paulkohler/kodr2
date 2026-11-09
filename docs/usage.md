@@ -161,6 +161,9 @@ cap is three attempts. The loop also stops when two consecutive attempts change 
 A build that ends in a transient provider error (a request timeout, a 5xx) is
 not judged: it waits `--retry-backoff-ms` and the next attempt runs, but it
 still spends an attempt, so a dead backend ends the goal.
+Ctrl-C or SIGTERM cancels an active attempt or retry wait. In `kodr loop`,
+a goal whose every build attempt errors stays unchecked for a later rerun;
+the JSON goal summary identifies this with `allErrored: true`.
 
 A judge verdict without sufficient tool use cannot establish that the goal
 is met. This differs from the advisory grounding check used by

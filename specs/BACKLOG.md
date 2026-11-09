@@ -25,20 +25,20 @@ Line references are approximate — treat them as anchors, not addresses.
   needs to decide what a truncated response means — a `finish_reason` of
   `length` is not an error and the model should be able to continue.
 
-- **#16** `kodr` handles `SIGINT` (`specs/cancel.yaml`) but has no `SIGTERM`
-  handler, so a loop stopped that way ends without finishing its record. In
-  the third CRM run the loop was stopped with `kill -TERM` inside the
-  sandbox. The wrapper then downloaded the workspace as normal, but the loop
-  record read `"reason": null` and did not include the task in flight (the
-  record is written after each task, so phase 7 was simply absent). Nothing
-  was lost that a `SIGINT` would have kept, but `SIGTERM` is what `docker
-  stop`, a service manager and most orchestration send, and an unattended
-  multi-hour run is exactly the case that gets stopped that way. Open
-  questions: whether the end-of-run orphan sweep (#11) runs on that path,
-  which was not checked, and whether `SIGTERM` should simply behave as the
-  first `SIGINT` does. Untested: `SIGINT` against a loop inside a sandbox.
-
 ## Fixed
+
+- **#16** SIGTERM now uses the graceful cancellation path for foreground
+  run, goal, loop and consolidate commands. The loop saves reason
+  `cancelled` and its interrupted task, preserves the workspace and unchecked
+  checklist, and reaches the final orphan sweep. SIGINT and SIGTERM share a
+  counter: the first cancels and the second forces exit (130 for SIGINT,
+  143 for SIGTERM). Both retry loops now cancel their backoff timers too.
+  Real subprocess tests cover both signals during commands and backoff for
+  plain and GOAL tasks, including the saved record and a detached child's
+  death. The original failure was a third CRM run stopped with `kill -TERM`
+  inside OpenShell, leaving `reason: null` and omitting phase 7. Live
+  OpenShell signal delivery has not been revalidated; the regression tests
+  exercise local OS delivery and the shared cancellation/cleanup wiring.
 
 - **#14** a transient provider error is terminal inside `kodr goal`. The
   plain-task branch of `kodr loop` classifies a request timeout as transient,

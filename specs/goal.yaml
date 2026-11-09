@@ -112,6 +112,9 @@ outputs:
 
 constraints:
   - >
+    retryBackoffMs waits are abortable. Cancellation during a retry wait ends
+    the goal promptly without another build or judge and clears the timer.
+  - >
     Each attempt is one full run() (build + test/heal), then one judge assessment.
     The loop stops as soon as a judge verdict is both met and grounded.
   - >

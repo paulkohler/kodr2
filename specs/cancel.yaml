@@ -9,7 +9,7 @@ description: >
   One seam, three front-ends. run(prompt, { signal }) is the injection point;
   the tool loop and heal both honor it, and every chat request carries it so a
   cancel lands mid-request rather than only between turns. The CLI wires it to
-  SIGINT (Ctrl-C), and the ACP front-end (specs/acp.yaml) wires it to
+  SIGINT (Ctrl-C) and SIGTERM for foreground commands, and the ACP front-end (specs/acp.yaml) wires it to
   session/cancel. The signal is created by the front-end, never by run() itself,
   so the front-end owns when to fire it.
 
@@ -118,7 +118,7 @@ constraints:
     calls and return { cancelled: true } rather than { error } on an abort, so
     a deliberate Ctrl-C is not reported to the operator as a failure.
   - >
-    kodr consolidate installs the same SIGINT canceller as a run and exits
+    kodr consolidate installs the same SIGINT/SIGTERM canceller as a run and exits
     non-zero when cancelled.
   - >
     The checklist loop reads runGoal's own `reason` to detect a cancelled
@@ -139,10 +139,16 @@ constraints:
     that backgrounded something leaves an orphan no ppid walk can find (see
     specs/shell.yaml).
   - >
-    The CLI installs a SIGINT handler (createSigintCanceller) only around the
-    foreground run(): the first Ctrl-C aborts the run's controller and prints a
-    notice; a second force-quits (exit 130) in case the graceful unwind hangs. The
-    handler is removed in a finally so it never outlives the run.
+    The foreground CLI commands run, goal, loop and consolidate install paired
+    SIGINT/SIGTERM handlers. The first signal aborts the command's controller
+    and prints a notice. A second signal forces exit (130 for SIGINT, 143 for
+    SIGTERM), including mixed signals. Both handlers are removed in finally.
+    Graceful SIGTERM records cancellation and preserves in-flight work exactly
+    as SIGINT does; main's finally still runs the orphan sweep (BACKLOG #16).
+  - >
+    Plain-task and goal retry waits observe cancellation, clear their timers,
+    and stop without another build, judge, mark, commit or rewind. A signal
+    arriving after a build or between tasks is checked before new work starts.
   - >
     The ACP front-end creates a fresh AbortController per session/prompt, stores it
     on the session, and clears it in a finally. session/cancel aborts that
@@ -152,6 +158,11 @@ constraints:
 
 tests:
   unit:
+    - SIGTERM aborts gracefully and a second or mixed termination signal forces the matching exit code
+    - installing and disposing cancellation handlers restores both process listener counts
+    - cancelling either retry backoff stops promptly with no further build or ratchet
+    - a real SIGTERM during a plain or GOAL loop saves the cancelled task and preserves its workspace
+    - the end-of-run sweep reaps a detached child after graceful SIGTERM
     - abortError is tagged with a code isAbortError recognizes
     - chat aborts an in-flight request when the signal fires (rejects with isAbortError)
     - an AbortSignal kills a running command's process group and answers at once
