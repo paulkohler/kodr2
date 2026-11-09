@@ -266,8 +266,8 @@ export async function readNextTask(tasksFile) {
  * @param {string} tasksFile
  * @param {number} line - Line index from readNextTask
  * @param {string} mark
- * @param {string|null} [expectedText] - Task text from readNextTask, for the
- *   already-marked check. Without it an already-marked line is always refused.
+ * @param {string|null} [expectedText] - Task text from readNextTask, checked
+ *   before marking. Without it an already-marked line is always refused.
  * @returns {Promise<{ ok: boolean, error?: string, alreadyMarked?: boolean }>}
  */
 export async function markTaskAt(tasksFile, line, mark, expectedText) {
@@ -283,6 +283,15 @@ export async function markTaskAt(tasksFile, line, mark, expectedText) {
     return {
       ok: false,
       error: `checklist line ${line + 1} is no longer unchecked -- refusing to mark a different task`,
+    };
+  }
+  if (
+    typeof expectedText === 'string' &&
+    lines[line] !== `- [ ] ${expectedText}`
+  ) {
+    return {
+      ok: false,
+      error: `checklist line ${line + 1} changed -- refusing to mark a different task`,
     };
   }
   lines[line] = lines[line].replace(/^- \[ \] /, `- [${mark}] `);

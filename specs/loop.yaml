@@ -415,6 +415,7 @@ constraints:
 
 tests:
   unit:
+    - markTaskAt refuses an unchecked line whose text differs from the selected task
     - >
       a GOAL: item cancelled between attempts stops the loop instead of parking
     - taskIsGreen ignores a failed review unless failOnReview is set

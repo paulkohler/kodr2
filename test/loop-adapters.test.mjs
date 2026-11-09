@@ -192,6 +192,29 @@ describe('loop adapters over a real repo (BACKLOG #8)', () => {
 });
 
 describe('checklistAdapter', () => {
+  const edits = {
+    rewording: '# Tasks\n\n- [ ] renamed\n- [ ] beta\n',
+    insertion: '# Tasks\n\n- [ ] inserted\n- [ ] alpha\n- [ ] beta\n',
+    removal: '# Tasks\n\n- [ ] beta\n',
+    reordering: '# Tasks\n\n- [ ] beta\n- [ ] alpha\n',
+  };
+  for (const [edit, content] of Object.entries(edits)) {
+    it(`refuses unchecked ${edit} without committing or marking another task`, async () => {
+      const repo = await repoWith(['alpha', 'beta']);
+      const result = await drive(repo, async () => {
+        writeFileSync(join(repo, 'TASKS.md'), content);
+        writeFileSync(join(repo, 'work.mjs'), 'export const work = true;\n');
+        return greenResult(['work.mjs', 'TASKS.md']);
+      });
+
+      assert.equal(result.reason, 'mark-failed');
+      assert.equal(result.green, 0);
+      assert.equal(readRepoFile(repo, 'TASKS.md'), content);
+      assert.deepEqual(commitSubjects(repo), ['init']);
+      assert.equal(readRepoFile(repo, 'work.mjs'), 'export const work = true;\n');
+    });
+  }
+
   it('refuses a mark with no task behind it rather than marking line 0', async () => {
     const repo = await repoWith(['alpha']);
     const checklist = checklistAdapter(join(repo, 'TASKS.md'));

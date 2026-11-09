@@ -51,6 +51,10 @@ outputs:
 
 constraints:
   - >
+    Marking validates the saved text even when the addressed line is still
+    unchecked. Insertion, removal, reordering or rewording must stop with
+    mark-failed rather than completing a task that was never attempted.
+  - >
     checklistAdapter holds the line index `readNextTask` returned and spends
     it on the next `markTask`, so the mark lands on the line this iteration
     took. Re-reading the file to find "the first unchecked line" is the #8
@@ -103,6 +107,7 @@ deliverables:
 
 tests:
   unit:
+    - unchecked rewording, insertion, removal and reordering stop without committing or marking another task
     - the mark lands on the line nextTask returned, not on the first unchecked line now
     - a model-authored commit during the attempt is gone from history after the park
     - the park commit touches the checklist and nothing else
