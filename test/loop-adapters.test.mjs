@@ -20,6 +20,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import { runLoop } from '../src/loop.mjs';
+import { runGoal } from '../src/goal.mjs';
 import { checklistAdapter, gitAdapter } from '../src/loop-adapters.mjs';
 import { createNullReporter } from '../src/reporter.mjs';
 import {
@@ -379,6 +380,62 @@ describe('the #8 control -- the regression is detectable', () => {
       'without headSha the park cannot rewind -- that is the bug, and it should still be reproducible',
     );
   });
+});
+
+describe('plain and GOAL task recovery over real adapters', () => {
+  const cases = [
+    { sequence: ['error', 'error'], status: 'errored', mark: ' ', reason: 'attempts-errored' },
+    { sequence: ['red', 'error'], status: 'parked', mark: '!', reason: 'budget' },
+    { sequence: ['error', 'red'], status: 'parked', mark: '!', reason: 'budget' },
+    { sequence: ['error', 'green'], status: 'green', mark: 'x', reason: 'budget' },
+  ];
+  for (const kind of ['plain', 'goal']) {
+    for (const scenario of cases) {
+      it(`${kind}: ${scenario.sequence.join(' then ')} records ${scenario.status}`, async () => {
+        let task = 'alpha';
+        if (kind === 'goal') task = 'GOAL: alpha';
+        const repo = await repoWith([task, 'beta']);
+        let calls = 0;
+        const buildTask = async () => {
+          const outcome = scenario.sequence[calls++];
+          writeFileSync(join(repo, 'work.mjs'), `export const attempt = ${calls};\n`);
+          if (outcome === 'green') return greenResult(['work.mjs']);
+          const result = redResult();
+          if (outcome === 'error') {
+            result.stoppedReason = 'error';
+            result.error = { message: 'HTTP 503' };
+          }
+          return result;
+        };
+        const result = await drive(repo, buildTask, {
+          maxAttempts: 2,
+          retryBackoffMs: 0,
+          stopOnPark: false,
+          buildGoal: (goal) => runGoal({
+            goal, maxAttempts: 2, retryBackoffMs: 0, runTask: buildTask,
+            evaluate: async (built) => ({
+              met: built.verification.passed, grounded: true, feedback: 'keep working',
+              toolTurns: 1, usage: { prompt: 0, completion: 0, cost: 0 }, retries: 0,
+            }),
+          }),
+        });
+        assert.equal(calls, 2);
+        assert.equal(result.reason, scenario.reason);
+        assert.equal(result.tasks[0].status, scenario.status);
+        assert.match(readRepoFile(repo, 'TASKS.md'), new RegExp(`- \\[${scenario.mark}\\] ${task}`));
+        assert.match(readRepoFile(repo, 'TASKS.md'), /- \[ \] beta/);
+        assert.equal(gitStatus(repo), '');
+        if (scenario.status === 'errored') {
+          assert.deepEqual(commitSubjects(repo), ['init']);
+          assert.equal(result.tasks[0].error, 'HTTP 503');
+        } else if (scenario.status === 'parked') {
+          assert.deepEqual(filesInHead(repo), ['TASKS.md']);
+        } else {
+          assert.ok(filesInHead(repo).includes('work.mjs'));
+        }
+      });
+    }
+  }
 });
 
 describe('an all-errored task over a real repo (BACKLOG #10)', () => {

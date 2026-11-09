@@ -51,6 +51,38 @@ function verdict(over = {}) {
 }
 
 describe('runGoal', () => {
+  for (const maxAttempts of [1, 3]) {
+    it(`reports allErrored after ${maxAttempts} build errors`, async () => {
+      const result = await runGoal({
+        goal: 'g',
+        maxAttempts,
+        retryBackoffMs: 0,
+        runTask: async () => fakeResult({ stoppedReason: 'error' }),
+        evaluate: async () => { throw new Error('an errored build must not be judged'); },
+      });
+      assert.equal(result.reason, 'build-error');
+      assert.equal(result.allErrored, true);
+      assert.equal(result.attempts, maxAttempts);
+      assert.equal(summarizeGoalResult(result).allErrored, true);
+    });
+  }
+
+  it('does not classify a judged attempt followed by an error as allErrored', async () => {
+    let calls = 0;
+    const result = await runGoal({
+      goal: 'g', maxAttempts: 2, retryBackoffMs: 0,
+      runTask: async () => {
+        calls += 1;
+        if (calls === 1) return fakeResult();
+        return fakeResult({ stoppedReason: 'error' });
+      },
+      evaluate: async () => verdict(),
+    });
+    assert.equal(result.reason, 'build-error');
+    assert.equal(result.allErrored, false);
+    assert.equal(summarizeGoalResult(result).allErrored, false);
+  });
+
   it('stops on the first met-and-grounded verdict and reports reason "met"', async () => {
     let taskCalls = 0;
     const result = await runGoal({

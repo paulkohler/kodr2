@@ -72,6 +72,12 @@ inputs:
       the cumulative one a level up (specs/loop.yaml).
 
 outputs:
+  allErrored:
+    type: boolean
+    description: >
+      True only when every build attempt errored without reaching an assessment.
+      A final build-error following a judged attempt is false. Exposed in the
+      result and JSON summary so checklist orchestration can preserve retryability.
   met:
     type: boolean
     description: Whether the goal was confirmed met by a grounded judge verdict
@@ -190,6 +196,9 @@ constraints:
 
 tests:
   unit:
+    - an all-errored goal reports allErrored true, including with one allowed attempt
+    - a judged attempt followed by a build error reports allErrored false
+    - goal JSON summaries preserve the allErrored outcome
     - stops the whole goal when an attempt comes back cancelled, without judging it
     - stops before the next attempt when the signal fired during the judge
     - does not start a single attempt when the signal is already aborted

@@ -298,6 +298,7 @@ function addUsage(total, usage) {
  * @property {number} attempts
  * @property {Verdict[]} verdicts
  * @property {import('./harness.mjs').RunResult|null} lastResult
+ * @property {boolean} [allErrored] - Every build errored without an assessment
  * @property {{ prompt: number, completion: number, cost: number }} usage
  * @property {number} retries
  * @property {{ message: string, name?: string, stack?: string }} [judgeError]
@@ -514,6 +515,7 @@ function finish(
     lastResult,
     usage,
     retries,
+    allErrored: reason === 'build-error' && attempts > 0 && verdicts.length === 0,
   };
   if (judgeError) {
     result.judgeError = judgeError;
@@ -540,6 +542,7 @@ function truncate(text, maxChars = 200) {
 
 /**
  * @typedef {object} GoalSummary
+ * @property {boolean} allErrored
  * @property {boolean} met
  * @property {string} reason
  * @property {number} attempts
@@ -562,6 +565,7 @@ export function summarizeGoalResult(result) {
     met: result.met,
     reason: result.reason,
     attempts: result.attempts,
+    allErrored: result.allErrored === true,
     usage: result.usage ?? { prompt: 0, completion: 0, cost: 0 },
     retries: result.retries ?? 0,
     verdicts: (result.verdicts ?? []).map((verdict) => ({

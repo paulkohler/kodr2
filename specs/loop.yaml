@@ -235,6 +235,11 @@ outputs:
 
 constraints:
   - >
+    GOAL: items whose runGoal result reports allErrored follow the same
+    attempts-errored path as plain tasks: rewind, leave unchecked, record the
+    last error and stop regardless of stopOnPark. A goal with any judged
+    attempt still parks normally if its final build errors.
+  - >
     With --fail-on-review, a blocking review verdict is folded into the
     existing retry engines rather than given a collaborator of its own. A
     plain task's FAIL consumes an attempt and the next one is prompted with

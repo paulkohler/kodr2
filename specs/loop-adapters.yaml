@@ -107,6 +107,8 @@ deliverables:
 
 tests:
   unit:
+    - all-errored plain and GOAL tasks leave real checklist items unchecked with no new commit
+    - plain and GOAL tasks with a valid failed assessment still park after a later error
     - unchecked rewording, insertion, removal and reordering stop without committing or marking another task
     - the mark lands on the line nextTask returned, not on the first unchecked line now
     - a model-authored commit during the attempt is gone from history after the park

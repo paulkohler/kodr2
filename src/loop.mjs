@@ -737,8 +737,6 @@ export async function runLoop(params) {
     let entry;
     let isGreen;
     let cancelled;
-    // A GOAL: item has no equivalent -- runGoal owns its own attempt loop and
-    // reports its own reason -- so this stays false on that branch.
     let allErrored = false;
     let lastError = null;
 
@@ -748,6 +746,8 @@ export async function runLoop(params) {
       retries += goalResult.retries || 0;
       isGreen = goalIsGreen(goalResult, { failOnReview });
       cancelled = goalWasCancelled(goalResult);
+      allErrored = goalResult.allErrored === true;
+      lastError = goalResult.lastResult?.error?.message ?? null;
       entry = {
         task,
         kind: 'goal',
