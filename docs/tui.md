@@ -33,6 +33,10 @@ It needs a real interactive terminal (it can't be combined with `--json`,
 kodr tui --approve-commands --test "npm test" --model google/gemma-4-26b-a4b
 ```
 
+For Ollama Cloud, see the [GPT OSS 120B TUI walkthrough](providers.md#direct-ollama-cloud-in-the-tui),
+including API-key setup, model switching, and the different model names for
+direct cloud requests and routing through a local Ollama server.
+
 The usual run settings work here too (`--provider`, `--model`, `--test`, `--cwd`,
 `--context-window`, …). **Ctrl-C** doesn't quit on the first press — as
 insurance, it asks you to press it again (`press ctrl-c again to quit`). While a

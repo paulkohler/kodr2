@@ -26,8 +26,64 @@ kodr doctor --provider ollama --model qwen3-coder:30b
 kodr "fix the failing test" --provider ollama --model qwen3-coder:30b
 ```
 
-For direct hosted access, set `OLLAMA_API_KEY`, use
-`--base-url https://ollama.com/v1`, and select a model available to your account.
+### Direct Ollama Cloud in the TUI
+
+Create an [Ollama API key](https://ollama.com/settings/keys) and export it in
+the terminal where you launch Kodr. This route needs no local Ollama server
+or model download:
+
+```bash
+export OLLAMA_API_KEY='your-api-key'
+
+kodr doctor \
+  --provider ollama \
+  --base-url https://ollama.com/v1 \
+  --model gpt-oss:120b
+
+kodr tui \
+  --provider ollama \
+  --base-url https://ollama.com/v1 \
+  --model gpt-oss:120b \
+  --context-window 131072
+```
+
+Use `gpt-oss:120b` for direct cloud requests. The `gpt-oss:120b-cloud` tag is
+for routing through a signed-in **local** Ollama server. The endpoint and
+model name go together:
+
+| Route | `--base-url` | `--model` | Authentication |
+| --- | --- | --- | --- |
+| Direct cloud | `https://ollama.com/v1` | `gpt-oss:120b` | `OLLAMA_API_KEY` |
+| Cloud through local Ollama | `http://localhost:11434/v1` | `gpt-oss:120b-cloud` | Sign in to local Ollama |
+
+These names follow Ollama's [direct cloud API guidance](https://docs.ollama.com/api/openai-compatibility#models)
+and [GPT OSS 120B cloud example](https://ollama.com/library/gpt-oss:120b-cloud).
+Use the identifiers in the [hosted model catalog](https://ollama.com/api/tags)
+for direct requests. You can also list them from Kodr:
+
+```bash
+kodr models --provider ollama --base-url https://ollama.com/v1
+```
+
+While the TUI is idle, switch between hosted models with:
+
+```text
+/model gemma4:31b
+/model gpt-oss:120b
+/model gpt-oss:20b
+/model nemotron-3-super
+/model nemotron-3-ultra
+```
+
+Switching models retains the conversation and the configured context window;
+`/clear` starts a fresh conversation. Set `--context-window` at launch to match
+the model and endpoint you intend to use. The `131072` above matches GPT OSS
+120B's advertised 128K window; it controls Kodr's compaction bookkeeping and
+does not resize the hosted model's window. Ollama's compatible model listing
+does not report a window to Kodr, so omitting the flag uses the 8192 default.
+
+Kodr's `--reasoning` flag and TUI `/reasoning` toggle currently support
+OpenRouter only. Ollama models can still produce their own thinking.
 
 ## OpenRouter
 
